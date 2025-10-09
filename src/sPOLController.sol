@@ -389,6 +389,8 @@ contract sPOLController {
         return nonces;
     }
 
+    // last function with no gasless option
+    // potentially make permissionless
     function withdrawExchangedPOL() external {
         require(0 != userNonces[msg.sender].length, "NO_OPEN_NONCES");
 
