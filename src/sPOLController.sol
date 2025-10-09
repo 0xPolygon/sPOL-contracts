@@ -242,7 +242,7 @@ contract sPOLController {
     ///////////////////////////////
 
     function exchangeForsPOL(uint256 _amount) external returns (uint256) {
-        return _exchangeTosPOL(_amount);
+        return _exchangeTosPOL(_amount, msg.sender);
     }
 
     function exchangeForsPOLPermit(uint256 _amount, address _user, uint256 _deadline, uint8 _v, bytes32 _r, bytes32 _s)
@@ -252,16 +252,17 @@ contract sPOLController {
         uint256 nonceBefore = polToken.nonces(_user);
         polToken.permit(_user, address(this), _amount, _deadline, _v, _r, _s);
         require(polToken.nonces(_user) == nonceBefore + 1, "Invalid permit");
-        return _exchangeTosPOL(_amount);
+        return _exchangeTosPOL(_amount, _user);
     }
 
-    function _exchangeTosPOL(uint256 _amount) internal returns (uint256) {
+    function _exchangeTosPOL(uint256 _amount, address _user) internal returns (uint256) {
         require(_amount < maxDeposit(), "EXCEEDS_MAX_DEPOSIT");
+        require(polToken.transferFrom(_user, address(this), _amount), "TRANSFER_FAILED");
         ValidatorInfo storage validator = _selectValidatorToBuy(_amount);
         uint256 gotShares = _buySharesFromValidator(validator, _amount);
         uint256 rate = actualExchangeRatePOLsPOL();
         uint256 toMint = gotShares * rate;
-        sPOLToken.mint(msg.sender, toMint);
+        sPOLToken.mint(_user, toMint);
         return toMint;
     }
 
@@ -308,8 +309,28 @@ contract sPOLController {
     ///////////////////////////////
 
     function initExchangeToPOL(uint256 _amount) external returns (uint256) {
+        return _initExchangeToPOL(_amount, msg.sender);
+    }
+
+    function initExchangeToPOLPermit(
+        uint256 _amount,
+        address _user,
+        uint256 _deadline,
+        uint8 _v,
+        bytes32 _r,
+        bytes32 _s
+    ) external returns (uint256) {
+        // consume permit resets allowance to 0 after use, as we don't want any leftover allowance
+        // allowance should have no negative downsides, we do this to be safe
+        uint256 nonceBefore = sPOLToken.nonces(_user);
+        sPOLToken.consumePermit(_user, address(this), _amount, _deadline, _v, _r, _s);
+        require(sPOLToken.nonces(_user) == nonceBefore + 1, "Invalid permit");
+        return _initExchangeToPOL(_amount, _user);
+    }
+
+    function _initExchangeToPOL(uint256 _amount, address _user) internal returns (uint256) {
         require(_amount <= maxUnstake, "AMOUNT_TOO_LARGE");
-        sPOLToken.burn(msg.sender, _amount);
+        sPOLToken.burn(_user, _amount);
 
         uint256 dPOLAmount = _amount * actualExchangeRatePOLsPOL();
 
@@ -317,7 +338,7 @@ contract sPOLController {
         uint256 userNonce = _sellSharesFromValidator(validator, dPOLAmount);
 
         globalWithdrawNonce++;
-        userNonces[msg.sender].push(globalWithdrawNonce);
+        userNonces[_user].push(globalWithdrawNonce);
 
         NonceDetails storage details = withdrawNonceDetails[globalWithdrawNonce];
         details.amount = uint128(dPOLAmount);
@@ -327,6 +348,7 @@ contract sPOLController {
         return globalWithdrawNonce;
     }
 
+    // withdraw now only possible as the user, so not gasless, we can consider making this permissionless
     function withdrawExchangedPOL(uint256 _nonce) external {
         for (uint256 i = 0; i < userNonces[msg.sender].length; i++) {
             if (userNonces[msg.sender][i] == _nonce) {
@@ -423,8 +445,6 @@ contract sPOLController {
 
         return userNonce;
     }
-
-    // do multi claim per user
 
     ///////////////////////////////
     ///  Fee Management         ///

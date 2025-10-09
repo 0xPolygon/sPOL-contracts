@@ -22,6 +22,24 @@ contract sPOL is ERC20PermitUpgradeable {
         __ERC20Permit_init("Staked POL");
     }
 
+    // only used for gasless sPOL -> POL exchanges
+    // resets allowance to 0 as, the controller never needs allowance
+    // can be front run by using normal permit function, makes the exchange fail
+    function consumePermit(
+        address _owner,
+        address _spender,
+        uint256 _value,
+        uint256 _deadline,
+        uint8 _v,
+        bytes32 _r,
+        bytes32 _s
+    ) external onlyController {
+        uint256 nonceBefore = nonces(_owner);
+        permit(_owner, _spender, _value, _deadline, _v, _r, _s);
+        require(nonces(_owner) == nonceBefore + 1, "Invalid permit");
+        _approve(_owner, _spender, 0);
+    }
+
     function mint(address to, uint256 amount) external onlyController {
         _mint(to, amount);
     }
