@@ -245,13 +245,13 @@ contract sPOLController {
         return _exchangeTosPOL(_amount);
     }
 
-    function exchangeForsPOLPermit(uint256 _amount, uint256 _deadline, uint8 _v, bytes32 _r, bytes32 _s)
+    function exchangeForsPOLPermit(uint256 _amount, address _user, uint256 _deadline, uint8 _v, bytes32 _r, bytes32 _s)
         external
         returns (uint256)
     {
-        uint256 nonceBefore = polToken.nonces(msg.sender);
-        polToken.permit(msg.sender, address(this), _amount, _deadline, _v, _r, _s);
-        require(polToken.nonces(msg.sender) == nonceBefore + 1, "Invalid permit");
+        uint256 nonceBefore = polToken.nonces(_user);
+        polToken.permit(_user, address(this), _amount, _deadline, _v, _r, _s);
+        require(polToken.nonces(_user) == nonceBefore + 1, "Invalid permit");
         return _exchangeTosPOL(_amount);
     }
 
