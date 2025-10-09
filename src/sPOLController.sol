@@ -47,7 +47,7 @@ contract sPOLController {
     // or maybe a new fPOL balance as dPOL after fees, and calc dPOL balance, saves some gas
     // and a add stake to dPOL balance (no fee)
 
-    uint8 public rewardFee;
+    uint16 public rewardFee;
     // In per mill, so 100 = 10%
     uint16 public constant MAX_FEE = 1000;
     address public feeReceiver;
@@ -435,11 +435,13 @@ contract sPOLController {
     }
 
     function changeRewardFee(uint8 newFee) external onlyAdmin {
+        require(newFee <= MAX_FEE, "FEE_TOO_LARGE");
         rewardFee = newFee;
     }
 
     function takeFee() external onlyAdmin {
         uint256 feeInsPOL = feedPOLBalance * actualExchangeRatePOLsPOL();
+        feedPOLBalance = 0;
         sPOLToken.mint(feeReceiver, feeInsPOL);
     }
 
