@@ -54,13 +54,15 @@ contract sPOLController {
     uint256 public feedPOLBalance;
 
     struct NonceDetails {
-        uint128 amount;
         uint16 validatorId;
-        uint16 validatorNonce;
+        uint128 amount;
+        uint96 validatorNonce;
     }
 
-    mapping(address => uint256) public userWithdrawNonce;
-    mapping(uint256 => uint256) public userNonceDetails;
+    mapping(address => uint256[]) public userNonces;
+    mapping(uint256 => NonceDetails) public withdrawNonceDetails;
+
+    uint256 public globalWithdrawNonce;
 
     uint256 public maxUnstake;
 
@@ -307,31 +309,88 @@ contract sPOLController {
 
     function initExchangeToPOL(uint256 _amount) external returns (uint256) {
         require(_amount <= maxUnstake, "AMOUNT_TOO_LARGE");
-        ValidatorInfo storage validator = _selectValidatorToSell(_amount);
-        uint256 userNonce = _sellSharesFromValidator(validator, _amount);
-        userNonceDetails[userWithdrawNonce[msg.sender]] =
-            (uint256(userNonce) << 128) | (uint256(validator.index) << 16) | uint128(_amount);
+        sPOLToken.burn(msg.sender, _amount);
 
-        return _amount;
+        uint256 dPOLAmount = _amount * actualExchangeRatePOLsPOL();
+
+        ValidatorInfo storage validator = _selectValidatorToSell(dPOLAmount);
+        uint256 userNonce = _sellSharesFromValidator(validator, dPOLAmount);
+
+        globalWithdrawNonce++;
+        userNonces[msg.sender].push(globalWithdrawNonce);
+
+        NonceDetails storage details = withdrawNonceDetails[globalWithdrawNonce];
+        details.amount = uint128(dPOLAmount);
+        details.validatorId = uint16(validator.index);
+        details.validatorNonce = uint96(userNonce);
+
+        return globalWithdrawNonce;
     }
 
     function withdrawExchangedPOL(uint256 _nonce) external {
-        require(_nonce == userWithdrawNonce[msg.sender], "INVALID_NONCE");
-        NonceDetails memory details = NonceDetails({
-            amount: uint128(userNonceDetails[_nonce]),
-            validatorId: uint16(userNonceDetails[_nonce] >> 16),
-            validatorNonce: uint16(userNonceDetails[_nonce] >> 128)
-        });
-        require(details.amount > 0, "ALREADY_CLAIMED");
+        for (uint256 i = 0; i < userNonces[msg.sender].length; i++) {
+            if (userNonces[msg.sender][i] == _nonce) {
+                NonceDetails storage nonce = withdrawNonceDetails[_nonce];
+                ValidatorInfo storage validator = validators[nonce.validatorId];
+                (uint256 shares, uint256 withdrawEpoch) =
+                    validator.validatorContract.unbonds_new(address(this), nonce.validatorNonce);
 
-        validators[details.validatorId].validatorContract.unstakeClaimTokens_newPOL(details.validatorNonce);
-        delete userNonceDetails[_nonce];
-        userWithdrawNonce[msg.sender]++;
+                require(
+                    withdrawEpoch + stakeManager.withdrawalDelay() <= stakeManager.epoch(),
+                    "WITHDRAWAL_DELAY_NOT_PASSED"
+                );
 
-        uint256 rate = actualExchangeRatePOLsPOL();
-        uint256 toBurn = details.amount * rate;
-        sPOLToken.burn(msg.sender, toBurn);
-        polToken.transfer(msg.sender, details.amount);
+                validator.validatorContract.unstakeClaimTokens_newPOL(nonce.validatorNonce);
+                polToken.transfer(msg.sender, shares);
+                if (userNonces[msg.sender].length > 1) {
+                    userNonces[msg.sender][i] = userNonces[msg.sender][userNonces[msg.sender].length - 1];
+                }
+                userNonces[msg.sender].pop();
+
+                return;
+            }
+        }
+        revert("NONCE_NOT_FOUND");
+    }
+
+    function getReadyUserNonces(address _user) external view returns (uint256[] memory) {
+        uint256[] memory nonces = new uint256[](userNonces[_user].length);
+        for (uint256 i = 0; i < userNonces[_user].length; i++) {
+            NonceDetails storage nonce = withdrawNonceDetails[userNonces[msg.sender][i]];
+            ValidatorInfo storage validator = validators[nonce.validatorId];
+            (, uint256 withdrawEpoch) = validator.validatorContract.unbonds_new(address(this), nonce.validatorNonce);
+
+            if (withdrawEpoch + stakeManager.withdrawalDelay() <= stakeManager.epoch()) {
+                nonces[i] = userNonces[_user][i];
+            }
+        }
+        return nonces;
+    }
+
+    function withdrawExchangedPOL() external {
+        require(0 != userNonces[msg.sender].length, "NO_OPEN_NONCES");
+
+        uint256 totalAmount;
+        for (uint256 i = 0; i < userNonces[msg.sender].length; i++) {
+            NonceDetails storage nonce = withdrawNonceDetails[userNonces[msg.sender][i]];
+            ValidatorInfo storage validator = validators[nonce.validatorId];
+            (uint256 shares, uint256 withdrawEpoch) =
+                validator.validatorContract.unbonds_new(address(this), nonce.validatorNonce);
+
+            if (withdrawEpoch + stakeManager.withdrawalDelay() <= stakeManager.epoch()) {
+                try validator.validatorContract.unstakeClaimTokens_newPOL(nonce.validatorNonce) {
+                    totalAmount += shares;
+                    if (userNonces[msg.sender].length > 1) {
+                        userNonces[msg.sender][i] = userNonces[msg.sender][userNonces[msg.sender].length - 1];
+                        i--;
+                    }
+                    userNonces[msg.sender].pop();
+                } catch {
+                    continue;
+                }
+            }
+        }
+        polToken.transfer(msg.sender, totalAmount);
     }
 
     function _selectValidatorToSell(uint256 amount) internal view returns (ValidatorInfo storage) {
