@@ -28,11 +28,13 @@ contract Deploy is Script {
     sPOLController public sPOLControllerImpl;
     TransparentUpgradeableProxy public sPOLProxy;
     TransparentUpgradeableProxy public sPOLControllerProxy;
-    ProxyAdmin public proxyAdmin;
+    ProxyAdmin public sPOLproxyAdmin;
+    ProxyAdmin public sPOLControllerproxyAdmin;
 
     function run() public {
-        vm.startBroadcast();
-        deployFromJson();
+        uint256 pk = vm.envUint("DEPLOYER_PRIVATE_KEY");
+        vm.startBroadcast(pk);
+        deployFromJson(vm.addr(pk));
         vm.stopBroadcast();
     }
 
@@ -100,21 +102,21 @@ contract Deploy is Script {
     }
 
     // Deploy using configuration loaded from JSON file for current chain
-    function deployFromJson() public {
+    function deployFromJson(address _deployer) public {
         loadConfigFromJson(block.chainid);
-        _deploy();
+        _deploy(_deployer);
     }
 
     // Deploy using mock configuration (for testing)
-    function deployWithMockConfig() public {
+    function deployWithMockConfig(address _deployer) public {
         loadMockConfig();
-        _deploy();
+        _deploy(_deployer);
     }
 
-    function _deploy() internal {
+    function _deploy(address _deployer) internal {
         console.log("Starting deployment...");
         console.log("Network:", networkName);
-        console.log("Deployer:", msg.sender);
+        console.log("Deployer:", _deployer);
         console.log("Chain ID:", block.chainid);
 
         // Validate configuration
@@ -127,39 +129,70 @@ contract Deploy is Script {
         require(rewardFee <= 1000, "Reward fee too high"); // Max 100%
         require(maxDivergence <= 100, "Max divergence too high"); // Max 100%
 
-        // Step 1: Deploy ProxyAdmin first
-        proxyAdmin = new ProxyAdmin(msg.sender); // Use deployer as initial owner
-        console.log("ProxyAdmin deployed at:", address(proxyAdmin));
+        // Step 1: Deploy temporary sPOLController implementation
+        sPOLController tempImpl = new sPOLController(polToken, maticToken, polygonMigration, address(0), stakeManager);
+        console.log("Temporary sPOLController implementation deployed at:", address(tempImpl));
 
-        // Step 2: Deploy sPOL implementation with a proxy controller address
-        sPOLControllerProxy = new TransparentUpgradeableProxy(address(0), address(proxyAdmin), "");
+        // Step 2: Deploy sPOLController proxy with temporary implementation (no initialization)
+        sPOLControllerProxy = new TransparentUpgradeableProxy(address(tempImpl), _deployer, "");
         console.log("sPOLController proxy deployed at:", address(sPOLControllerProxy));
 
-        // Step 3: Deploy sPOL implementation with a proxy controller address
+        // Get the proxy admin address from EIP-1967 admin slot
+        sPOLControllerproxyAdmin = ProxyAdmin(
+            address(
+                uint160(
+                    uint256(
+                        vm.load(
+                            address(sPOLControllerProxy),
+                            hex"b53127684a568b3173ae13b9f8a6016e243e63b6e8ee1178d6a717850b5d6103"
+                        )
+                    )
+                )
+            )
+        );
+        console.log("Proxy admin deployed at:", address(sPOLControllerproxyAdmin));
+
+        // Step 3: Deploy sPOL implementation with the controller proxy address
         sPOLImpl = new sPOL(address(sPOLControllerProxy));
         console.log("sPOL implementation deployed at:", address(sPOLImpl));
 
         // Step 4: Deploy sPOL proxy
         bytes memory tokenInitData = abi.encodeCall(sPOL.initialize, ());
-        sPOLProxy = new TransparentUpgradeableProxy(address(sPOLImpl), address(proxyAdmin), tokenInitData);
+        sPOLProxy = new TransparentUpgradeableProxy(address(sPOLImpl), _deployer, tokenInitData);
         console.log("sPOL proxy deployed at:", address(sPOLProxy));
+
+        sPOLproxyAdmin = ProxyAdmin(
+            address(
+                uint160(
+                    uint256(
+                        vm.load(
+                            address(sPOLProxy), hex"b53127684a568b3173ae13b9f8a6016e243e63b6e8ee1178d6a717850b5d6103"
+                        )
+                    )
+                )
+            )
+        );
+        console.log("Proxy admin deployed at:", address(sPOLControllerproxyAdmin));
 
         // Step 5: Deploy sPOLController implementation with the real sPOL proxy address
         sPOLControllerImpl =
             new sPOLController(polToken, maticToken, polygonMigration, address(sPOLProxy), stakeManager);
         console.log("sPOLController implementation deployed at:", address(sPOLControllerImpl));
 
-        // Step 5: Update sPOLController proxy to point to the real implementation
+        // Step 6: Use the proxy admin to upgrade sPOLController proxy
         bytes memory controllerInitData =
             abi.encodeCall(sPOLController.initialize, (rewardFee, feeReceiver, maxDivergence, admin));
-        proxyAdmin.upgradeAndCall(
-            ITransparentUpgradeableProxy(address(sPOLProxy)), address(sPOLControllerImpl), controllerInitData
+
+        sPOLControllerproxyAdmin.upgradeAndCall(
+            ITransparentUpgradeableProxy(address(sPOLControllerProxy)), address(sPOLControllerImpl), controllerInitData
         );
-        console.log("sPOL proxy upgraded to new implementation");
+        console.log("sPOLController proxy upgraded to new implementation");
 
         // Step 6: Transfer ProxyAdmin ownership to the designated admin
-        proxyAdmin.transferOwnership(admin);
-        console.log("ProxyAdmin ownership transferred to:", admin);
+        sPOLControllerproxyAdmin.transferOwnership(admin);
+        console.log("sPOL ProxyAdmin ownership transferred to:", admin);
+        sPOLproxyAdmin.transferOwnership(admin);
+        console.log("sPOL Controller ProxyAdmin ownership transferred to:", admin);
 
         // Verify deployment
         _verifyDeployment();
@@ -169,7 +202,8 @@ contract Deploy is Script {
         console.log("sPOL Token (implementation):", address(sPOLImpl));
         console.log("sPOLController (proxy):", address(sPOLControllerProxy));
         console.log("sPOLController (implementation):", address(sPOLControllerImpl));
-        console.log("ProxyAdmin:", address(proxyAdmin));
+        console.log("sPOL Proxy Admin Address:", address(sPOLproxyAdmin));
+        console.log("sPOL Controller Proxy Admin Address:", address(sPOLControllerproxyAdmin));
     }
 
     function _verifyDeployment() internal view {
@@ -209,11 +243,12 @@ contract Deploy is Script {
         uint8 _rewardFee,
         address _feeReceiver,
         uint8 _maxDivergence,
-        address _admin
+        address _admin,
+        address _deployer
     ) external {
         setCustomConfig(
             _polToken, _maticToken, _polygonMigration, _stakeManager, _admin, _feeReceiver, _rewardFee, _maxDivergence
         );
-        _deploy();
+        _deploy(_deployer);
     }
 }

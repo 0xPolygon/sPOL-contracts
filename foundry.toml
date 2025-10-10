@@ -3,9 +3,12 @@ src = "src"
 out = "out"
 libs = ["lib", "dependencies"]
 optimizer = true
+fs_permissions = [{ access = "read", path = "script"}]
+
 
 [lint]
 lint_on_build= false
+
 
 [dependencies]
 forge-std = "1.10.0"
