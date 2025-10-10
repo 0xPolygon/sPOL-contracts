@@ -1,0 +1,38 @@
+{
+    "networks": {
+        "1": {
+            "name": "ethereum-mainnet",
+            "polToken": "0x455E53cb5e7c0EA88f72C2FA798dA996A0492a89",
+            "maticToken": "0x7D1AfA7B718fb893dB30A3aBc0Cfc608AaCfeBB0",
+            "polygonMigration": "0x29e7DF7b6A1B2b07b731457f499E1696c60E2C4e",
+            "stakeManager": "0x5e3Ef299fDDf15eAa0432E6e66473ace8c13D908",
+            "admin": "0x0000000000000000000000000000000000000001",
+            "feeReceiver": "0x0000000000000000000000000000000000000001",
+            "rewardFee": 100,
+            "maxDivergence": 10
+        },
+        "11155111": {
+            "name": "sepolia-testnet",
+            "polToken": "0x1234567890123456789012345678901234567890",
+            "maticToken": "0x2345678901234567890123456789012345678901",
+            "polygonMigration": "0x3456789012345678901234567890123456789012",
+            "stakeManager": "0x4567890123456789012345678901234567890123",
+            "admin": "0x0000000000000000000000000000000000000001",
+            "feeReceiver": "0x0000000000000000000000000000000000000001",
+            "rewardFee": 100,
+            "maxDivergence": 10
+        },
+        "31337": {
+            "name": "localhost-anvil",
+            "polToken": "0x1111111111111111111111111111111111111111",
+            "maticToken": "0x2222222222222222222222222222222222222222",
+            "polygonMigration": "0x3333333333333333333333333333333333333333",
+            "stakeManager": "0x4444444444444444444444444444444444444444",
+            "admin": "0x5555555555555555555555555555555555555555",
+            "feeReceiver": "0x6666666666666666666666666666666666666666",
+            "rewardFee": 100,
+            "maxDivergence": 10
+        }
+    },
+    "defaultNetwork": "31337"
+}
