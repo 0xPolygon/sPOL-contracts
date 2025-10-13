@@ -64,7 +64,7 @@ contract sPOLController {
 
     uint256 public globalWithdrawNonce;
 
-    uint256 public maxUnstake;
+    uint256 public maxRedeem;
 
     modifier onlyAdmin() {
         require(msg.sender == admin, "ONLY_ADMIN");
@@ -241,11 +241,11 @@ contract sPOLController {
     ///  POL -> sPOL Exchange   ///
     ///////////////////////////////
 
-    function exchangeForsPOL(uint256 _amount) external returns (uint256) {
+    function buySPOL(uint256 _amount) external returns (uint256) {
         return _exchangeTosPOL(_amount, msg.sender);
     }
 
-    function exchangeForsPOLPermit(uint256 _amount, address _user, uint256 _deadline, uint8 _v, bytes32 _r, bytes32 _s)
+    function buySPOLPermit(uint256 _amount, address _user, uint256 _deadline, uint8 _v, bytes32 _r, bytes32 _s)
         external
         returns (uint256)
     {
@@ -283,8 +283,8 @@ contract sPOLController {
         adddPOLBalance(_amount);
         validators[_validator.index].totalStaked += _amount;
 
-        if (maxUnstake < validators[_validator.index].totalStaked) {
-            maxUnstake = validators[_validator.index].totalStaked;
+        if (maxRedeem < validators[_validator.index].totalStaked) {
+            maxRedeem = validators[_validator.index].totalStaked;
         }
 
         return _amount;
@@ -308,18 +308,14 @@ contract sPOLController {
     ///  sPOL -> POL Exchange   ///
     ///////////////////////////////
 
-    function initExchangeToPOL(uint256 _amount) external returns (uint256) {
+    function initSellSPOL(uint256 _amount) external returns (uint256) {
         return _initExchangeToPOL(_amount, msg.sender);
     }
 
-    function initExchangeToPOLPermit(
-        uint256 _amount,
-        address _user,
-        uint256 _deadline,
-        uint8 _v,
-        bytes32 _r,
-        bytes32 _s
-    ) external returns (uint256) {
+    function initSellSPOLPermit(uint256 _amount, address _user, uint256 _deadline, uint8 _v, bytes32 _r, bytes32 _s)
+        external
+        returns (uint256)
+    {
         // consume permit resets allowance to 0 after use, as we don't want any leftover allowance
         // allowance should have no negative downsides, we do this to be safe
         uint256 nonceBefore = sPOLToken.nonces(_user);
@@ -329,7 +325,7 @@ contract sPOLController {
     }
 
     function _initExchangeToPOL(uint256 _amount, address _user) internal returns (uint256) {
-        require(_amount <= maxUnstake, "AMOUNT_TOO_LARGE");
+        require(_amount <= maxRedeem, "AMOUNT_TOO_LARGE");
         sPOLToken.burn(_user, _amount);
 
         uint256 dPOLAmount = _amount * actualExchangeRatePOLsPOL();
@@ -349,7 +345,7 @@ contract sPOLController {
     }
 
     // withdraw now only possible as the user, so not gasless, we can consider making this permissionless
-    function withdrawExchangedPOL(uint256 _nonce) external {
+    function withdrawPOL(uint256 _nonce) external {
         for (uint256 i = 0; i < userNonces[msg.sender].length; i++) {
             if (userNonces[msg.sender][i] == _nonce) {
                 NonceDetails storage nonce = withdrawNonceDetails[_nonce];
@@ -391,7 +387,7 @@ contract sPOLController {
 
     // last function with no gasless option
     // potentially make permissionless
-    function withdrawExchangedPOL() external {
+    function withdrawPOL() external {
         require(0 != userNonces[msg.sender].length, "NO_OPEN_NONCES");
 
         uint256 totalAmount;
