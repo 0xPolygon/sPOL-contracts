@@ -66,6 +66,15 @@ contract sPOLController {
 
     uint256 public maxRedeem;
 
+    event ValidatorAdded(uint16 validatorId);
+    event ValidatorRemoved(uint16 validatorId);
+    event ValidatorFrozen(uint16 validatorId);
+    event ValidatorUnfrozen(uint16 validatorId);
+    event ValidatorTargetShareChanged(uint16 validatorId, uint8 newTargetShare);
+    event sPOLCreated(address user, uint256 amountPOL, uint256 amountSPOL);
+    event sPOLDeleted(address user, uint256 amountSPOL, uint256 amountPOL, uint256 nonce);
+    event POLWithdrawn(address user, uint256 amountPOL, uint256 nonce);
+
     modifier onlyAdmin() {
         require(msg.sender == admin, "ONLY_ADMIN");
         _;
@@ -112,6 +121,8 @@ contract sPOLController {
         });
         validatorList.push(_validatorID);
         activeValidators.push(_validatorID);
+
+        emit ValidatorAdded(_validatorID);
     }
 
     function removeValidator(uint16 _removedValidator) external onlyAdmin {
@@ -125,6 +136,8 @@ contract sPOLController {
 
         removedValidator.status = ValidatorStatus.DEACTIVATED;
         removedValidator.depositShare = 0;
+        emit ValidatorRemoved(_removedValidator);
+
         _removeFromActiveValidators(_removedValidator);
     }
 
@@ -132,6 +145,7 @@ contract sPOLController {
         require(validators[_validator].status == ValidatorStatus.ACTIVE, "NOT_ACTIVE");
         require(validators[_validator].depositShare == 0, "SHARE_NOT_ZERO");
         validators[_validator].status = ValidatorStatus.FROZEN;
+        emit ValidatorFrozen(_validator);
         _removeFromActiveValidators(_validator);
     }
 
@@ -139,6 +153,7 @@ contract sPOLController {
         require(validators[_validator].status == ValidatorStatus.FROZEN, "NOT_FROZEN");
         validators[_validator].status = ValidatorStatus.ACTIVE;
         activeValidators.push(_validator);
+        emit ValidatorUnfrozen(_validator);
     }
 
     function _removeFromActiveValidators(uint16 _validator) internal {
@@ -169,6 +184,7 @@ contract sPOLController {
         require(_validator.length == _newTargetShare.length, "LENGTH_MISMATCH");
         for (uint256 i = 0; i < _validator.length; i++) {
             validators[_validator[i]].depositShare = _newTargetShare[i];
+            emit ValidatorTargetShareChanged(_validator[i], _newTargetShare[i]);
         }
         uint8 totalPercent;
         for (uint256 i = 0; i < activeValidators.length; i++) {
@@ -263,6 +279,7 @@ contract sPOLController {
         uint256 rate = actualExchangeRatePOLsPOL();
         uint256 toMint = gotShares * rate;
         sPOLToken.mint(_user, toMint);
+        emit sPOLCreated(_user, _amount, toMint);
         return toMint;
     }
 
@@ -327,9 +344,7 @@ contract sPOLController {
     function _initExchangeToPOL(uint256 _amount, address _user) internal returns (uint256) {
         require(_amount <= maxRedeem, "AMOUNT_TOO_LARGE");
         sPOLToken.burn(_user, _amount);
-
         uint256 dPOLAmount = _amount * actualExchangeRatePOLsPOL();
-
         ValidatorInfo storage validator = _selectValidatorToSell(dPOLAmount);
         uint256 userNonce = _sellSharesFromValidator(validator, dPOLAmount);
 
@@ -340,6 +355,7 @@ contract sPOLController {
         details.amount = uint128(dPOLAmount);
         details.validatorId = uint16(validator.index);
         details.validatorNonce = uint96(userNonce);
+        emit sPOLDeleted(_user, _amount, dPOLAmount, globalWithdrawNonce);
 
         return globalWithdrawNonce;
     }
@@ -360,6 +376,7 @@ contract sPOLController {
 
                 validator.validatorContract.unstakeClaimTokens_newPOL(nonce.validatorNonce);
                 polToken.transfer(msg.sender, shares);
+                emit POLWithdrawn(msg.sender, shares, _nonce);
                 if (userNonces[msg.sender].length > 1) {
                     userNonces[msg.sender][i] = userNonces[msg.sender][userNonces[msg.sender].length - 1];
                 }
@@ -405,11 +422,13 @@ contract sPOLController {
                         i--;
                     }
                     userNonces[msg.sender].pop();
+                    emit POLWithdrawn(msg.sender, totalAmount, nonce.validatorNonce);
                 } catch {
                     continue;
                 }
             }
         }
+
         polToken.transfer(msg.sender, totalAmount);
     }
 
