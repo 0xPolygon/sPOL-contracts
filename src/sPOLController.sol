@@ -370,10 +370,17 @@ contract sPOLController {
         return globalWithdrawNonce;
     }
 
-    // withdraw now only possible as the user, so not gasless, we can consider making this permissionless
     function withdrawPOL(uint256 _nonce) external {
-        for (uint256 i = 0; i < userNonces[msg.sender].length; i++) {
-            if (userNonces[msg.sender][i] == _nonce) {
+        _withdrawPOL(msg.sender, _nonce);
+    }
+
+    function withdrawPOL(address _user, uint256 _nonce) external {
+        _withdrawPOL(_user, _nonce);
+    }
+
+    function _withdrawPOL(address _user, uint256 _nonce) internal {
+        for (uint256 i = 0; i < userNonces[_user].length; i++) {
+            if (userNonces[_user][i] == _nonce) {
                 NonceDetails storage nonce = withdrawNonceDetails[_nonce];
                 ValidatorInfo storage validator = validators[nonce.validatorId];
                 (uint256 shares, uint256 withdrawEpoch) =
@@ -385,17 +392,53 @@ contract sPOLController {
                 );
 
                 validator.validatorContract.unstakeClaimTokens_newPOL(nonce.validatorNonce);
-                polToken.transfer(msg.sender, shares);
-                emit POLWithdrawn(msg.sender, shares, _nonce);
-                if (userNonces[msg.sender].length > 1) {
-                    userNonces[msg.sender][i] = userNonces[msg.sender][userNonces[msg.sender].length - 1];
+                polToken.transfer(_user, shares);
+                emit POLWithdrawn(_user, shares, _nonce);
+                if (userNonces[_user].length > 1) {
+                    userNonces[_user][i] = userNonces[_user][userNonces[_user].length - 1];
                 }
-                userNonces[msg.sender].pop();
+                userNonces[_user].pop();
 
                 return;
             }
         }
         revert("NONCE_NOT_FOUND");
+    }
+
+    function withdrawPOL() external {
+        _withdrawPOL(msg.sender);
+    }
+
+    function withdrawPOL(address _user) external {
+        _withdrawPOL(_user);
+    }
+
+    function _withdrawPOL(address _user) internal {
+        require(0 != userNonces[_user].length, "NO_OPEN_NONCES");
+
+        uint256 totalAmount;
+        for (uint256 i = 0; i < userNonces[_user].length; i++) {
+            NonceDetails storage nonce = withdrawNonceDetails[userNonces[_user][i]];
+            ValidatorInfo storage validator = validators[nonce.validatorId];
+            (uint256 shares, uint256 withdrawEpoch) =
+                validator.validatorContract.unbonds_new(address(this), nonce.validatorNonce);
+
+            if (withdrawEpoch + stakeManager.withdrawalDelay() <= stakeManager.epoch()) {
+                try validator.validatorContract.unstakeClaimTokens_newPOL(nonce.validatorNonce) {
+                    totalAmount += shares;
+                    if (userNonces[_user].length > 1) {
+                        userNonces[_user][i] = userNonces[_user][userNonces[_user].length - 1];
+                        i--;
+                    }
+                    userNonces[_user].pop();
+                    emit POLWithdrawn(_user, totalAmount, nonce.validatorNonce);
+                } catch {
+                    continue;
+                }
+            }
+        }
+
+        polToken.transfer(_user, totalAmount);
     }
 
     function getReadyUserNonces(address _user) external view returns (uint256[] memory) {
@@ -410,36 +453,6 @@ contract sPOLController {
             }
         }
         return nonces;
-    }
-
-    // last function with no gasless option
-    // potentially make permissionless
-    function withdrawPOL() external {
-        require(0 != userNonces[msg.sender].length, "NO_OPEN_NONCES");
-
-        uint256 totalAmount;
-        for (uint256 i = 0; i < userNonces[msg.sender].length; i++) {
-            NonceDetails storage nonce = withdrawNonceDetails[userNonces[msg.sender][i]];
-            ValidatorInfo storage validator = validators[nonce.validatorId];
-            (uint256 shares, uint256 withdrawEpoch) =
-                validator.validatorContract.unbonds_new(address(this), nonce.validatorNonce);
-
-            if (withdrawEpoch + stakeManager.withdrawalDelay() <= stakeManager.epoch()) {
-                try validator.validatorContract.unstakeClaimTokens_newPOL(nonce.validatorNonce) {
-                    totalAmount += shares;
-                    if (userNonces[msg.sender].length > 1) {
-                        userNonces[msg.sender][i] = userNonces[msg.sender][userNonces[msg.sender].length - 1];
-                        i--;
-                    }
-                    userNonces[msg.sender].pop();
-                    emit POLWithdrawn(msg.sender, totalAmount, nonce.validatorNonce);
-                } catch {
-                    continue;
-                }
-            }
-        }
-
-        polToken.transfer(msg.sender, totalAmount);
     }
 
     function _selectValidatorToSell(uint256 amount) internal view returns (ValidatorInfo storage) {
