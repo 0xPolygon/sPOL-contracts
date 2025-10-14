@@ -128,25 +128,23 @@ contract sPOLController {
     function removeValidator(uint16 _removedValidator) external onlyAdmin {
         ValidatorInfo storage removedValidator = validators[_removedValidator];
         require(removedValidator.totalStaked == 0, "STILL_FUNDED");
-        require(stakeManager.delegatorsReward(_removedValidator) == 0, "REWARDS_PENDING");
         require(removedValidator.status == ValidatorStatus.ACTIVE, "NOT_ACTIVE");
-
         require(removedValidator.validatorContract.balanceOf(address(this)) == 0, "SHARES_PENDING");
         require(removedValidator.validatorContract.getLiquidRewards(address(this)) == 0, "REWARDS_PENDING");
 
         removedValidator.status = ValidatorStatus.DEACTIVATED;
         removedValidator.depositShare = 0;
-        emit ValidatorRemoved(_removedValidator);
-
         _removeFromActiveValidators(_removedValidator);
+        emit ValidatorRemoved(_removedValidator);
     }
 
     function freezeValidator(uint16 _validator) external onlyAdmin {
         require(validators[_validator].status == ValidatorStatus.ACTIVE, "NOT_ACTIVE");
         require(validators[_validator].depositShare == 0, "SHARE_NOT_ZERO");
+
         validators[_validator].status = ValidatorStatus.FROZEN;
-        emit ValidatorFrozen(_validator);
         _removeFromActiveValidators(_validator);
+        emit ValidatorFrozen(_validator);
     }
 
     function unfreezeValidator(uint16 _validator) external onlyAdmin {
@@ -170,21 +168,21 @@ contract sPOLController {
                 break;
             }
         }
-        revert("NOT_IN_ACTIVE_LIST");
     }
 
     function changeMaxDivergence(uint8 newDivergence) external onlyAdmin {
         maxDivergence = newDivergence;
     }
 
-    function updateValidatorTargetShare(uint16[] calldata _validator, uint8[] calldata _newTargetShare)
+    function updateValidatorTargetShare(uint16[] calldata _validatorID, uint8[] calldata _newTargetShare)
         external
         onlyAdmin
     {
-        require(_validator.length == _newTargetShare.length, "LENGTH_MISMATCH");
-        for (uint256 i = 0; i < _validator.length; i++) {
-            validators[_validator[i]].depositShare = _newTargetShare[i];
-            emit ValidatorTargetShareChanged(_validator[i], _newTargetShare[i]);
+        require(_validatorID.length == _newTargetShare.length, "LENGTH_MISMATCH");
+        for (uint256 i = 0; i < _validatorID.length; i++) {
+            require(validators[_validatorID[i]].status == ValidatorStatus.ACTIVE, "NOT_ACTIVE");
+            validators[_validatorID[i]].depositShare = _newTargetShare[i];
+            emit ValidatorTargetShareChanged(_validatorID[i], _newTargetShare[i]);
         }
         uint8 totalPercent;
         for (uint256 i = 0; i < activeValidators.length; i++) {
@@ -195,6 +193,7 @@ contract sPOLController {
 
     function migrateValidator(uint16 _oldValidator, uint16 _newValidator) external onlyAdmin {
         uint256 amount = validators[_oldValidator].totalStaked;
+        amount += validators[_oldValidator].validatorContract.getLiquidRewards(address(this));
         _migrateValidator(_oldValidator, _newValidator, amount);
     }
 
@@ -213,14 +212,14 @@ contract sPOLController {
 
     function restakeValidator(uint16 _validator) public {
         (uint256 amountRestaked,) = validators[_validator].validatorContract.restakePOL();
-        adddPOLBalanceFee(amountRestaked);
+        _adddPOLBalanceFee(amountRestaked);
         validators[_validator].totalStaked += amountRestaked;
     }
 
     function restakeAllActiveValidators() external {
         for (uint256 i = 0; i < activeValidators.length; i++) {
             (uint256 amountRestaked,) = validators[activeValidators[i]].validatorContract.restakePOL();
-            adddPOLBalanceFee(amountRestaked);
+            _adddPOLBalanceFee(amountRestaked);
             validators[activeValidators[i]].totalStaked += amountRestaked;
         }
     }
@@ -230,6 +229,17 @@ contract sPOLController {
             ValidatorInfo storage validator = validators[activeValidators[i]];
             validator.totalStaked = validator.validatorContract.balanceOf(address(this));
         }
+    }
+
+    // very expensive, includes frozen validators
+    function reloadAllValidatorInfo() external onlyAdmin {
+        uint256 totalDPOL;
+        for (uint256 i = 0; i < validatorList.length; i++) {
+            ValidatorInfo storage validator = validators[activeValidators[i]];
+            validator.totalStaked = validator.validatorContract.balanceOf(address(this));
+            totalDPOL += validator.totalStaked;
+        }
+        totaldPOLBalance = totalDPOL;
     }
 
     ///////////////////////////////
@@ -293,11 +303,11 @@ contract sPOLController {
         if (amountRestaked < rewards) {
             // dropped some rewards
         }
-        adddPOLBalanceFee(amountRestaked);
+        _adddPOLBalanceFee(amountRestaked);
         validators[_validator.index].totalStaked += amountRestaked;
 
         require(_validator.validatorContract.buyVoucher(_amount, _amount) == _amount, "BUY_FAILED");
-        adddPOLBalance(_amount);
+        _adddPOLBalance(_amount);
         validators[_validator.index].totalStaked += _amount;
 
         if (maxRedeem < validators[_validator.index].totalStaked) {
@@ -482,13 +492,13 @@ contract sPOLController {
         sPOLToken.mint(feeReceiver, feeInsPOL);
     }
 
-    function adddPOLBalanceFee(uint256 _amount) internal {
+    function _adddPOLBalanceFee(uint256 _amount) internal {
         uint256 feeTaken = (_amount * rewardFee) / 1000;
         feedPOLBalance += feeTaken;
         totaldPOLBalance += _amount;
     }
 
-    function adddPOLBalance(uint256 _amount) internal {
+    function _adddPOLBalance(uint256 _amount) internal {
         totaldPOLBalance += _amount;
     }
 
