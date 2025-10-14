@@ -281,6 +281,21 @@ contract sPOLController {
         return _exchangeTosPOL(_amount, _user);
     }
 
+    function buySPOL(uint256 _amount, uint16 _validator) external returns (uint256) {
+        address user = msg.sender;
+        ValidatorInfo storage validator = validators[_validator];
+        require(_amount <= _validatorMaxTotalStakeDistance(validator), "VALIDATOR_OVERFUNDED");
+        require(validator.status == ValidatorStatus.ACTIVE, "VALIDATOR_NOT_ACTIVE");
+
+        require(polToken.transferFrom(user, address(this), _amount), "TRANSFER_FAILED");
+        uint256 gotShares = _buySharesFromValidator(validator, _amount);
+        uint256 rate = actualExchangeRatePOLsPOL();
+        uint256 toMint = gotShares * rate;
+        sPOLToken.mint(user, toMint);
+        emit sPOLMinted(user, _amount, toMint);
+        return toMint;
+    }
+
     function _exchangeTosPOL(uint256 _amount, address _user) internal returns (uint256) {
         require(_amount < maxDeposit(), "EXCEEDS_MAX_DEPOSIT");
         require(polToken.transferFrom(_user, address(this), _amount), "TRANSFER_FAILED");
@@ -291,6 +306,20 @@ contract sPOLController {
         sPOLToken.mint(_user, toMint);
         emit sPOLMinted(_user, _amount, toMint);
         return toMint;
+    }
+
+    function getMostUnderfundedValidator() external view returns (uint16, uint256) {
+        uint16 selectedValidator;
+        uint256 maxFundsDepositable;
+        for (uint256 i = 0; i < activeValidators.length; i++) {
+            ValidatorInfo storage validator = validators[activeValidators[i]];
+            uint256 amount = _validatorMaxTotalStakeDistance(validator);
+            if (maxFundsDepositable < amount) {
+                maxFundsDepositable = amount;
+                selectedValidator = validator.index;
+            }
+        }
+        return (selectedValidator, maxFundsDepositable);
     }
 
     function maxDeposit() public view returns (uint256) {
@@ -317,14 +346,29 @@ contract sPOLController {
         return _amount;
     }
 
-    function _validatorMaxDeposit(uint16 _validator) internal view returns (uint256) {
-        return ((totaldPOLBalance * validators[_validator].depositShare) / 100);
+    function _validatorMaxDeposit(ValidatorInfo storage _validator) internal view returns (uint256) {
+        return ((totaldPOLBalance * _validator.depositShare) / 100);
+    }
+
+    function _validatorMaxTotalStake(ValidatorInfo storage _validator) internal view returns (uint256) {
+        return ((totaldPOLBalance * (_validator.depositShare + maxDivergence)) / 100);
+    }
+
+    function _validatorMaxTotalStakeDistance(ValidatorInfo storage _validator) internal view returns (uint256) {
+        if (activeValidators.length == 1) {
+            return type(uint256).max;
+        }
+        uint256 maxTotalStake = _validatorMaxTotalStake(_validator);
+        if (_validator.totalStaked > maxTotalStake) {
+            return 0;
+        }
+        return maxTotalStake - _validator.totalStaked;
     }
 
     function _selectValidatorToBuy(uint256 amount) internal view returns (ValidatorInfo storage) {
         ValidatorInfo storage validator = validators[activeValidators[lastSuccessfulBuyValidator]];
 
-        if (validator.totalStaked + amount <= _validatorMaxDeposit(validator.index)) {
+        if (validator.totalStaked + amount <= _validatorMaxDeposit(validator)) {
             return validator;
         } else {}
         // then is underfunded?
