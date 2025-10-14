@@ -443,6 +443,7 @@ contract sPOLController {
 
     function getReadyUserNonces(address _user) external view returns (uint256[] memory) {
         uint256[] memory nonces = new uint256[](userNonces[_user].length);
+        uint256 count;
         for (uint256 i = 0; i < userNonces[_user].length; i++) {
             NonceDetails storage nonce = withdrawNonceDetails[userNonces[msg.sender][i]];
             ValidatorInfo storage validator = validators[nonce.validatorId];
@@ -450,9 +451,18 @@ contract sPOLController {
 
             if (withdrawEpoch + stakeManager.withdrawalDelay() <= stakeManager.epoch()) {
                 nonces[i] = userNonces[_user][i];
+                count++;
             }
         }
-        return nonces;
+        uint256[] memory finalNonces = new uint256[](count);
+        uint256 index;
+        for (uint256 i = 0; i < userNonces[_user].length; i++) {
+            if (nonces[i] != 0) {
+                finalNonces[index] = nonces[i];
+                index++;
+            }
+        }
+        return finalNonces;
     }
 
     function _selectValidatorToSell(uint256 amount) internal view returns (ValidatorInfo storage) {
