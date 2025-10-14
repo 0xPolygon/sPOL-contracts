@@ -71,8 +71,8 @@ contract sPOLController {
     event ValidatorFrozen(uint16 validatorId);
     event ValidatorUnfrozen(uint16 validatorId);
     event ValidatorTargetShareChanged(uint16 validatorId, uint8 newTargetShare);
-    event sPOLCreated(address user, uint256 amountPOL, uint256 amountSPOL);
-    event sPOLDeleted(address user, uint256 amountSPOL, uint256 amountPOL, uint256 nonce);
+    event sPOLMinted(address user, uint256 amountPOL, uint256 amountSPOL);
+    event sPOLBurned(address user, uint256 amountSPOL, uint256 amountPOL, uint256 nonce);
     event POLWithdrawn(address user, uint256 amountPOL, uint256 nonce);
 
     modifier onlyAdmin() {
@@ -289,7 +289,7 @@ contract sPOLController {
         uint256 rate = actualExchangeRatePOLsPOL();
         uint256 toMint = gotShares * rate;
         sPOLToken.mint(_user, toMint);
-        emit sPOLCreated(_user, _amount, toMint);
+        emit sPOLMinted(_user, _amount, toMint);
         return toMint;
     }
 
@@ -365,7 +365,7 @@ contract sPOLController {
         details.amount = uint128(dPOLAmount);
         details.validatorId = uint16(validator.index);
         details.validatorNonce = uint96(userNonce);
-        emit sPOLDeleted(_user, _amount, dPOLAmount, globalWithdrawNonce);
+        emit sPOLBurned(_user, _amount, dPOLAmount, globalWithdrawNonce);
 
         return globalWithdrawNonce;
     }
