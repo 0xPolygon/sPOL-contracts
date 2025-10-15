@@ -268,7 +268,7 @@ contract sPOLController {
     ///////////////////////////////
 
     function buySPOL(uint256 _amount) external returns (uint256) {
-        return _exchangeTosPOL(_amount, msg.sender);
+        return _buySPOLMulti(_amount, msg.sender);
     }
 
     function buySPOLPermit(uint256 _amount, address _user, uint256 _deadline, uint8 _v, bytes32 _r, bytes32 _s)
@@ -278,31 +278,57 @@ contract sPOLController {
         uint256 nonceBefore = polToken.nonces(_user);
         polToken.permit(_user, address(this), _amount, _deadline, _v, _r, _s);
         require(polToken.nonces(_user) == nonceBefore + 1, "Invalid permit");
-        return _exchangeTosPOL(_amount, _user);
+        return _buySPOLMulti(_amount, _user);
     }
 
-    function buySPOL(uint256 _amount, uint16 _validator) external returns (uint256) {
-        address user = msg.sender;
+    function buySPOL(uint256 _amount, uint16 _validator) public returns (uint256) {
+        return _buySPOLSingle(_amount, _validator, msg.sender);
+    }
+
+    function buySPOLPermit(
+        uint256 _amount,
+        uint16 _validator,
+        address _user,
+        uint256 _deadline,
+        uint8 _v,
+        bytes32 _r,
+        bytes32 _s
+    ) public returns (uint256) {
+        uint256 nonceBefore = polToken.nonces(_user);
+        polToken.permit(_user, address(this), _amount, _deadline, _v, _r, _s);
+        require(polToken.nonces(_user) == nonceBefore + 1, "Invalid permit");
+        return _buySPOLSingle(_amount, _validator, _user);
+    }
+
+    function _buySPOLSingle(uint256 _amount, uint16 _validator, address _user) internal returns (uint256) {
         ValidatorInfo storage validator = validators[_validator];
         require(_amount <= _validatorMaxTotalStakeDistance(validator), "VALIDATOR_OVERFUNDED");
         require(validator.status == ValidatorStatus.ACTIVE, "VALIDATOR_NOT_ACTIVE");
+        _takePOL(_amount, _user);
 
-        require(polToken.transferFrom(user, address(this), _amount), "TRANSFER_FAILED");
         uint256 gotShares = _buySharesFromValidator(validator, _amount);
-        uint256 rate = actualExchangeRatePOLsPOL();
-        uint256 toMint = gotShares * rate;
-        sPOLToken.mint(user, toMint);
-        emit sPOLMinted(user, _amount, toMint);
-        return toMint;
+        return _mintSPOL(gotShares, _user);
     }
 
-    function _exchangeTosPOL(uint256 _amount, address _user) internal returns (uint256) {
-        require(_amount < maxDeposit(), "EXCEEDS_MAX_DEPOSIT");
+    function _buySPOLMulti(uint256 _amount, address _user) internal returns (uint256) {
+        (uint16[] memory validator, uint256[] memory amount) = _selectValidatorToBuy(_amount);
+        _takePOL(_amount, _user);
+        uint256 totalShares;
+        for (uint256 i = 0; i < amount.length; i++) {
+            totalShares += _buySharesFromValidator(validator[i], amount[i]);
+        }
+        lastSuccessfulBuyValidator = validator[validator.length - 1];
+        require(totalShares == _amount, "BUY_SHARES_MISMATCH");
+        return _mintSPOL(totalShares, _user);
+    }
+
+    function _takePOL(uint256 _amount, address _user) internal {
         require(polToken.transferFrom(_user, address(this), _amount), "TRANSFER_FAILED");
-        ValidatorInfo storage validator = _selectValidatorToBuy(_amount);
-        uint256 gotShares = _buySharesFromValidator(validator, _amount);
+    }
+
+    function _mintSPOL(uint256 _amount, address _user) internal returns (uint256) {
         uint256 rate = actualExchangeRatePOLsPOL();
-        uint256 toMint = gotShares * rate;
+        uint256 toMint = _amount * rate;
         sPOLToken.mint(_user, toMint);
         emit sPOLMinted(_user, _amount, toMint);
         return toMint;
@@ -322,8 +348,8 @@ contract sPOLController {
         return (selectedValidator, maxFundsDepositable);
     }
 
-    function maxDeposit() public view returns (uint256) {
-        return totaldPOLBalance / 100 * maxDivergence;
+    function _buySharesFromValidator(uint16 _validator, uint256 _amount) internal returns (uint256) {
+        return _buySharesFromValidator(validators[_validator], _amount);
     }
 
     function _buySharesFromValidator(ValidatorInfo storage _validator, uint256 _amount) internal returns (uint256) {
@@ -365,14 +391,50 @@ contract sPOLController {
         return maxTotalStake - _validator.totalStaked;
     }
 
-    function _selectValidatorToBuy(uint256 amount) internal view returns (ValidatorInfo storage) {
-        ValidatorInfo storage validator = validators[activeValidators[lastSuccessfulBuyValidator]];
+    // can't take storage array of full vals, so we take index to avoid costly copying
+    function _selectValidatorToBuy(uint256 _amount) internal view returns (uint16[] memory, uint256[] memory) {
+        uint16[] memory selectedValidators = new uint16[](activeValidators.length);
+        uint256[] memory amounts = new uint256[](activeValidators.length);
+        uint256 remainingAmount = _amount;
 
-        if (validator.totalStaked + amount <= _validatorMaxDeposit(validator)) {
-            return validator;
-        } else {}
-        // then is underfunded?
-        return validators[validatorList[0]];
+        for (uint256 i = 0; i < activeValidators.length; i++) {
+            ValidatorInfo storage validator =
+                validators[activeValidators[(lastSuccessfulBuyValidator + i) % activeValidators.length]];
+            uint256 maxAmount = _validatorMaxTotalStakeDistance(validator);
+
+            if (_amount <= maxAmount) {
+                selectedValidators[0] = validator.index;
+                amounts[0] = _amount;
+                // memory cut to size 1 both arrays
+                assembly {
+                    mstore(selectedValidators, 1)
+                    mstore(amounts, 1)
+                }
+                return (selectedValidators, amounts);
+            } else if (remainingAmount <= maxAmount) {
+                selectedValidators[i] = validator.index;
+                amounts[i] = remainingAmount;
+                // memory cut to size i+1 both arrays
+                assembly {
+                    mstore(selectedValidators, add(i, 1))
+                    mstore(amounts, add(i, 1))
+                }
+                return (selectedValidators, amounts);
+            } else {
+                selectedValidators[i] = validator.index;
+                amounts[i] = maxAmount;
+                remainingAmount -= maxAmount;
+            }
+        }
+        // in this case not enough theoretical capacity, so we just distribute to all equally
+        uint256 perValidator = _amount / activeValidators.length;
+        uint256 remainder = _amount % activeValidators.length;
+        for (uint256 i = 0; i < activeValidators.length; i++) {
+            selectedValidators[i] = validators[activeValidators[i]].index;
+            amounts[i] = perValidator;
+        }
+        amounts[0] += remainder;
+        return (selectedValidators, amounts);
     }
 
     ///////////////////////////////
@@ -412,6 +474,56 @@ contract sPOLController {
         emit sPOLBurned(_user, _amount, dPOLAmount, globalWithdrawNonce);
 
         return globalWithdrawNonce;
+    }
+
+    function _selectValidatorToSell(uint256 amount) internal view returns (ValidatorInfo storage) {
+        for (uint256 i = 0; i < activeValidators.length; i++) {
+            ValidatorInfo storage validator =
+                validators[activeValidators[(i + lastSuccessfulSellValidator) % activeValidators.length]];
+            if (validator.totalStaked >= amount) {
+                if (totaldPOLBalance / validator.depositShare * 100 >= validator.totalStaked) {
+                    return validator;
+                }
+            }
+        }
+        revert("NO_VALIDATOR_FOUND");
+        // couldn't unstake all at once
+    }
+
+    function _sellSharesFromValidator(ValidatorInfo storage _validator, uint256 _amount) internal returns (uint256) {
+        // use withdraw and sellVoucher in one
+        (uint256 amountRestaked, uint256 rewards) = _validator.validatorContract.restakePOL();
+        if (amountRestaked < rewards) {
+            // dropped some rewards
+        }
+
+        _validator.validatorContract.sellVoucher_newPOL(_amount, _amount);
+        uint256 userNonce = _validator.validatorContract.unbondNonces(address(this));
+
+        validators[_validator.index].totalStaked -= _amount;
+        validators[_validator.index].totalStaked += amountRestaked;
+        totaldPOLBalance -= _amount;
+
+        return userNonce;
+    }
+
+    function getMostOverfundedValidator() external view returns (uint16, uint256) {
+        uint16 selectedValidator = activeValidators[0];
+        uint256 maxFundsRedeemable = type(uint256).max;
+        for (uint256 i = 0; i < activeValidators.length; i++) {
+            ValidatorInfo storage validator = validators[activeValidators[i]];
+            uint256 amount = _validatorMaxDeposit(validator);
+
+            if (validator.totalStaked > amount) {
+                continue;
+            }
+            amount - validator.totalStaked;
+            if (maxFundsRedeemable > amount) {
+                maxFundsRedeemable = amount;
+                selectedValidator = validator.index;
+            }
+        }
+        return (selectedValidator, maxFundsRedeemable);
     }
 
     function withdrawPOL(uint256 _nonce) external {
@@ -509,37 +621,6 @@ contract sPOLController {
         return finalNonces;
     }
 
-    function _selectValidatorToSell(uint256 amount) internal view returns (ValidatorInfo storage) {
-        for (uint256 i = 0; i < activeValidators.length; i++) {
-            ValidatorInfo storage validator =
-                validators[activeValidators[(i + lastSuccessfulSellValidator) % activeValidators.length]];
-            if (validator.totalStaked >= amount) {
-                if (totaldPOLBalance / validator.depositShare * 100 >= validator.totalStaked) {
-                    return validator;
-                }
-            }
-        }
-        revert("NO_VALIDATOR_FOUND");
-        // couldn't unstake all at once
-    }
-
-    function _sellSharesFromValidator(ValidatorInfo storage _validator, uint256 _amount) internal returns (uint256) {
-        // use withdraw and sellVoucher in one
-        (uint256 amountRestaked, uint256 rewards) = _validator.validatorContract.restakePOL();
-        if (amountRestaked < rewards) {
-            // dropped some rewards
-        }
-
-        _validator.validatorContract.sellVoucher_newPOL(_amount, _amount);
-        uint256 userNonce = _validator.validatorContract.unbondNonces(address(this));
-
-        validators[_validator.index].totalStaked -= _amount;
-        validators[_validator.index].totalStaked += amountRestaked;
-        totaldPOLBalance -= _amount;
-
-        return userNonce;
-    }
-
     ///////////////////////////////
     ///  Fee Management         ///
     ///////////////////////////////
@@ -573,7 +654,9 @@ contract sPOLController {
     ///  Other                  ///
     ///////////////////////////////
 
-    function cleanUpMaticPOL(address _receiver) external onlyAdmin {
+    function cleanUpMaticPOL(uint16 _validator, address _receiver) external onlyAdmin {
+        require(validators[_validator].status == ValidatorStatus.ACTIVE, "VALIDATOR_NOT_ACTIVE");
+
         uint256 maticBalance = maticToken.balanceOf(address(this));
         if (maticBalance > 0) {
             polygonMigration.migrate(maticBalance);
@@ -581,9 +664,10 @@ contract sPOLController {
         uint256 polBalance = polToken.balanceOf(address(this));
         if (polBalance > 0) {
             if (_receiver == address(0)) {
-                // just stake, no sPOL creation
+                _buySharesFromValidator(_validator, polBalance);
             } else {
-                // buy Shares
+                uint256 mintedSPOL = buySPOL(polBalance, _validator);
+                sPOLToken.transfer(_receiver, mintedSPOL);
             }
         }
     }
