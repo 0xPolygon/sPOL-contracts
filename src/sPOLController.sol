@@ -302,7 +302,7 @@ contract sPOLController {
 
     function _buySPOLSingle(uint256 _amount, uint16 _validator, address _user) internal returns (uint256) {
         ValidatorInfo storage validator = validators[_validator];
-        require(_amount <= _validatorMaxTotalStakeDistance(validator), "VALIDATOR_OVERFUNDED");
+        require(_amount <= _validatorMaxTotalStakeDistance(validator, true), "VALIDATOR_OVERFUNDED");
         require(validator.status == ValidatorStatus.ACTIVE, "VALIDATOR_NOT_ACTIVE");
         _takePOL(_amount, _user);
 
@@ -339,7 +339,7 @@ contract sPOLController {
         uint256 maxFundsDepositable;
         for (uint256 i = 0; i < activeValidators.length; i++) {
             ValidatorInfo storage validator = validators[activeValidators[i]];
-            uint256 amount = _validatorMaxTotalStakeDistance(validator);
+            uint256 amount = _validatorMaxTotalStakeDistance(validator, true);
             if (maxFundsDepositable < amount) {
                 maxFundsDepositable = amount;
                 selectedValidator = validator.index;
@@ -387,61 +387,33 @@ contract sPOLController {
         return ((totaldPOLBalance * (_validator.depositShare - maxDivergence)) / 100);
     }
 
-    function _validatorMaxTotalStakeDistance(ValidatorInfo storage _validator) internal view returns (uint256) {
+    // positive to check how much can be added, negative to check how much can be removed
+    function _validatorMaxTotalStakeDistance(ValidatorInfo storage _validator, bool _positive)
+        internal
+        view
+        returns (uint256)
+    {
         if (activeValidators.length == 1) {
             return type(uint256).max;
         }
-        uint256 maxTotalStake = _validatorMaxTotalStake(_validator);
-        if (_validator.totalStaked > maxTotalStake) {
-            return 0;
+        if (_positive) {
+            uint256 maxTotalStake = _validatorMaxTotalStake(_validator);
+            if (_validator.totalStaked >= maxTotalStake) {
+                return 0;
+            }
+            return maxTotalStake - _validator.totalStaked;
+        } else {
+            uint256 minTotalStake = _validatorMinTotalStake(_validator);
+            if (_validator.totalStaked < minTotalStake) {
+                return 0;
+            }
+            return _validator.totalStaked - minTotalStake;
         }
-        return maxTotalStake - _validator.totalStaked;
     }
 
     // can't take storage array of full vals, so we take index to avoid costly copying
     function _selectValidatorToBuy(uint256 _amount) internal view returns (uint16[] memory, uint256[] memory) {
-        uint16[] memory selectedValidators = new uint16[](activeValidators.length);
-        uint256[] memory amounts = new uint256[](activeValidators.length);
-        uint256 remainingAmount = _amount;
-
-        for (uint256 i = 0; i < activeValidators.length; i++) {
-            ValidatorInfo storage validator =
-                validators[activeValidators[(lastSuccessfulBuyValidator + i) % activeValidators.length]];
-            uint256 maxAmount = _validatorMaxTotalStakeDistance(validator);
-
-            if (_amount <= maxAmount) {
-                selectedValidators[0] = validator.index;
-                amounts[0] = _amount;
-                // memory cut to size 1 both arrays
-                assembly {
-                    mstore(selectedValidators, 1)
-                    mstore(amounts, 1)
-                }
-                return (selectedValidators, amounts);
-            } else if (remainingAmount <= maxAmount) {
-                selectedValidators[i] = validator.index;
-                amounts[i] = remainingAmount;
-                // memory cut to size i+1 both arrays
-                assembly {
-                    mstore(selectedValidators, add(i, 1))
-                    mstore(amounts, add(i, 1))
-                }
-                return (selectedValidators, amounts);
-            } else {
-                selectedValidators[i] = validator.index;
-                amounts[i] = maxAmount;
-                remainingAmount -= maxAmount;
-            }
-        }
-        // in this case not enough theoretical capacity, so we just distribute to all equally
-        uint256 perValidator = _amount / activeValidators.length;
-        uint256 remainder = _amount % activeValidators.length;
-        for (uint256 i = 0; i < activeValidators.length; i++) {
-            selectedValidators[i] = validators[activeValidators[i]].index;
-            amounts[i] = perValidator;
-        }
-        amounts[0] += remainder;
-        return (selectedValidators, amounts);
+        return _selectValidators(_amount, true);
     }
 
     ///////////////////////////////
@@ -506,6 +478,15 @@ contract sPOLController {
         return globalWithdrawNonce;
     }
 
+    // can't take storage array of full vals, so we take index to avoid costly copying
+    function _selectValidatorToSell(uint256 _amount, uint256 du)
+        internal
+        view
+        returns (uint16[] memory, uint256[] memory)
+    {
+        return _selectValidators(_amount, false);
+    }
+
     function _initExchangeToPOL(uint256 _amount, address _user) internal returns (uint256) {
         require(_amount <= maxRedeem, "AMOUNT_TOO_LARGE");
         sPOLToken.burn(_user, _amount);
@@ -561,12 +542,8 @@ contract sPOLController {
         uint256 maxFundsRedeemable = 0;
         for (uint256 i = 0; i < activeValidators.length; i++) {
             ValidatorInfo storage validator = validators[activeValidators[i]];
-            uint256 amount = _validatorMinTotalStake(validator);
+            uint256 unstakeable = _validatorMaxTotalStakeDistance(validator, false);
 
-            if (validator.totalStaked < amount) {
-                continue;
-            }
-            uint256 unstakeable = validator.totalStaked - amount;
             if (maxFundsRedeemable < unstakeable) {
                 maxFundsRedeemable = unstakeable;
                 selectedValidator = validator.index;
@@ -688,6 +665,52 @@ contract sPOLController {
     ///////////////////////////////
     ///  Other                  ///
     ///////////////////////////////
+
+    function _selectValidators(uint256 _amount, bool _buy) internal view returns (uint16[] memory, uint256[] memory) {
+        uint16[] memory selectedValidators = new uint16[](activeValidators.length);
+        uint256[] memory amounts = new uint256[](activeValidators.length);
+        uint256 remainingAmount = _amount;
+
+        for (uint256 i = 0; i < activeValidators.length; i++) {
+            ValidatorInfo storage validator =
+                validators[activeValidators[(lastSuccessfulBuyValidator + i) % activeValidators.length]];
+
+            uint256 maxAmount = _validatorMaxTotalStakeDistance(validator, _buy);
+
+            if (_amount <= maxAmount) {
+                selectedValidators[0] = validator.index;
+                amounts[0] = _amount;
+                // memory cut to size 1 both arrays
+                assembly {
+                    mstore(selectedValidators, 1)
+                    mstore(amounts, 1)
+                }
+                return (selectedValidators, amounts);
+            } else if (remainingAmount <= maxAmount) {
+                selectedValidators[i] = validator.index;
+                amounts[i] = remainingAmount;
+                // memory cut to size i+1 both arrays
+                assembly {
+                    mstore(selectedValidators, add(i, 1))
+                    mstore(amounts, add(i, 1))
+                }
+                return (selectedValidators, amounts);
+            } else {
+                selectedValidators[i] = validator.index;
+                amounts[i] = maxAmount;
+                remainingAmount -= maxAmount;
+            }
+        }
+        // in this case not enough theoretical capacity, so we just distribute to all equally
+        uint256 perValidator = _amount / activeValidators.length;
+        uint256 remainder = _amount % activeValidators.length;
+        for (uint256 i = 0; i < activeValidators.length; i++) {
+            selectedValidators[i] = validators[activeValidators[i]].index;
+            amounts[i] = perValidator;
+        }
+        amounts[0] += remainder;
+        return (selectedValidators, amounts);
+    }
 
     function cleanUpMaticPOL(uint16 _validator, address _receiver) external onlyAdmin {
         require(validators[_validator].status == ValidatorStatus.ACTIVE, "VALIDATOR_NOT_ACTIVE");
