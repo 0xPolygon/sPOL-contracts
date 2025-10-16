@@ -380,6 +380,13 @@ contract sPOLController {
         return ((totaldPOLBalance * (_validator.depositShare + maxDivergence)) / 100);
     }
 
+    function _validatorMinTotalStake(ValidatorInfo storage _validator) internal view returns (uint256) {
+        if (_validator.depositShare <= maxDivergence) {
+            return 0;
+        }
+        return ((totaldPOLBalance * (_validator.depositShare - maxDivergence)) / 100);
+    }
+
     function _validatorMaxTotalStakeDistance(ValidatorInfo storage _validator) internal view returns (uint256) {
         if (activeValidators.length == 1) {
             return type(uint256).max;
@@ -509,17 +516,17 @@ contract sPOLController {
 
     function getMostOverfundedValidator() external view returns (uint16, uint256) {
         uint16 selectedValidator = activeValidators[0];
-        uint256 maxFundsRedeemable = type(uint256).max;
+        uint256 maxFundsRedeemable = 0;
         for (uint256 i = 0; i < activeValidators.length; i++) {
             ValidatorInfo storage validator = validators[activeValidators[i]];
-            uint256 amount = _validatorMaxDeposit(validator);
+            uint256 amount = _validatorMinTotalStake(validator);
 
-            if (validator.totalStaked > amount) {
+            if (validator.totalStaked < amount) {
                 continue;
             }
-            amount - validator.totalStaked;
-            if (maxFundsRedeemable > amount) {
-                maxFundsRedeemable = amount;
+            uint256 unstakeable = validator.totalStaked - amount;
+            if (maxFundsRedeemable < unstakeable) {
+                maxFundsRedeemable = unstakeable;
                 selectedValidator = validator.index;
             }
         }
