@@ -464,6 +464,48 @@ contract sPOLController {
         return _initExchangeToPOL(_amount, _user);
     }
 
+    function sellSPOL(uint256 _amount, uint16 _validator) external returns (uint256) {
+        return _sellSPOLSingle(_amount, _validator, msg.sender);
+    }
+
+    function sellSPOLPermit(
+        uint256 _amount,
+        uint16 _validator,
+        address _user,
+        uint256 _deadline,
+        uint8 _v,
+        bytes32 _r,
+        bytes32 _s
+    ) external returns (uint256) {
+        // consume permit resets allowance to 0 after use, as we don't want any leftover allowance
+        // allowance should have no negative downsides, we do this to be safe
+        uint256 nonceBefore = sPOLToken.nonces(_user);
+        sPOLToken.consumePermit(_user, address(this), _amount, _deadline, _v, _r, _s);
+        require(sPOLToken.nonces(_user) == nonceBefore + 1, "Invalid permit");
+        return _sellSPOLSingle(_amount, _validator, _user);
+    }
+
+    function _sellSPOLSingle(uint256 _amount, uint16 _validator, address _user) internal returns (uint256) {
+        ValidatorInfo storage validator = validators[_validator];
+        require(validator.status == ValidatorStatus.ACTIVE, "VALIDATOR_NOT_ACTIVE");
+        require(_amount <= validator.totalStaked - _validatorMinTotalStake(validator), "VALIDATOR_UNDERFUNDED");
+        sPOLToken.burn(_user, _amount);
+
+        uint256 dPOLAmount = _amount * actualExchangeRatePOLsPOL();
+        uint256 userNonce = _sellSharesFromValidator(validator, dPOLAmount);
+
+        globalWithdrawNonce++;
+        userNonces[_user].push(globalWithdrawNonce);
+
+        NonceDetails storage details = withdrawNonceDetails[globalWithdrawNonce];
+        details.amount = uint128(dPOLAmount);
+        details.validatorId = uint16(validator.index);
+        details.validatorNonce = uint96(userNonce);
+        emit sPOLBurned(_user, _amount, dPOLAmount, globalWithdrawNonce);
+
+        return globalWithdrawNonce;
+    }
+
     function _initExchangeToPOL(uint256 _amount, address _user) internal returns (uint256) {
         require(_amount <= maxRedeem, "AMOUNT_TOO_LARGE");
         sPOLToken.burn(_user, _amount);
