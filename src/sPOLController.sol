@@ -420,20 +420,20 @@ contract sPOLController {
     ///  sPOL -> POL Exchange   ///
     ///////////////////////////////
 
-    function initSellSPOL(uint256 _amount) external returns (uint256) {
-        return _initExchangeToPOL(_amount, msg.sender);
+    function initSellSPOL(uint256 _amount) external returns (uint256[] memory) {
+        return _sellSPOLMulti(_amount, msg.sender);
     }
 
     function initSellSPOLPermit(uint256 _amount, address _user, uint256 _deadline, uint8 _v, bytes32 _r, bytes32 _s)
         external
-        returns (uint256)
+        returns (uint256[] memory)
     {
         // consume permit resets allowance to 0 after use, as we don't want any leftover allowance
         // allowance should have no negative downsides, we do this to be safe
         uint256 nonceBefore = sPOLToken.nonces(_user);
         sPOLToken.consumePermit(_user, address(this), _amount, _deadline, _v, _r, _s);
         require(sPOLToken.nonces(_user) == nonceBefore + 1, "Invalid permit");
-        return _initExchangeToPOL(_amount, _user);
+        return _sellSPOLMulti(_amount, _user);
     }
 
     function sellSPOL(uint256 _amount, uint16 _validator) external returns (uint256) {
@@ -461,7 +461,7 @@ contract sPOLController {
         ValidatorInfo storage validator = validators[_validator];
         require(validator.status == ValidatorStatus.ACTIVE, "VALIDATOR_NOT_ACTIVE");
         require(_amount <= validator.totalStaked - _validatorMinTotalStake(validator), "VALIDATOR_UNDERFUNDED");
-        sPOLToken.burn(_user, _amount);
+        _takeSPOL(_amount, _user);
 
         uint256 dPOLAmount = _amount * actualExchangeRatePOLsPOL();
         uint256 userNonce = _sellSharesFromValidator(validator, dPOLAmount);
@@ -479,45 +479,38 @@ contract sPOLController {
     }
 
     // can't take storage array of full vals, so we take index to avoid costly copying
-    function _selectValidatorToSell(uint256 _amount, uint256 du)
-        internal
-        view
-        returns (uint16[] memory, uint256[] memory)
-    {
+    function _selectValidatorToSell(uint256 _amount) internal view returns (uint16[] memory, uint256[] memory) {
         return _selectValidators(_amount, false);
     }
 
-    function _initExchangeToPOL(uint256 _amount, address _user) internal returns (uint256) {
-        require(_amount <= maxRedeem, "AMOUNT_TOO_LARGE");
-        sPOLToken.burn(_user, _amount);
-        uint256 dPOLAmount = _amount * actualExchangeRatePOLsPOL();
-        ValidatorInfo storage validator = _selectValidatorToSell(dPOLAmount);
-        uint256 userNonce = _sellSharesFromValidator(validator, dPOLAmount);
-
-        globalWithdrawNonce++;
-        userNonces[_user].push(globalWithdrawNonce);
-
-        NonceDetails storage details = withdrawNonceDetails[globalWithdrawNonce];
-        details.amount = uint128(dPOLAmount);
-        details.validatorId = uint16(validator.index);
-        details.validatorNonce = uint96(userNonce);
-        emit sPOLBurned(_user, _amount, dPOLAmount, globalWithdrawNonce);
-
-        return globalWithdrawNonce;
+    function _takeSPOL(uint256 _amount, address _user) internal {
+        try sPOLToken.burn(_user, _amount) {}
+        catch {
+            revert("BURN_FAILED");
+        }
     }
 
-    function _selectValidatorToSell(uint256 amount) internal view returns (ValidatorInfo storage) {
-        for (uint256 i = 0; i < activeValidators.length; i++) {
-            ValidatorInfo storage validator =
-                validators[activeValidators[(i + lastSuccessfulSellValidator) % activeValidators.length]];
-            if (validator.totalStaked >= amount) {
-                if (totaldPOLBalance / validator.depositShare * 100 >= validator.totalStaked) {
-                    return validator;
-                }
-            }
+    function _sellSPOLMulti(uint256 _amount, address _user) internal returns (uint256[] memory) {
+        _takeSPOL(_amount, _user);
+        uint256 dPOLAmount = _amount * actualExchangeRatePOLsPOL();
+        (uint16[] memory validator, uint256[] memory amount) = _selectValidatorToSell(dPOLAmount);
+        uint256[] memory nonces = new uint256[](validator.length);
+        for (uint256 i = 0; i < validator.length; i++) {
+            uint256 userNonce = _sellSharesFromValidator(validator[i], amount[i]);
+            globalWithdrawNonce++;
+            userNonces[_user].push(globalWithdrawNonce);
+
+            NonceDetails storage details = withdrawNonceDetails[globalWithdrawNonce];
+            details.amount = uint128(dPOLAmount);
+            details.validatorId = validator[i];
+            details.validatorNonce = uint96(userNonce);
+            emit sPOLBurned(_user, amount[i] / actualExchangeRatePOLsPOL(), amount[i], globalWithdrawNonce);
         }
-        revert("NO_VALIDATOR_FOUND");
-        // couldn't unstake all at once
+        return nonces;
+    }
+
+    function _sellSharesFromValidator(uint16 _validator, uint256 _amount) internal returns (uint256) {
+        return _sellSharesFromValidator(validators[_validator], _amount);
     }
 
     function _sellSharesFromValidator(ValidatorInfo storage _validator, uint256 _amount) internal returns (uint256) {
