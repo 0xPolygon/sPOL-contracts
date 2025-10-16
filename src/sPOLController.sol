@@ -539,22 +539,22 @@ contract sPOLController {
             if (userNonces[_user][i] == _nonce) {
                 NonceDetails storage nonce = withdrawNonceDetails[_nonce];
                 ValidatorInfo storage validator = validators[nonce.validatorId];
-                (uint256 shares, uint256 withdrawEpoch) =
-                    validator.validatorContract.unbonds_new(address(this), nonce.validatorNonce);
+                (uint256 shares,) = validator.validatorContract.unbonds_new(address(this), nonce.validatorNonce);
 
-                require(
-                    withdrawEpoch + stakeManager.withdrawalDelay() <= stakeManager.epoch(),
-                    "WITHDRAWAL_DELAY_NOT_PASSED"
-                );
+                try validator.validatorContract.unstakeClaimTokens_newPOL(nonce.validatorNonce) {}
+                catch Error(string memory errorMsg) {
+                    revert(errorMsg);
+                } catch {
+                    revert("UNSTAKE_CLAIM_FAILED");
+                }
 
-                validator.validatorContract.unstakeClaimTokens_newPOL(nonce.validatorNonce);
-                polToken.transfer(_user, shares);
-                emit POLWithdrawn(_user, shares, _nonce);
                 if (userNonces[_user].length > 1) {
                     userNonces[_user][i] = userNonces[_user][userNonces[_user].length - 1];
                 }
                 userNonces[_user].pop();
 
+                polToken.transfer(_user, shares);
+                emit POLWithdrawn(_user, shares, _nonce);
                 return;
             }
         }
@@ -573,8 +573,10 @@ contract sPOLController {
         require(0 != userNonces[_user].length, "NO_OPEN_NONCES");
 
         uint256 totalAmount;
-        for (uint256 i = 0; i < userNonces[_user].length; i++) {
-            NonceDetails storage nonce = withdrawNonceDetails[userNonces[_user][i]];
+        //create a copy of the array in memory to avoid SStores
+        uint256[] memory memNonces = userNonces[_user];
+        for (uint256 i = 0; i < memNonces.length; i++) {
+            NonceDetails storage nonce = withdrawNonceDetails[memNonces[i]];
             ValidatorInfo storage validator = validators[nonce.validatorId];
             (uint256 shares, uint256 withdrawEpoch) =
                 validator.validatorContract.unbonds_new(address(this), nonce.validatorNonce);
@@ -582,43 +584,27 @@ contract sPOLController {
             if (withdrawEpoch + stakeManager.withdrawalDelay() <= stakeManager.epoch()) {
                 try validator.validatorContract.unstakeClaimTokens_newPOL(nonce.validatorNonce) {
                     totalAmount += shares;
-                    if (userNonces[_user].length > 1) {
-                        userNonces[_user][i] = userNonces[_user][userNonces[_user].length - 1];
-                        i--;
-                    }
-                    userNonces[_user].pop();
+                    memNonces[i] = 0;
                     emit POLWithdrawn(_user, totalAmount, nonce.validatorNonce);
                 } catch {
+                    // Nonce wasn't ready for some reason, so we skip it
+                    // Consider reverting here, because in case this happens it's not the delay, but maybe something serious
                     continue;
                 }
             }
         }
-
+        // shrink the array in storage as needed
+        uint256 foundNonces;
+        for (uint256 i = 0; i < memNonces.length; i++) {
+            if (memNonces[i] == 0) {
+                userNonces[_user].pop();
+            } else {
+                userNonces[_user][foundNonces] = memNonces[i];
+                foundNonces++;
+            }
+        }
+        // bundle transfer to save gas, separate events inform about multi withdraws
         polToken.transfer(_user, totalAmount);
-    }
-
-    function getReadyUserNonces(address _user) external view returns (uint256[] memory) {
-        uint256[] memory nonces = new uint256[](userNonces[_user].length);
-        uint256 count;
-        for (uint256 i = 0; i < userNonces[_user].length; i++) {
-            NonceDetails storage nonce = withdrawNonceDetails[userNonces[msg.sender][i]];
-            ValidatorInfo storage validator = validators[nonce.validatorId];
-            (, uint256 withdrawEpoch) = validator.validatorContract.unbonds_new(address(this), nonce.validatorNonce);
-
-            if (withdrawEpoch + stakeManager.withdrawalDelay() <= stakeManager.epoch()) {
-                nonces[i] = userNonces[_user][i];
-                count++;
-            }
-        }
-        uint256[] memory finalNonces = new uint256[](count);
-        uint256 index;
-        for (uint256 i = 0; i < userNonces[_user].length; i++) {
-            if (nonces[i] != 0) {
-                finalNonces[index] = nonces[i];
-                index++;
-            }
-        }
-        return finalNonces;
     }
 
     ///////////////////////////////
