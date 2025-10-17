@@ -2,14 +2,13 @@
 pragma solidity ^0.8.30;
 
 import {ERC20Permit, ERC20} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Permit.sol";
+import {Initializable} from "@openzeppelin-contracts-upgradeable-5.5.0/proxy/utils/Initializable.sol";
 import {IPolygonMigration} from "./interfaces/IPolygonMigration.sol";
-import {
-    StakeManager as IStakeManager, StakeManagerStorage as StakeManagerStatus
-} from "./interfaces/IStakeManager.sol";
+import {StakeManager as IStakeManager, StakeManagerStorage as StakeManagerStatus} from "./interfaces/IStakeManager.sol";
 import {ValidatorShare as IValidatorShare} from "./interfaces/IValidatorShare.sol";
 import {sPOL} from "./sPOL.sol";
 
-contract sPOLController {
+contract sPOLController is Initializable {
     struct ValidatorInfo {
         ValidatorStatus status;
         uint8 depositShare;
@@ -92,10 +91,14 @@ contract sPOLController {
         polygonMigration = IPolygonMigration(_polygonMigration);
         sPOLToken = sPOL(_sPOLToken);
         stakeManager = IStakeManager(_stakeManager);
+        _disableInitializers();
     }
 
-    function initialize(uint8 _rewardFee, address _feeReceiver, uint8 _maxDivergence, address _admin) external {
-        require(rewardFee <= MAX_FEE, "FEE_TOO_LARGE");
+    function initialize(uint16 _rewardFee, address _feeReceiver, uint8 _maxDivergence, address _admin)
+        external
+        initializer
+    {
+        require(_rewardFee <= MAX_FEE, "FEE_TOO_LARGE");
         rewardFee = _rewardFee;
         feeReceiver = _feeReceiver;
         maxDivergence = _maxDivergence;
