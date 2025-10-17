@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.30;
 
-import {ERC20PermitUpgradeable} from
-    "@openzeppelin-contracts-upgradeable-5.5.0/token/ERC20/extensions/ERC20PermitUpgradeable.sol";
+import {
+    ERC20PermitUpgradeable
+} from "@openzeppelin-contracts-upgradeable-5.5.0/token/ERC20/extensions/ERC20PermitUpgradeable.sol";
 
 contract sPOL is ERC20PermitUpgradeable {
     address public immutable sPOLController;
@@ -34,9 +35,7 @@ contract sPOL is ERC20PermitUpgradeable {
         bytes32 _r,
         bytes32 _s
     ) external onlyController {
-        uint256 nonceBefore = nonces(_owner);
         permit(_owner, _spender, _value, _deadline, _v, _r, _s);
-        require(nonces(_owner) == nonceBefore + 1, "Invalid permit");
         _approve(_owner, _spender, 0);
     }
 
