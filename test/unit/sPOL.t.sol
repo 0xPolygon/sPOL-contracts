@@ -207,6 +207,46 @@ contract sPOLTest is Test, Deploy {
         token.consumePermit(userAddr, spender, amount, deadline, v, r, s);
     }
 
+    function test_consumePermit_success() public {
+        uint256 amount = 100 ether;
+        uint256 deadline = block.timestamp + 1 hours;
+        (address userAddr, uint256 userKey) = makeAddrAndKey("permitUser");
+
+        // Check initial state
+        assertEq(token.allowance(userAddr, spender), 0);
+        assertEq(token.nonces(userAddr), 0);
+
+        // Create a valid permit
+        (uint8 v, bytes32 r, bytes32 s) = createPermit(userAddr, spender, amount, deadline, userKey);
+
+        // Note: consumePermit sets allowance to 0 after calling permit, so we don't expect approval to remain
+        // Use the permit
+        vm.prank(address(controller));
+        token.consumePermit(userAddr, spender, amount, deadline, v, r, s);
+
+        // Verify state changes - allowance should be 0
+        assertEq(token.allowance(userAddr, spender), 0);
+        assertEq(token.nonces(userAddr), 1);
+    }
+
+    function test_consumePermit_reuse() public {
+        uint256 amount = 100 ether;
+        uint256 deadline = block.timestamp + 1 hours;
+        (address userAddr, uint256 userKey) = makeAddrAndKey("permitUser");
+
+        // Create a permit with the correct nonce first
+        (uint8 v, bytes32 r, bytes32 s) = createPermit(userAddr, spender, amount, deadline, userKey);
+
+        // Use the permit once to increment the nonce
+        vm.prank(address(controller));
+        token.consumePermit(userAddr, spender, amount, deadline, v, r, s);
+
+        // Now try to use the same permit again (bad nonce)
+        vm.expectRevert(); // Just expect any revert since the exact error depends on what address is recovered
+        vm.prank(address(controller));
+        token.consumePermit(userAddr, spender, amount, deadline, v, r, s);
+    }
+
     // Integration tests
     function test_deployment_validation() public view {
         // Test that deployment was successful and contracts are properly linked
@@ -259,23 +299,15 @@ contract sPOLTest is Test, Deploy {
         view
         returns (uint8, bytes32, bytes32)
     {
+        uint256 nonce = token.nonces(_from);
+        bytes32 PERMIT_TYPEHASH =
+            keccak256("Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)");
+
         bytes32 dataToSign = keccak256(
             abi.encodePacked(
-                hex"1901",
+                "\x19\x01",
                 token.DOMAIN_SEPARATOR(),
-                keccak256(
-                    abi.encode(
-                        // keccak256(
-                        //     "Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)"
-                        // ),
-                        hex"6e71edae12b1b97f4d1f60370fef10105fa2faae0126114a169c64845d6126c9",
-                        _from,
-                        _spender,
-                        _value,
-                        token.nonces(_from),
-                        _deadline
-                    )
-                )
+                keccak256(abi.encode(PERMIT_TYPEHASH, _from, _spender, _value, nonce, _deadline))
             )
         );
         return vm.sign(_pk, dataToSign);
