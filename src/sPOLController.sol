@@ -338,7 +338,7 @@ contract sPOLController is Initializable {
     }
 
     function getMostUnderfundedValidator() external view returns (uint16, uint256) {
-        uint16 selectedValidator;
+        uint16 selectedValidator = activeValidators[0];
         uint256 maxFundsDepositable;
         for (uint256 i = 0; i < activeValidators.length; i++) {
             ValidatorInfo storage validator = validators[activeValidators[i]];
@@ -347,6 +347,9 @@ contract sPOLController is Initializable {
                 maxFundsDepositable = amount;
                 selectedValidator = validator.index;
             }
+        }
+        if (maxFundsDepositable == 0) {
+            maxFundsDepositable = type(uint256).max;
         }
         return (selectedValidator, maxFundsDepositable);
     }
