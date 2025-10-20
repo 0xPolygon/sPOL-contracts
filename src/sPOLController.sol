@@ -378,19 +378,33 @@ contract sPOLController is Initializable {
         return _amount;
     }
 
-    function _validatorMaxDeposit(ValidatorInfo storage _validator) internal view returns (uint256) {
-        return ((totaldPOLBalance * _validator.depositShare) / 100);
-    }
-
-    function _validatorMaxTotalStake(ValidatorInfo storage _validator) internal view returns (uint256) {
-        return ((totaldPOLBalance * (_validator.depositShare + maxDivergence)) / 100);
-    }
-
-    function _validatorMinTotalStake(ValidatorInfo storage _validator) internal view returns (uint256) {
-        if (_validator.depositShare <= maxDivergence) {
+    function _maxDeposit(ValidatorInfo storage _validator) internal view returns (uint256) {
+        uint8 myBigShare = _validator.depositShare + maxDivergence;
+        if (myBigShare >= 100) {
+            return type(uint256).max;
+        }
+        uint256 theOtherShare = totaldPOLBalance - _validator.totalStaked;
+        uint8 restShare = 100 - myBigShare;
+        uint256 myactualMaxSahre = (theOtherShare * myBigShare) / restShare;
+        if (myactualMaxSahre <= _validator.totalStaked) {
             return 0;
         }
-        return ((totaldPOLBalance * (_validator.depositShare - maxDivergence)) / 100);
+        return myactualMaxSahre - _validator.totalStaked;
+    }
+
+    function _maxRedeem(ValidatorInfo storage _validator) internal view returns (uint256) {
+        if (_validator.depositShare <= maxDivergence) {
+            return _validator.totalStaked;
+        }
+        uint8 mySmallShare = _validator.depositShare - maxDivergence;
+
+        uint256 theOtherShare = totaldPOLBalance - _validator.totalStaked;
+        uint8 restShare = 100 - mySmallShare;
+        uint256 myactualMinSahre = (theOtherShare * mySmallShare) / restShare;
+        if (myactualMinSahre >= _validator.totalStaked) {
+            return 0;
+        }
+        return _validator.totalStaked - myactualMinSahre;
     }
 
     // positive to check how much can be added, negative to check how much can be removed
@@ -399,21 +413,10 @@ contract sPOLController is Initializable {
         view
         returns (uint256)
     {
-        if (activeValidators.length == 1) {
-            return type(uint256).max;
-        }
         if (_positive) {
-            uint256 maxTotalStake = _validatorMaxTotalStake(_validator);
-            if (_validator.totalStaked >= maxTotalStake) {
-                return 0;
-            }
-            return maxTotalStake - _validator.totalStaked;
+            return _maxDeposit(_validator);
         } else {
-            uint256 minTotalStake = _validatorMinTotalStake(_validator);
-            if (_validator.totalStaked < minTotalStake) {
-                return 0;
-            }
-            return _validator.totalStaked - minTotalStake;
+            return _maxRedeem(_validator);
         }
     }
 
@@ -466,7 +469,7 @@ contract sPOLController is Initializable {
     function _sellSPOLSingle(uint256 _amount, uint16 _validator, address _user) internal returns (uint256) {
         ValidatorInfo storage validator = validators[_validator];
         require(validator.status == ValidatorStatus.ACTIVE, "VALIDATOR_NOT_ACTIVE");
-        require(_amount <= validator.totalStaked - _validatorMinTotalStake(validator), "VALIDATOR_UNDERFUNDED");
+        require(_amount <= _maxRedeem(validator), "VALIDATOR_UNDERFUNDED");
         _takeSPOL(_amount, _user);
 
         uint256 dPOLAmount = _amount * actualExchangeRatePOLsPOL();
@@ -675,7 +678,6 @@ contract sPOLController is Initializable {
                 validators[activeValidators[(lastSuccessfulBuyValidator + i) % activeValidators.length]];
 
             uint256 maxAmount = _validatorMaxTotalStakeDistance(validator, _buy);
-
             if (_amount <= maxAmount) {
                 selectedValidators[0] = validator.index;
                 amounts[0] = _amount;
