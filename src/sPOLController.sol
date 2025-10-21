@@ -7,6 +7,7 @@ import {IPolygonMigration} from "./interfaces/IPolygonMigration.sol";
 import {StakeManager as IStakeManager, StakeManagerStorage as StakeManagerStatus} from "./interfaces/IStakeManager.sol";
 import {ValidatorShare as IValidatorShare} from "./interfaces/IValidatorShare.sol";
 import {sPOL} from "./sPOL.sol";
+import "forge-std/console.sol";
 
 contract sPOLController is Initializable {
     struct ValidatorInfo {
@@ -227,6 +228,7 @@ contract sPOLController is Initializable {
         }
     }
 
+    // buggy, doesn't update totaldPOLBalance
     function reloadAllActiveValidatorInfo() external onlyAdmin {
         for (uint256 i = 0; i < activeValidators.length; i++) {
             ValidatorInfo storage validator = validators[activeValidators[i]];
@@ -703,13 +705,35 @@ contract sPOLController is Initializable {
             }
         }
         // in this case not enough theoretical capacity, so we just distribute to all equally
-        uint256 perValidator = _amount / activeValidators.length;
-        uint256 remainder = _amount % activeValidators.length;
-        for (uint256 i = 0; i < activeValidators.length; i++) {
-            selectedValidators[i] = validators[activeValidators[i]].index;
-            amounts[i] = perValidator;
+        // for buy this is a fine approximation, for sell it can be really bad, so extra logic
+        if (_buy) {
+            uint256 perValidator = _amount / activeValidators.length;
+            uint256 remainder = _amount % activeValidators.length;
+            for (uint256 i = 0; i < activeValidators.length; i++) {
+                selectedValidators[i] = validators[activeValidators[i]].index;
+                amounts[i] = perValidator;
+            }
+            amounts[0] += remainder;
+        } else {
+            uint256 remaining = _amount;
+            for (uint256 i = 0; i < activeValidators.length; i++) {
+                if (remaining > validators[activeValidators[i]].totalStaked) {
+                    amounts[i] = validators[activeValidators[i]].totalStaked;
+                    remaining -= validators[activeValidators[i]].totalStaked;
+                } else {
+                    amounts[i] = remaining;
+                    remaining = 0;
+                    assembly {
+                        mstore(selectedValidators, add(i, 1))
+                        mstore(amounts, add(i, 1))
+                    }
+                    selectedValidators[i] = validators[activeValidators[i]].index;
+                    break;
+                }
+                selectedValidators[i] = validators[activeValidators[i]].index;
+            }
+            require(remaining == 0, "Not enough stake");
         }
-        amounts[0] += remainder;
         return (selectedValidators, amounts);
     }
 
