@@ -228,12 +228,16 @@ contract sPOLController is Initializable {
         }
     }
 
-    // buggy, doesn't update totaldPOLBalance
     function reloadAllActiveValidatorInfo() external onlyAdmin {
+        uint256 amountToReduce;
+        uint256 amountToAdd;
         for (uint256 i = 0; i < activeValidators.length; i++) {
             ValidatorInfo storage validator = validators[activeValidators[i]];
+            amountToReduce += validator.totalStaked;
             validator.totalStaked = validator.validatorContract.balanceOf(address(this));
+            amountToAdd += validator.totalStaked;
         }
+        totaldPOLBalance = totaldPOLBalance - amountToReduce + amountToAdd;
     }
 
     // very expensive, includes frozen validators
