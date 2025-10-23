@@ -239,7 +239,7 @@ contract sPOLController is Initializable {
     function reloadAllValidatorInfo() external onlyAdmin {
         uint256 totalDPOL;
         for (uint256 i = 0; i < validatorList.length; i++) {
-            ValidatorInfo storage validator = validators[activeValidators[i]];
+            ValidatorInfo storage validator = validators[validatorList[i]];
             validator.totalStaked = validator.validatorContract.balanceOf(address(this));
             totalDPOL += validator.totalStaked;
         }
