@@ -633,15 +633,20 @@ contract sPOLController is Initializable {
     ///////////////////////////////
 
     function changeFeeReceiver(address newFeeReceiver) external onlyAdmin {
+        require(newFeeReceiver != address(0), "ZERO_ADDRESS");
+        takeFee();
         feeReceiver = newFeeReceiver;
     }
 
-    function changeRewardFee(uint8 newFee) external onlyAdmin {
+    function changeRewardFee(uint16 newFee) external onlyAdmin {
         require(newFee <= MAX_FEE, "FEE_TOO_LARGE");
         rewardFee = newFee;
     }
 
-    function takeFee() external onlyAdmin {
+    function takeFee() public onlyAdmin {
+        if (feedPOLBalance == 0) {
+            return;
+        }
         uint256 feeInsPOL = feedPOLBalance * actualExchangeRatePOLsPOL();
         feedPOLBalance = 0;
         sPOLToken.mint(feeReceiver, feeInsPOL);
