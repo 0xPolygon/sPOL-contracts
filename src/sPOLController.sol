@@ -324,7 +324,7 @@ contract sPOLController is Initializable {
         _takePOL(_amount, _user);
         uint256 totalShares;
         for (uint256 i = 0; i < amount.length; i++) {
-            totalShares += _buySharesFromValidator(validator[i], amount[i]);
+            totalShares += _buySharesFromValidator(validators[validator[i]], amount[i]);
         }
         lastSuccessfulBuyValidator = validator[validator.length - 1];
         require(totalShares == _amount, "BUY_SHARES_MISMATCH");
@@ -358,10 +358,6 @@ contract sPOLController is Initializable {
             maxFundsDepositable = type(uint256).max;
         }
         return (selectedValidator, maxFundsDepositable);
-    }
-
-    function _buySharesFromValidator(uint16 _validator, uint256 _amount) internal returns (uint256) {
-        return _buySharesFromValidator(validators[_validator], _amount);
     }
 
     function _buySharesFromValidator(ValidatorInfo storage _validator, uint256 _amount) internal returns (uint256) {
@@ -751,7 +747,7 @@ contract sPOLController is Initializable {
         uint256 polBalance = polToken.balanceOf(address(this));
         if (polBalance > 0) {
             if (_receiver == address(0)) {
-                _buySharesFromValidator(_validator, polBalance);
+                _buySharesFromValidator(validators[_validator], polBalance);
             } else {
                 uint256 mintedSPOL = buySPOL(polBalance, _validator);
                 sPOLToken.transfer(_receiver, mintedSPOL);
