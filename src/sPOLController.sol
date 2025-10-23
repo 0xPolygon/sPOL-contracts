@@ -33,9 +33,6 @@ contract sPOLController is Initializable {
     IStakeManager public immutable stakeManager;
     sPOL public immutable sPOLToken;
 
-    // in percentage points
-    uint8 public maxDivergence;
-
     mapping(uint16 => ValidatorInfo) public validators;
     uint16[] public validatorList;
     uint16[] public activeValidators;
@@ -43,9 +40,9 @@ contract sPOLController is Initializable {
     uint16 public lastSuccessfulSellValidator;
 
     uint256 public totaldPOLBalance;
-    // two functions add rewards to dPOL balance (here take a fee, as in add to accumulatedFees, but also add to totaldPOLBalance)
-    // or maybe a new fPOL balance as dPOL after fees, and calc dPOL balance, saves some gas
-    // and a add stake to dPOL balance (no fee)
+
+    // in percentage points
+    uint8 public maxDivergence;
 
     uint16 public rewardFee;
     // In per mill, so 100 = 10%
@@ -63,8 +60,6 @@ contract sPOLController is Initializable {
     mapping(uint256 => NonceDetails) public withdrawNonceDetails;
 
     uint256 public globalWithdrawNonce;
-
-    uint256 public maxRedeem;
 
     event ValidatorAdded(uint16 validatorId);
     event ValidatorRemoved(uint16 validatorId);
@@ -372,10 +367,6 @@ contract sPOLController is Initializable {
         require(_validator.validatorContract.buyVoucher(_amount, _amount) == _amount, "BUY_FAILED");
         _adddPOLBalance(_amount);
         validators[_validator.index].totalStaked += _amount;
-
-        if (maxRedeem < validators[_validator.index].totalStaked) {
-            maxRedeem = validators[_validator.index].totalStaked;
-        }
 
         return _amount;
     }

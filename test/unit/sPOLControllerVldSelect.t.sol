@@ -289,7 +289,7 @@ contract sPOLControllerVLDSelectTest is Test, sPOLController {
         addValidators(valIds, shares, stakes);
 
         uint256 cutOffFirstValidator = 7000 - 222;
-        uint256 cutOffSecondValidator = 0;
+        // uint256 cutOffSecondValidator = 0;
 
         if (_amountToSell > 9000) {
             vm.expectRevert("Not enough stake");
