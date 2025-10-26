@@ -140,7 +140,7 @@ contract sPOLControllerTest is Test, Deploy {
         vm.store(address(controller), bytes32(uint256(5)), bytes32(dPOLBalance));
         vm.mockCall(address(sPOLToken), abi.encodeWithSelector(ERC20.totalSupply.selector), abi.encode(totalsPOLSupply));
 
-        uint256 expectedSPOLMint = feePOLBalance * ((dPOLBalance - feePOLBalance) / totalsPOLSupply);
+        uint256 expectedSPOLMint = feePOLBalance * totalsPOLSupply / (dPOLBalance - feePOLBalance);
 
         vm.expectEmit(true, true, true, true, address(sPOLToken));
         emit IERC20.Transfer(address(0), testFeeReceiver, expectedSPOLMint);
