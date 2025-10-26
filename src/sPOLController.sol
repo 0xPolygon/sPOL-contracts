@@ -250,17 +250,24 @@ contract sPOLController is Initializable {
     ///  General Exchange       ///
     ///////////////////////////////
 
-    function actualExchangeRatePOLsPOL() public view returns (uint256) {
-        return (totaldPOLBalance - feedPOLBalance) / totalsPOLBalance();
+    function convertPOLtoSPOL(uint256 _amountPOL) public view returns (uint256) {
+        if (_amountPOL == 0) {
+            return 0;
+        }
+        if (totalsPOLBalance() == 0) {
+            return _amountPOL;
+        }
+        return _amountPOL * totalsPOLBalance() / (totaldPOLBalance - feedPOLBalance);
     }
 
-    function virtualExchangeRatePOLsPOL() external view returns (uint256) {
-        uint256 totalRewards;
-        for (uint256 i = 0; i < activeValidators.length; i++) {
-            ValidatorInfo storage validator = validators[activeValidators[i]];
-            totalRewards = validator.validatorContract.getLiquidRewards(address(this));
+    function convertSPOLtoPOL(uint256 _amountSPOL) public view returns (uint256) {
+        if (_amountSPOL == 0) {
+            return 0;
         }
-        return (totaldPOLBalance + totalRewards - feedPOLBalance) / totalsPOLBalance();
+        if (totalsPOLBalance() == 0) {
+            return _amountSPOL;
+        }
+        return _amountSPOL * (totaldPOLBalance - feedPOLBalance) / totalsPOLBalance();
     }
 
     function totalsPOLBalance() public view returns (uint256) {
@@ -331,8 +338,7 @@ contract sPOLController is Initializable {
     }
 
     function _mintSPOL(uint256 _amount, address _user) internal returns (uint256) {
-        uint256 rate = actualExchangeRatePOLsPOL();
-        uint256 toMint = _amount * rate;
+        uint256 toMint = convertPOLtoSPOL(_amount);
         sPOLToken.mint(_user, toMint);
         emit sPOLMinted(_user, _amount, toMint);
         return toMint;
@@ -465,7 +471,7 @@ contract sPOLController is Initializable {
         require(_amount <= _maxRedeem(validator), "VALIDATOR_UNDERFUNDED");
         _takeSPOL(_amount, _user);
 
-        uint256 dPOLAmount = _amount * actualExchangeRatePOLsPOL();
+        uint256 dPOLAmount = convertSPOLtoPOL(_amount);
         uint256 userNonce = _sellSharesFromValidator(validator, dPOLAmount);
 
         globalWithdrawNonce++;
@@ -494,7 +500,7 @@ contract sPOLController is Initializable {
 
     function _sellSPOLMulti(uint256 _amount, address _user) internal returns (uint256[] memory) {
         _takeSPOL(_amount, _user);
-        uint256 dPOLAmount = _amount * actualExchangeRatePOLsPOL();
+        uint256 dPOLAmount = convertSPOLtoPOL(_amount);
         (uint16[] memory validator, uint256[] memory amount) = _selectValidatorToSell(dPOLAmount);
         uint256[] memory nonces = new uint256[](validator.length);
         for (uint256 i = 0; i < validator.length; i++) {
@@ -503,10 +509,10 @@ contract sPOLController is Initializable {
             userNonces[_user].push(globalWithdrawNonce);
 
             NonceDetails storage details = withdrawNonceDetails[globalWithdrawNonce];
-            details.amount = uint128(dPOLAmount);
+            details.amount = uint128(amount[i]);
             details.validatorId = validator[i];
             details.validatorNonce = uint96(userNonce);
-            emit sPOLBurned(_user, amount[i] / actualExchangeRatePOLsPOL(), amount[i], globalWithdrawNonce);
+            emit sPOLBurned(_user, convertPOLtoSPOL(amount[i]), amount[i], globalWithdrawNonce);
         }
         return nonces;
     }
@@ -647,7 +653,7 @@ contract sPOLController is Initializable {
         if (feedPOLBalance == 0) {
             return;
         }
-        uint256 feeInsPOL = feedPOLBalance * actualExchangeRatePOLsPOL();
+        uint256 feeInsPOL = convertPOLtoSPOL(feedPOLBalance);
         feedPOLBalance = 0;
         sPOLToken.mint(feeReceiver, feeInsPOL);
     }
