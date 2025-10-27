@@ -250,6 +250,7 @@ contract sPOLController is Initializable {
     ///  General Exchange       ///
     ///////////////////////////////
 
+    // limit by maxDeposit?
     function convertPOLtoSPOL(uint256 _amountPOL) public view returns (uint256) {
         if (_amountPOL == 0) {
             return 0;
@@ -260,6 +261,7 @@ contract sPOLController is Initializable {
         return _amountPOL * totalsPOLBalance() / (totaldPOLBalance - feedPOLBalance);
     }
 
+    // limit by maxRedeem?
     function convertSPOLtoPOL(uint256 _amountSPOL) public view returns (uint256) {
         if (_amountSPOL == 0) {
             return 0;
@@ -362,19 +364,12 @@ contract sPOLController is Initializable {
     }
 
     function _buySharesFromValidator(ValidatorInfo storage _validator, uint256 _amount) internal returns (uint256) {
-        // use restake and buyVoucher in one
-        (uint256 amountRestaked, uint256 rewards) = _validator.validatorContract.restakePOL();
-        if (amountRestaked < rewards) {
-            // dropped some rewards
-        }
-        _adddPOLBalanceFee(amountRestaked);
-        validators[_validator.index].totalStaked += amountRestaked;
-
-        require(_validator.validatorContract.buyVoucher(_amount, _amount) == _amount, "BUY_FAILED");
-        _adddPOLBalance(_amount);
-        validators[_validator.index].totalStaked += _amount;
-
-        return _amount;
+        (uint256 amountDeposited, uint256 liquidReward) = _validator.validatorContract.restakeAndStakePOL(_amount);
+        require(amountDeposited == _amount, "INCORRECT_EXCHANGE_RATE");
+        _adddPOLBalanceFee(liquidReward);
+        _adddPOLBalance(amountDeposited);
+        validators[_validator.index].totalStaked += amountDeposited + liquidReward;
+        return amountDeposited;
     }
 
     function _maxDeposit(ValidatorInfo storage _validator) internal view returns (uint256) {
@@ -504,7 +499,7 @@ contract sPOLController is Initializable {
         (uint16[] memory validator, uint256[] memory amount) = _selectValidatorToSell(dPOLAmount);
         uint256[] memory nonces = new uint256[](validator.length);
         for (uint256 i = 0; i < validator.length; i++) {
-            uint256 userNonce = _sellSharesFromValidator(validator[i], amount[i]);
+            uint256 userNonce = _sellSharesFromValidator(validators[validator[i]], amount[i]);
             globalWithdrawNonce++;
             userNonces[_user].push(globalWithdrawNonce);
 
@@ -517,24 +512,15 @@ contract sPOLController is Initializable {
         return nonces;
     }
 
-    function _sellSharesFromValidator(uint16 _validator, uint256 _amount) internal returns (uint256) {
-        return _sellSharesFromValidator(validators[_validator], _amount);
-    }
-
     function _sellSharesFromValidator(ValidatorInfo storage _validator, uint256 _amount) internal returns (uint256) {
-        // use withdraw and sellVoucher in one
-        (uint256 amountRestaked, uint256 rewards) = _validator.validatorContract.restakePOL();
-        if (amountRestaked < rewards) {
-            // dropped some rewards
-        }
-
-        _validator.validatorContract.sellVoucher_newPOL(_amount, _amount);
-        uint256 userNonce = _validator.validatorContract.unbondNonces(address(this));
-
+        (uint256 unstaked, uint256 liquidRewards) = _validator.validatorContract.restakeAndUnstakePOL(_amount);
+        require(unstaked == _amount, "INCORRECT_EXCHANGE_RATE");
+        _adddPOLBalanceFee(liquidRewards);
+        _removedPOLBalance(_amount);
         validators[_validator.index].totalStaked -= _amount;
-        validators[_validator.index].totalStaked += amountRestaked;
-        totaldPOLBalance -= _amount;
+        validators[_validator.index].totalStaked += liquidRewards;
 
+        uint256 userNonce = _validator.validatorContract.unbondNonces(address(this));
         return userNonce;
     }
 
@@ -666,6 +652,10 @@ contract sPOLController is Initializable {
 
     function _adddPOLBalance(uint256 _amount) internal {
         totaldPOLBalance += _amount;
+    }
+
+    function _removedPOLBalance(uint256 _amount) internal {
+        totaldPOLBalance -= _amount;
     }
 
     ///////////////////////////////

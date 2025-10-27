@@ -78,4 +78,6 @@ interface ValidatorShare {
     function withdrawRewards() external;
     function withdrawRewardsPOL() external;
     function withdrawShares() external view returns (uint256);
+    function restakeAndStakePOL(uint256 _amount) external returns (uint256, uint256);
+    function restakeAndUnstakePOL(uint256 _amount) external returns (uint256, uint256);
 }
