@@ -15,6 +15,9 @@ contract sPOLMessenger is BaseRootTunnel, MsgCoder {
     IRootChainManager public immutable rootChainManager;
     IsPOLController public immutable sPOLController;
 
+    mapping(uint256 => uint256[]) public backfillNonces;
+    mapping(uint256 => bool) public completedBackfill;
+
     constructor(address _polToken, address _sPOLToken, address _sPOLController, address _rootChainManager)
         BaseRootTunnel(msg.sender)
     {
@@ -42,14 +45,33 @@ contract sPOLMessenger is BaseRootTunnel, MsgCoder {
 
     function handleMigration(bytes memory _msg) internal {
         (uint256 _polAmount, uint256 _mintedSPOL) = decodeL2MigrationRequestMessage(_msg);
+        require(polToken.balanceOf(address(this)) >= _polAmount, "Not enough POL in messenger");
+
         sPOLController.completeMigration(_polAmount, _mintedSPOL);
         rootChainManager.depositFor(child, address(sPOLToken), abi.encodePacked(_mintedSPOL));
         // maybe make it so that if the target of the deposit is the child it doesn't need a msg and just burns directly
-        _sendMessageToChild(abi.encode(_mintedSPOL));
+        _sendMessageToChild(abi.encode(MsgType.L1_MIGRATION_RESPONSE, encodeL1MigrationResponseMessage(_mintedSPOL)));
     }
 
     function handleBackfill(bytes memory _msg) internal {
         (uint256 _polAmount, uint256 _sPOLAmount, uint256 _backFillCycle) = decodeL2BackfillRequestMessage(_msg);
+        require(sPOLToken.balanceOf(address(this)) >= _sPOLAmount, "Not enough sPOL in messenger");
+        uint256[] memory nonces = sPOLController.startBackfillSell(_polAmount, _sPOLAmount);
+        backfillNonces[_backFillCycle] = nonces;
+    }
+
+    function completeBackfill(uint256 _backFillCycle) external {
+        require(!completedBackfill[_backFillCycle], "Backfill already completed");
+        uint256 totalWithdraw;
+        for (uint256 i = 0; i < backfillNonces[_backFillCycle].length; i++) {
+            sPOLController.withdrawPOL(backfillNonces[_backFillCycle][i]);
+            // add to total withdraw
+        }
+        rootChainManager.depositFor(child, address(polToken), abi.encodePacked(totalWithdraw));
+        _sendMessageToChild(
+            abi.encode(MsgType.L1_BACKFILL_RESPONSE, encodeL1BackfillResponseMessage(totalWithdraw, _backFillCycle))
+        );
+        completedBackfill[_backFillCycle] = true;
     }
 
     function updateL2ExchangeRate() external {
