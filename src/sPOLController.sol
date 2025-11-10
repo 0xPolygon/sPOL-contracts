@@ -423,11 +423,11 @@ contract sPOLController is Initializable {
     ///  sPOL -> POL Exchange   ///
     ///////////////////////////////
 
-    function initSellSPOL(uint256 _amount) external returns (uint256[] memory) {
+    function sellSPOL(uint256 _amount) external returns (uint256[] memory) {
         return _sellSPOLMulti(_amount, msg.sender);
     }
 
-    function initSellSPOLPermit(uint256 _amount, address _user, uint256 _deadline, uint8 _v, bytes32 _r, bytes32 _s)
+    function sellSPOLPermit(uint256 _amount, address _user, uint256 _deadline, uint8 _v, bytes32 _r, bytes32 _s)
         external
         returns (uint256[] memory)
     {
@@ -745,5 +745,10 @@ contract sPOLController is Initializable {
                 sPOLToken.transfer(_receiver, mintedSPOL);
             }
         }
+    }
+
+    function completeMigration(uint256 _amountPOL, uint256 _amountSPOL) external onlyAdmin {
+        require(convertPOLtoSPOL(_amountPOL) <= _amountSPOL, "BAD_EXCHANGE_RATE");
+        _takePOL(_amountPOL, msg.sender);
     }
 }
