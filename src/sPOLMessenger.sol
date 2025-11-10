@@ -18,9 +18,15 @@ contract sPOLMessenger is BaseRootTunnel, MsgCoder {
     mapping(uint256 => uint256[]) public backfillNonces;
     mapping(uint256 => bool) public completedBackfill;
 
-    constructor(address _polToken, address _sPOLToken, address _sPOLController, address _rootChainManager)
-        BaseRootTunnel(msg.sender)
-    {
+    constructor(
+        address _polToken,
+        address _sPOLToken,
+        address _sPOLController,
+        address _rootChainManager,
+        address _stateSender,
+        address _checkpointManager,
+        address _childTunnel
+    ) BaseRootTunnel(_stateSender, _checkpointManager, _childTunnel) {
         polToken = IERC20(_polToken);
         sPOLToken = IERC20(_sPOLToken);
         sPOLController = IsPOLController(_sPOLController);

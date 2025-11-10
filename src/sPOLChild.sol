@@ -55,7 +55,7 @@ contract sPOLChild is BaseChildTunnel, ERC20PermitUpgradeable, MsgCoder {
         _;
     }
 
-    constructor(address _admin) BaseChildTunnel(_admin) {
+    constructor(address _admin, address _stateSyncer) BaseChildTunnel(_stateSyncer) {
         admin = _admin;
     }
 

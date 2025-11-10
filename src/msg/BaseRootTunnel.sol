@@ -22,54 +22,18 @@ abstract contract BaseRootTunnel {
     bytes32 public constant SEND_MESSAGE_EVENT_SIG = 0x8c5261668696ce22758910d05bab8f186d6eb247ceac2af2e82c7dc17669b036;
 
     // state sender contract
-    IStateSender public stateSender;
+    IStateSender public immutable stateSender;
     // root chain manager
-    ICheckpointManager public checkpointManager;
+    ICheckpointManager public immutable checkpointManager;
     // child tunnel contract which receives and sends messages
-    address public childTunnel;
+    address public immutable childTunnel;
     // storage to avoid duplicate exits
     mapping(bytes32 => bool) public processedExits;
 
-    address admin;
-
-    modifier onlyAdmin() {
-        require(msg.sender == admin, "RootTunnel: ONLY_ADMIN_ALLOWED");
-        _;
-    }
-
-    constructor(address _admin) {
-        admin = _admin;
-    }
-
-    /**
-     * @notice Set the state sender, callable only by admins
-     * @dev This should be the state sender from plasma contracts
-     * It is used to send bytes from root to child chain
-     * @param newStateSender address of state sender contract
-     */
-    function setStateSender(address newStateSender) external onlyAdmin {
-        require(newStateSender != address(0), "RootTunnel: BAD_NEW_STATE_SENDER");
-        stateSender = IStateSender(newStateSender);
-    }
-
-    /**
-     * @notice Set the checkpoint manager, callable only by admins
-     * @dev This should be the plasma contract responsible for keeping track of checkpoints
-     * @param newCheckpointManager address of checkpoint manager contract
-     */
-    function setCheckpointManager(address newCheckpointManager) external onlyAdmin {
-        require(newCheckpointManager != address(0), "RootTunnel: BAD_NEW_CHECKPOINT_MANAGER");
-        checkpointManager = ICheckpointManager(newCheckpointManager);
-    }
-
-    /**
-     * @notice Set the child chain tunnel, callable only by admins
-     * @dev This should be the contract responsible to receive data bytes on child chain
-     * @param newChildTunnel address of child tunnel contract
-     */
-    function setChildTunnel(address newChildTunnel) external onlyAdmin {
-        require(newChildTunnel != address(0x0), "RootTunnel: INVALID_CHILD_TUNNEL_ADDRESS");
-        childTunnel = newChildTunnel;
+    constructor(address _stateSender, address _checkpointManager, address _childTunnel) {
+        stateSender = IStateSender(_stateSender);
+        checkpointManager = ICheckpointManager(_checkpointManager);
+        childTunnel = _childTunnel;
     }
 
     /**

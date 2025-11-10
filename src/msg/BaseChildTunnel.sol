@@ -5,12 +5,10 @@ pragma solidity ^0.8.30;
  * @notice Mock child tunnel contract to receive and send message from L2
  */
 abstract contract BaseChildTunnel {
-    bytes32 public constant STATE_SYNCER_ROLE = keccak256("STATE_SYNCER_ROLE");
-
     // MessageTunnel on L1 will get data from this event
     event MessageSent(bytes message);
 
-    address public stateSyncer;
+    address public immutable stateSyncer;
 
     modifier onlyStateSyncer() {
         require(msg.sender == stateSyncer, "ChildTunnel: ONLY_STATE_SYNCER_ALLOWED");
