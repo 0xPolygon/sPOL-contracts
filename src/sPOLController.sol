@@ -69,6 +69,8 @@ contract sPOLController is Initializable {
     event sPOLMinted(address user, uint256 amountPOL, uint256 amountSPOL);
     event sPOLBurned(address user, uint256 amountSPOL, uint256 amountPOL, uint256 nonce);
     event POLWithdrawn(address user, uint256 amountPOL, uint256 nonce);
+    event sPOLMigrated(address user, uint256 amountPOL, uint256 amountSPOL);
+    event sPOLBackfilled(address user, uint256 amountSPOL, uint256 amountPOL);
 
     modifier onlyAdmin() {
         require(msg.sender == admin, "ONLY_ADMIN");
@@ -749,6 +751,33 @@ contract sPOLController is Initializable {
 
     function completeMigration(uint256 _amountPOL, uint256 _amountSPOL) external onlyAdmin {
         require(convertPOLtoSPOL(_amountPOL) <= _amountSPOL, "BAD_EXCHANGE_RATE");
+        (uint16[] memory validator, uint256[] memory amount) = _selectValidatorToBuy(_amountPOL);
         _takePOL(_amountPOL, msg.sender);
+        uint256 totalShares;
+        for (uint256 i = 0; i < amount.length; i++) {
+            totalShares += _buySharesFromValidator(validators[validator[i]], amount[i]);
+        }
+        lastSuccessfulBuyValidator = validator[validator.length - 1];
+        require(totalShares == _amountPOL, "BUY_SHARES_MISMATCH");
+        sPOLToken.mint(msg.sender, _amountSPOL);
+        emit sPOLMigrated(msg.sender, _amountPOL, _amountSPOL);
+    }
+
+    function startBackfillSell(uint256 _amountSPOL, uint256 _amountPOL) external onlyAdmin returns (uint256[] memory) {
+        require(convertSPOLtoPOL(_amountSPOL) >= _amountPOL, "BAD_EXCHANGE_RATE");
+        _takeSPOL(_amountSPOL, msg.sender);
+        (uint16[] memory validator, uint256[] memory amount) = _selectValidatorToSell(_amountPOL);
+        uint256[] memory nonces = new uint256[](validator.length);
+        for (uint256 i = 0; i < validator.length; i++) {
+            uint256 userNonce = _sellSharesFromValidator(validators[validator[i]], amount[i]);
+            globalWithdrawNonce++;
+            userNonces[msg.sender].push(globalWithdrawNonce);
+            NonceDetails storage details = withdrawNonceDetails[globalWithdrawNonce];
+            details.amount = uint128(amount[i]);
+            details.validatorId = validator[i];
+            details.validatorNonce = uint96(userNonce);
+        }
+        emit sPOLBackfilled(msg.sender, _amountSPOL, _amountPOL);
+        return nonces;
     }
 }
