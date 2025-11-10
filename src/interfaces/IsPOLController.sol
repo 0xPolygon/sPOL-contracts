@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: UNLICENSED
-pragma solidity ^0.8.4;
+pragma solidity ^0.8.30;
 
 interface sPOLController {
     // Shows how much one sPOL is worth in POL

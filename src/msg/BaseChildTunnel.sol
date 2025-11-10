@@ -2,7 +2,7 @@
 pragma solidity ^0.8.30;
 
 /**
- * @notice Mock child tunnel contract to receive and send message from L2
+ * @notice Abstract child tunnel contract to receive and send message from L2
  */
 abstract contract BaseChildTunnel {
     // MessageTunnel on L1 will get data from this event
@@ -20,8 +20,8 @@ abstract contract BaseChildTunnel {
     }
 
     /**
-     * @notice Receive state sync from matic contracts
-     * @dev This method will be called by Matic chain internally.
+     * @notice Receive state sync from polygon contracts
+     * @dev This method will be called by polygon chain internally.
      * This is executed without transaction using a system call.
      */
     function onStateReceive(uint256, bytes calldata message) external onlyStateSyncer {

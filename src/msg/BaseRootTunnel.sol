@@ -144,7 +144,6 @@ abstract contract BaseRootTunnel {
      * @notice Process message received from Child Tunnel
      * @dev function needs to be implemented to handle message as per requirement
      * This is called by the receiveMessage() function.
-     * Since it is called via a system call, any event will not be emitted during its execution.
      * @param message bytes message that was sent from child tunnel
      */
     function _processMessageFromChild(bytes memory message) internal virtual;

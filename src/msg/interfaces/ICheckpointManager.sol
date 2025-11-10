@@ -12,7 +12,7 @@ contract ICheckpointManager {
 
     /**
      * @notice mapping of checkpoint header numbers to block details
-     * @dev These checkpoints are submitted by plasma contracts
+     * @dev These checkpoints are submitted by validators on root chain
      */
     mapping(uint256 => HeaderBlock) public headerBlocks;
 }
