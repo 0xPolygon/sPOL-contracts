@@ -59,16 +59,19 @@ contract sPOLChild is Initializable, PausableUpgradeable, BaseChildTunnel, ERC20
         _;
     }
 
-    constructor(address _admin, address _stateSyncer) BaseChildTunnel(_stateSyncer) {
-        admin = _admin;
+    constructor(address _stateSyncer) BaseChildTunnel(_stateSyncer) {
         _disableInitializers();
     }
 
-    function initialize() external initializer {
+    function initialize(address _admin) external initializer {
         __Pausable_init();
         __ERC20_init("Staked POL", "sPOL");
         __ERC20Permit_init("Staked POL");
         maxExchangeRateUpdateDelay = 30 days;
+        // we get about 0,25% rewards in a month, so if we pause after a month of no update
+        // 0,3% should be safe so sPOL doesn't become cheaper than L1
+        safetyFee = 30; // 0.3%
+        admin = _admin;
     }
 
     //   function _sendMessageToRoot(bytes memory message)
