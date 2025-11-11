@@ -17,37 +17,45 @@ contract sPOLChild is
     Initializable,
     PausableUpgradeable,
     AccessManagedUpgradeable,
-    BaseChildTunnel,
     ERC20PermitUpgradeable,
+    BaseChildTunnel,
     MsgCoder
 {
     // exchange info
     uint256 public l1SPOLBalance;
     uint256 public l1DPOLBalance;
+
+    // Safety parameters for the delayed exchange rate from L1
     // fee in 1/100 of a percent
     uint16 public safetyFee;
     uint16 public constant SAFETY_FEE_DENOMINATOR = 10_000;
+    uint256 public maxExchangeRateUpdateDelay;
+    uint256 public lastExchangeRateUpdate;
 
     // local info
+    // This should always be equal to reservedWithdrawPOLBalance + actualQuickRedeemReserve
     uint256 public polBalance;
     // Slow redeem
+    // These two together should always be equal to the sum of outstanding POL in userOutstandingPOL
     uint256 public missingWithdrawPOLBalance;
     uint256 public reservedWithdrawPOLBalance;
 
     // Redeem reserve
     uint256 public targetQuickRedeemReserve;
+    // This should be equal to polBalance - reservedWithdrawPOLBalance
     uint256 public actualQuickRedeemReserve;
+    // Marker to not overfill the quick redeem reserve
     uint256 public pendingQuickRedeemReserveRefill;
 
+    // sPOL originating on L2 needs to be locked in the bridge from L1 so it becomes "real"
     uint256 public locallyMintedSPOL;
-    uint256 public locallyBurnedSPOL;
-    uint256 public sPOLtoBeBurned;
+    // sPOL that was burned on L2 needs to be released from bridge on L1 and also burned there
+    uint256 public locallyToBeBurnedSPOL;
 
+    // Migration and backfill tracking
     uint256 public backFillCycle;
     mapping(uint256 => bool) public completedBackfills;
     bool public onGoingMigration;
-    uint256 public maxExchangeRateUpdateDelay;
-    uint256 public lastExchangeRateUpdate;
 
     struct UserOutstanding {
         uint256 outstandingPOL;
@@ -56,7 +64,7 @@ contract sPOLChild is
     }
 
     mapping(address => UserOutstanding[]) public userOutstandingPOL;
-    uint256 public globalNonce;
+    uint256 public globalWithdrawNonce;
 
     event sPOLMinted(address user, uint256 amountPOL, uint256 amountSPOL);
     event sPOLBurned(address user, uint256 amountSPOL, uint256 amountPOL, uint256 nonce);
@@ -77,8 +85,6 @@ contract sPOLChild is
         safetyFee = 30; // 0.3%
     }
 
-    //   function _sendMessageToRoot(bytes memory message)
-
     function _processMessageFromRoot(bytes memory message) internal virtual override {
         (MsgType msgType, bytes memory actualMessage) = abi.decode(message, (MsgType, bytes));
         if (msgType == MsgType.EXCHANGE_UPDATE) {
@@ -88,13 +94,14 @@ contract sPOLChild is
         } else if (msgType == MsgType.L1_BACKFILL_RESPONSE) {
             handleBackfillResponse(actualMessage);
         } else {
+            // maybe don't revert here to avoid failedStateSync issues
             revert("Invalid message type");
         }
     }
 
     function handleExchangeRateUpdate(bytes memory _msg) internal {
-        uint256 currentConversion = convertSPOLToPOL(1e18);
         (uint256 updatedl1SPOLBalance, uint256 updatedl1DPOLBalance) = decodeExchangeUpdateMessage(_msg);
+        uint256 currentConversion = convertSPOLToPOL(1e18);
         l1SPOLBalance = updatedl1SPOLBalance;
         l1DPOLBalance = updatedl1DPOLBalance;
         uint256 newConversion = convertSPOLToPOL(1e18);
@@ -114,12 +121,12 @@ contract sPOLChild is
 
         uint256 sPOLToAddToBridge;
         // maybe do this on response
-        if (locallyMintedSPOL > locallyBurnedSPOL) {
-            sPOLToAddToBridge = locallyMintedSPOL - locallyBurnedSPOL;
-            locallyMintedSPOL -= locallyBurnedSPOL;
-            locallyBurnedSPOL = 0;
+        if (locallyMintedSPOL > locallyToBeBurnedSPOL) {
+            sPOLToAddToBridge = locallyMintedSPOL - locallyToBeBurnedSPOL;
+            locallyMintedSPOL -= locallyToBeBurnedSPOL;
+            locallyToBeBurnedSPOL = 0;
         } else {
-            locallyBurnedSPOL -= locallyMintedSPOL;
+            locallyToBeBurnedSPOL -= locallyMintedSPOL;
             locallyMintedSPOL = 0;
         }
         _sendMessageToRoot(
@@ -149,8 +156,8 @@ contract sPOLChild is
         }
         missingWithdrawPOLBalance = 0;
         uint256 bridgeMissingSPOL;
-        if (locallyMintedSPOL > locallyBurnedSPOL) {
-            bridgeMissingSPOL = locallyMintedSPOL - locallyBurnedSPOL;
+        if (locallyMintedSPOL > locallyToBeBurnedSPOL) {
+            bridgeMissingSPOL = locallyMintedSPOL - locallyToBeBurnedSPOL;
         }
         // we need to create spol and bridge it back over to L1
         _sendMessageToRoot(
@@ -207,10 +214,9 @@ contract sPOLChild is
     function sellSPOL(uint256 _sPOLAmount) external whenNotPaused {
         //_burn(msg.sender, _sPOLAmount);
         _transfer(msg.sender, address(this), _sPOLAmount);
-        sPOLtoBeBurned += _sPOLAmount;
-        locallyBurnedSPOL += _sPOLAmount;
+        locallyToBeBurnedSPOL += _sPOLAmount;
         uint256 polToReturn = convertSPOLToPOL(_sPOLAmount);
-        emit sPOLBurned(msg.sender, _sPOLAmount, polToReturn, globalNonce++);
+        emit sPOLBurned(msg.sender, _sPOLAmount, polToReturn, globalWithdrawNonce++);
         if (actualQuickRedeemReserve >= polToReturn) {
             _quickSellSPOL(polToReturn);
         } else {
@@ -222,13 +228,13 @@ contract sPOLChild is
         actualQuickRedeemReserve -= _polAmount;
         polBalance -= _polAmount;
         payable(msg.sender).transfer(_polAmount);
-        emit POLWithdrawn(msg.sender, _polAmount, globalNonce);
+        emit POLWithdrawn(msg.sender, _polAmount, globalWithdrawNonce);
     }
 
     function _slowSellSPOL(uint256 _polAmount) internal {
         missingWithdrawPOLBalance += _polAmount;
         UserOutstanding memory userOutstanding =
-            UserOutstanding({outstandingPOL: _polAmount, backFillCycle: backFillCycle, nonce: globalNonce});
+            UserOutstanding({outstandingPOL: _polAmount, backFillCycle: backFillCycle, nonce: globalWithdrawNonce});
         userOutstandingPOL[msg.sender].push(userOutstanding);
     }
 
