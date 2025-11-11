@@ -9,8 +9,18 @@ import {
 } from "@openzeppelin-contracts-upgradeable/token/ERC20/extensions/ERC20PermitUpgradeable.sol";
 import {PausableUpgradeable} from "@openzeppelin-contracts-upgradeable/utils/PausableUpgradeable.sol";
 import {Initializable} from "@openzeppelin-contracts-upgradeable/proxy/utils/Initializable.sol";
+import {
+    AccessManagedUpgradeable
+} from "@openzeppelin-contracts-upgradeable/access/manager/AccessManagedUpgradeable.sol";
 
-contract sPOLChild is Initializable, PausableUpgradeable, BaseChildTunnel, ERC20PermitUpgradeable, MsgCoder {
+contract sPOLChild is
+    Initializable,
+    PausableUpgradeable,
+    AccessManagedUpgradeable,
+    BaseChildTunnel,
+    ERC20PermitUpgradeable,
+    MsgCoder
+{
     // exchange info
     uint256 public l1SPOLBalance;
     uint256 public l1DPOLBalance;
@@ -48,30 +58,23 @@ contract sPOLChild is Initializable, PausableUpgradeable, BaseChildTunnel, ERC20
     mapping(address => UserOutstanding[]) public userOutstandingPOL;
     uint256 public globalNonce;
 
-    address public admin;
-
     event sPOLMinted(address user, uint256 amountPOL, uint256 amountSPOL);
     event sPOLBurned(address user, uint256 amountSPOL, uint256 amountPOL, uint256 nonce);
     event POLWithdrawn(address user, uint256 amountPOL, uint256 nonce);
-
-    modifier onlyAdmin() {
-        require(msg.sender == admin, "Only admin can call");
-        _;
-    }
 
     constructor(address _stateSyncer) BaseChildTunnel(_stateSyncer) {
         _disableInitializers();
     }
 
-    function initialize(address _admin) external initializer {
+    function initialize(address _authority) external initializer {
         __Pausable_init();
         __ERC20_init("Staked POL", "sPOL");
         __ERC20Permit_init("Staked POL");
+        __AccessManaged_init(_authority);
         maxExchangeRateUpdateDelay = 30 days;
         // we get about 0,25% rewards in a month, so if we pause after a month of no update
         // 0,3% should be safe so sPOL doesn't become cheaper than L1
         safetyFee = 30; // 0.3%
-        admin = _admin;
     }
 
     //   function _sendMessageToRoot(bytes memory message)
@@ -252,24 +255,24 @@ contract sPOLChild is Initializable, PausableUpgradeable, BaseChildTunnel, ERC20
         payable(msg.sender).transfer(totalToWithdraw);
     }
 
-    function setQuickRedeemBufferSize(uint256 _newSize) external onlyAdmin {
+    function setQuickRedeemBufferSize(uint256 _newSize) external restricted {
         targetQuickRedeemReserve = _newSize;
     }
 
-    function setSafetyFee(uint16 _newFee) external onlyAdmin {
+    function setSafetyFee(uint16 _newFee) external restricted {
         require(_newFee <= SAFETY_FEE_DENOMINATOR / 10, "Fee too high");
         safetyFee = _newFee;
     }
 
-    function setMaxExchangeRateUpdateDelay(uint256 _newDelay) external onlyAdmin {
+    function setMaxExchangeRateUpdateDelay(uint256 _newDelay) external restricted {
         maxExchangeRateUpdateDelay = _newDelay;
     }
 
-    function pauseUserFunctions() external onlyAdmin {
+    function pauseUserFunctions() external restricted {
         _pause();
     }
 
-    function unpauseUserFunctions() external onlyAdmin {
+    function unpauseUserFunctions() external restricted {
         _unpause();
     }
 }
