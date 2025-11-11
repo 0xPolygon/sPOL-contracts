@@ -58,7 +58,7 @@ contract sPOLControllerTest is Test, Deploy {
         controller = sPOLController(address(sPOLControllerProxy));
 
         // Verify initial state
-        assertEq(controller.admin(), testAdmin);
+        assertEq(controller.authority(), testAdmin);
         assertEq(controller.feeReceiver(), testFeeReceiver);
         assertEq(controller.rewardFee(), INITIAL_REWARD_FEE);
     }

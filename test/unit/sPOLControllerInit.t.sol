@@ -55,7 +55,7 @@ contract sPOLControllerInitTest is Test {
         assertEq(controller.rewardFee(), testRewardFee, "Reward fee not set correctly");
         assertEq(controller.feeReceiver(), testFeeReceiver, "Fee receiver not set correctly");
         assertEq(controller.maxDivergence(), testMaxDivergence, "Max divergence not set correctly");
-        assertEq(controller.admin(), testAdmin, "Admin not set correctly");
+        assertEq(controller.authority(), testAdmin, "Admin not set correctly");
     }
 
     function test_Initialize_WithZeroFee() public {

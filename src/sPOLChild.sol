@@ -63,9 +63,9 @@ contract sPOLChild is Initializable, PausableUpgradeable, BaseChildTunnel, ERC20
     }
 
     function initialize() external initializer {
+        __Pausable_init();
         __ERC20_init("Staked POL", "sPOL");
         __ERC20Permit_init("Staked POL");
-        __Pausable_init();
     }
 
     //   function _sendMessageToRoot(bytes memory message)

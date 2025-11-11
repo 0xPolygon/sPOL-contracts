@@ -8,8 +8,11 @@ import {BaseRootTunnel} from "./msg/BaseRootTunnel.sol";
 import {MsgCoder} from "./MsgCoder.sol";
 import {Initializable} from "@openzeppelin-contracts-upgradeable-5.5.0/proxy/utils/Initializable.sol";
 import {PausableUpgradeable} from "@openzeppelin-contracts-upgradeable-5.5.0/utils/PausableUpgradeable.sol";
+import {
+    AccessManagedUpgradeable
+} from "@openzeppelin-contracts-upgradeable-5.5.0/access/manager/AccessManagedUpgradeable.sol";
 
-contract sPOLMessenger is Initializable, PausableUpgradeable, BaseRootTunnel, MsgCoder {
+contract sPOLMessenger is Initializable, PausableUpgradeable, AccessManagedUpgradeable, BaseRootTunnel, MsgCoder {
     IERC20 public immutable polToken;
     IERC20 public immutable sPOLToken;
     address public child;
@@ -36,8 +39,9 @@ contract sPOLMessenger is Initializable, PausableUpgradeable, BaseRootTunnel, Ms
         _disableInitializers();
     }
 
-    function initialize() external initializer {
+    function initialize(address _authority) external initializer {
         __Pausable_init();
+        __AccessManaged_init(_authority);
     }
 
     function _processMessageFromChild(bytes memory _message) internal override {

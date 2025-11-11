@@ -24,7 +24,6 @@ contract sPOLControllerVLDSelectTest is Test, sPOLController {
         rewardFee = testRewardFeee;
         feeReceiver = testFeeReceiver;
         maxDivergence = testMaxDivergence;
-        admin = testAdmin;
         // Mocks
         // We don't test adding, so all validators are valid
         vm.mockCall(testStakeManager, abi.encodeWithSelector(IStakeManager.isValidator.selector), abi.encode(true));

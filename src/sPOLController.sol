@@ -4,14 +4,15 @@ pragma solidity ^0.8.30;
 import {ERC20Permit, ERC20} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Permit.sol";
 import {Initializable} from "@openzeppelin-contracts-upgradeable-5.5.0/proxy/utils/Initializable.sol";
 import {PausableUpgradeable} from "@openzeppelin-contracts-upgradeable-5.5.0/utils/PausableUpgradeable.sol";
-
+import {
+    AccessManagedUpgradeable
+} from "@openzeppelin-contracts-upgradeable-5.5.0/access/manager/AccessManagedUpgradeable.sol";
 import {IPolygonMigration} from "./interfaces/IPolygonMigration.sol";
 import {StakeManager as IStakeManager, StakeManagerStorage as StakeManagerStatus} from "./interfaces/IStakeManager.sol";
 import {ValidatorShare as IValidatorShare} from "./interfaces/IValidatorShare.sol";
 import {sPOL} from "./sPOL.sol";
-import "forge-std/console.sol";
 
-contract sPOLController is Initializable, PausableUpgradeable {
+contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgradeable {
     struct ValidatorInfo {
         ValidatorStatus status;
         uint8 depositShare;
@@ -26,8 +27,6 @@ contract sPOLController is Initializable, PausableUpgradeable {
         DEACTIVATED,
         FROZEN
     }
-
-    address public admin;
 
     ERC20Permit public immutable polToken;
     ERC20 public immutable maticToken;
@@ -74,11 +73,6 @@ contract sPOLController is Initializable, PausableUpgradeable {
     event sPOLMigrated(address user, uint256 amountPOL, uint256 amountSPOL);
     event sPOLBackfilled(address user, uint256 amountSPOL, uint256 amountPOL);
 
-    modifier onlyAdmin() {
-        require(msg.sender == admin, "ONLY_ADMIN");
-        _;
-    }
-
     constructor(
         address _polToken,
         address _maticToken,
@@ -94,22 +88,23 @@ contract sPOLController is Initializable, PausableUpgradeable {
         _disableInitializers();
     }
 
-    function initialize(uint16 _rewardFee, address _feeReceiver, uint8 _maxDivergence, address _admin)
+    function initialize(uint16 _rewardFee, address _feeReceiver, uint8 _maxDivergence, address _authority)
         external
         initializer
     {
+        __Pausable_init();
+        __AccessManaged_init(_authority);
         require(_rewardFee <= MAX_FEE, "FEE_TOO_LARGE");
         rewardFee = _rewardFee;
         feeReceiver = _feeReceiver;
         maxDivergence = _maxDivergence;
-        admin = _admin;
     }
 
     ///////////////////////////////
     ///  Validator Management   ///
     ///////////////////////////////
 
-    function addValidator(uint16 _validatorID) external onlyAdmin {
+    function addValidator(uint16 _validatorID) external restricted {
         require(stakeManager.isValidator(_validatorID), "NOT_ACTIVE_VALIDATOR");
 
         IValidatorShare validatorContract = IValidatorShare(stakeManager.getValidatorContract(_validatorID));
@@ -128,7 +123,7 @@ contract sPOLController is Initializable, PausableUpgradeable {
         emit ValidatorAdded(_validatorID);
     }
 
-    function removeValidator(uint16 _removedValidator) external onlyAdmin {
+    function removeValidator(uint16 _removedValidator) external restricted {
         ValidatorInfo storage removedValidator = validators[_removedValidator];
         require(removedValidator.totalStaked == 0, "STILL_FUNDED");
         require(removedValidator.status == ValidatorStatus.ACTIVE, "NOT_ACTIVE");
@@ -141,7 +136,7 @@ contract sPOLController is Initializable, PausableUpgradeable {
         emit ValidatorRemoved(_removedValidator);
     }
 
-    function freezeValidator(uint16 _validator) external onlyAdmin {
+    function freezeValidator(uint16 _validator) external restricted {
         require(validators[_validator].status == ValidatorStatus.ACTIVE, "NOT_ACTIVE");
         require(validators[_validator].depositShare == 0, "SHARE_NOT_ZERO");
 
@@ -150,7 +145,7 @@ contract sPOLController is Initializable, PausableUpgradeable {
         emit ValidatorFrozen(_validator);
     }
 
-    function unfreezeValidator(uint16 _validator) external onlyAdmin {
+    function unfreezeValidator(uint16 _validator) external restricted {
         require(validators[_validator].status == ValidatorStatus.FROZEN, "NOT_FROZEN");
         validators[_validator].status = ValidatorStatus.ACTIVE;
         activeValidators.push(_validator);
@@ -173,13 +168,13 @@ contract sPOLController is Initializable, PausableUpgradeable {
         }
     }
 
-    function changeMaxDivergence(uint8 newDivergence) external onlyAdmin {
+    function changeMaxDivergence(uint8 newDivergence) external restricted {
         maxDivergence = newDivergence;
     }
 
     function updateValidatorTargetShare(uint16[] calldata _validatorID, uint8[] calldata _newTargetShare)
         external
-        onlyAdmin
+        restricted
     {
         require(_validatorID.length == _newTargetShare.length, "LENGTH_MISMATCH");
         for (uint256 i = 0; i < _validatorID.length; i++) {
@@ -194,13 +189,13 @@ contract sPOLController is Initializable, PausableUpgradeable {
         require(totalPercent == 100, "TOTAL_NOT_100");
     }
 
-    function migrateValidator(uint16 _oldValidator, uint16 _newValidator) external onlyAdmin {
+    function migrateValidator(uint16 _oldValidator, uint16 _newValidator) external restricted {
         uint256 amount = validators[_oldValidator].totalStaked;
         amount += validators[_oldValidator].validatorContract.getLiquidRewards(address(this));
         _migrateValidator(_oldValidator, _newValidator, amount);
     }
 
-    function migrateValidator(uint16 _oldValidator, uint16 _newValidator, uint256 _amount) external onlyAdmin {
+    function migrateValidator(uint16 _oldValidator, uint16 _newValidator, uint256 _amount) external restricted {
         require(_amount <= validators[_oldValidator].totalStaked, "AMOUNT_TOO_LARGE");
         _migrateValidator(_oldValidator, _newValidator, _amount);
     }
@@ -227,7 +222,7 @@ contract sPOLController is Initializable, PausableUpgradeable {
         }
     }
 
-    function reloadAllActiveValidatorInfo() external onlyAdmin {
+    function reloadAllActiveValidatorInfo() external restricted {
         uint256 amountToReduce;
         uint256 amountToAdd;
         for (uint256 i = 0; i < activeValidators.length; i++) {
@@ -240,7 +235,7 @@ contract sPOLController is Initializable, PausableUpgradeable {
     }
 
     // very expensive, includes frozen validators
-    function reloadAllValidatorInfo() external onlyAdmin {
+    function reloadAllValidatorInfo() external restricted {
         uint256 totalDPOL;
         for (uint256 i = 0; i < validatorList.length; i++) {
             ValidatorInfo storage validator = validators[validatorList[i]];
@@ -630,18 +625,18 @@ contract sPOLController is Initializable, PausableUpgradeable {
     ///  Fee Management         ///
     ///////////////////////////////
 
-    function changeFeeReceiver(address newFeeReceiver) external onlyAdmin {
+    function changeFeeReceiver(address newFeeReceiver) external restricted {
         require(newFeeReceiver != address(0), "ZERO_ADDRESS");
         takeFee();
         feeReceiver = newFeeReceiver;
     }
 
-    function changeRewardFee(uint16 newFee) external onlyAdmin {
+    function changeRewardFee(uint16 newFee) external restricted {
         require(newFee <= MAX_FEE, "FEE_TOO_LARGE");
         rewardFee = newFee;
     }
 
-    function takeFee() public onlyAdmin {
+    function takeFee() public restricted {
         if (feedPOLBalance == 0) {
             return;
         }
@@ -735,7 +730,7 @@ contract sPOLController is Initializable, PausableUpgradeable {
         return (selectedValidators, amounts);
     }
 
-    function cleanUpMaticPOL(uint16 _validator, address _receiver) external onlyAdmin {
+    function cleanUpMaticPOL(uint16 _validator, address _receiver) external restricted {
         require(validators[_validator].status == ValidatorStatus.ACTIVE, "VALIDATOR_NOT_ACTIVE");
 
         uint256 maticBalance = maticToken.balanceOf(address(this));
@@ -753,7 +748,7 @@ contract sPOLController is Initializable, PausableUpgradeable {
         }
     }
 
-    function completeMigration(uint256 _amountPOL, uint256 _amountSPOL) external onlyAdmin {
+    function completeMigration(uint256 _amountPOL, uint256 _amountSPOL) external restricted {
         require(convertPOLtoSPOL(_amountPOL) <= _amountSPOL, "BAD_EXCHANGE_RATE");
         (uint16[] memory validator, uint256[] memory amount) = _selectValidatorToBuy(_amountPOL);
         _takePOL(_amountPOL, msg.sender);
@@ -767,7 +762,7 @@ contract sPOLController is Initializable, PausableUpgradeable {
         emit sPOLMigrated(msg.sender, _amountPOL, _amountSPOL);
     }
 
-    function startBackfillSell(uint256 _amountSPOL, uint256 _amountPOL) external onlyAdmin returns (uint256[] memory) {
+    function startBackfillSell(uint256 _amountSPOL, uint256 _amountPOL) external restricted returns (uint256[] memory) {
         require(convertSPOLtoPOL(_amountSPOL) >= _amountPOL, "BAD_EXCHANGE_RATE");
         _takeSPOL(_amountSPOL, msg.sender);
         (uint16[] memory validator, uint256[] memory amount) = _selectValidatorToSell(_amountPOL);
@@ -785,11 +780,11 @@ contract sPOLController is Initializable, PausableUpgradeable {
         return nonces;
     }
 
-    function pauseUserFunctions() external onlyAdmin {
+    function pauseUserFunctions() external restricted {
         _pause();
     }
 
-    function unpauseUserFunctions() external onlyAdmin {
+    function unpauseUserFunctions() external restricted {
         _unpause();
     }
 }

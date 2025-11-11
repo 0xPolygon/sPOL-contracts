@@ -221,7 +221,7 @@ contract Deploy is Script {
         );
 
         // Verify sPOLController
-        require(controller.admin() == admin, "Controller admin incorrect");
+        require(controller.authority() == admin, "Controller admin incorrect");
         require(address(controller.polToken()) == polToken, "Controller POL token incorrect");
         require(address(controller.sPOLToken()) == address(sPOLProxy), "Controller sPOL token incorrect");
         require(controller.rewardFee() == rewardFee, "Controller reward fee incorrect");
