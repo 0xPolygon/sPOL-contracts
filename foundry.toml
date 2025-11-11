@@ -11,7 +11,7 @@ lint_on_build= false
 
 
 [dependencies]
-forge-std = "1.10.0"
-"@openzeppelin-contracts" = "5.5.0-rc.0"
-"@openzeppelin-contracts-upgradeable" = "5.5.0-rc.0"
+forge-std = "1.11.0"
+"@openzeppelin-contracts" = "5.5.0"
+"@openzeppelin-contracts-upgradeable" = "5.5.0"
 

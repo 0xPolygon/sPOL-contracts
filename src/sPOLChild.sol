@@ -6,9 +6,9 @@ import {BaseChildTunnel} from "./msg/BaseChildTunnel.sol";
 import {MsgCoder} from "./MsgCoder.sol";
 import {
     ERC20PermitUpgradeable
-} from "@openzeppelin-contracts-upgradeable-5.5.0/token/ERC20/extensions/ERC20PermitUpgradeable.sol";
-import {PausableUpgradeable} from "@openzeppelin-contracts-upgradeable-5.5.0/utils/PausableUpgradeable.sol";
-import {Initializable} from "@openzeppelin-contracts-upgradeable-5.5.0/proxy/utils/Initializable.sol";
+} from "@openzeppelin-contracts-upgradeable/token/ERC20/extensions/ERC20PermitUpgradeable.sol";
+import {PausableUpgradeable} from "@openzeppelin-contracts-upgradeable/utils/PausableUpgradeable.sol";
+import {Initializable} from "@openzeppelin-contracts-upgradeable/proxy/utils/Initializable.sol";
 
 contract sPOLChild is Initializable, PausableUpgradeable, BaseChildTunnel, ERC20PermitUpgradeable, MsgCoder {
     // exchange info

@@ -6,11 +6,11 @@ import {sPOLController as IsPOLController} from "./sPOLController.sol";
 import {IRootChainManager} from "./msg/interfaces/IRootChainManager.sol";
 import {BaseRootTunnel} from "./msg/BaseRootTunnel.sol";
 import {MsgCoder} from "./MsgCoder.sol";
-import {Initializable} from "@openzeppelin-contracts-upgradeable-5.5.0/proxy/utils/Initializable.sol";
-import {PausableUpgradeable} from "@openzeppelin-contracts-upgradeable-5.5.0/utils/PausableUpgradeable.sol";
+import {Initializable} from "@openzeppelin-contracts-upgradeable/proxy/utils/Initializable.sol";
+import {PausableUpgradeable} from "@openzeppelin-contracts-upgradeable/utils/PausableUpgradeable.sol";
 import {
     AccessManagedUpgradeable
-} from "@openzeppelin-contracts-upgradeable-5.5.0/access/manager/AccessManagedUpgradeable.sol";
+} from "@openzeppelin-contracts-upgradeable/access/manager/AccessManagedUpgradeable.sol";
 
 contract sPOLMessenger is Initializable, PausableUpgradeable, AccessManagedUpgradeable, BaseRootTunnel, MsgCoder {
     IERC20 public immutable polToken;

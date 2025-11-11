@@ -2,11 +2,11 @@
 pragma solidity ^0.8.30;
 
 import {ERC20Permit, ERC20} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Permit.sol";
-import {Initializable} from "@openzeppelin-contracts-upgradeable-5.5.0/proxy/utils/Initializable.sol";
-import {PausableUpgradeable} from "@openzeppelin-contracts-upgradeable-5.5.0/utils/PausableUpgradeable.sol";
+import {Initializable} from "@openzeppelin-contracts-upgradeable/proxy/utils/Initializable.sol";
+import {PausableUpgradeable} from "@openzeppelin-contracts-upgradeable/utils/PausableUpgradeable.sol";
 import {
     AccessManagedUpgradeable
-} from "@openzeppelin-contracts-upgradeable-5.5.0/access/manager/AccessManagedUpgradeable.sol";
+} from "@openzeppelin-contracts-upgradeable/access/manager/AccessManagedUpgradeable.sol";
 import {IPolygonMigration} from "./interfaces/IPolygonMigration.sol";
 import {StakeManager as IStakeManager, StakeManagerStorage as StakeManagerStatus} from "./interfaces/IStakeManager.sol";
 import {ValidatorShare as IValidatorShare} from "./interfaces/IValidatorShare.sol";
