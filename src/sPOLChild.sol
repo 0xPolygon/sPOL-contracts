@@ -170,7 +170,18 @@ contract sPOLChild is
 
     function handleBackfillResponse(bytes memory _msg) internal {
         (uint256 _returnedPOL, uint256 _backFillCycle) = decodeL1BackfillResponseMessage(_msg);
-        missingWithdrawPOLBalance -= _returnedPOL;
+        if (missingWithdrawPOLBalance >= _returnedPOL) {
+            missingWithdrawPOLBalance -= _returnedPOL;
+        } else {
+            uint256 leftOver = _returnedPOL - missingWithdrawPOLBalance;
+            missingWithdrawPOLBalance = 0;
+            actualQuickRedeemReserve += leftOver;
+            if (pendingQuickRedeemReserveRefill >= leftOver) {
+                pendingQuickRedeemReserveRefill -= leftOver;
+            } else {
+                pendingQuickRedeemReserveRefill = 0;
+            }
+        }
         polBalance += _returnedPOL;
         completedBackfills[_backFillCycle] = true;
     }
