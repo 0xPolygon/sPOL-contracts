@@ -36,6 +36,8 @@ contract sPOLChild is Initializable, PausableUpgradeable, BaseChildTunnel, ERC20
     uint256 public backFillCycle;
     mapping(uint256 => bool) public completedBackfills;
     bool public onGoingMigration;
+    uint256 public maxExchangeRateUpdateDelay;
+    uint256 public lastExchangeRateUpdate;
 
     struct UserOutstanding {
         uint256 outstandingPOL;
@@ -66,6 +68,7 @@ contract sPOLChild is Initializable, PausableUpgradeable, BaseChildTunnel, ERC20
         __Pausable_init();
         __ERC20_init("Staked POL", "sPOL");
         __ERC20Permit_init("Staked POL");
+        maxExchangeRateUpdateDelay = 30 days;
     }
 
     //   function _sendMessageToRoot(bytes memory message)
@@ -91,6 +94,7 @@ contract sPOLChild is Initializable, PausableUpgradeable, BaseChildTunnel, ERC20
         uint256 newConversion = convertSPOLToPOL(1e18);
         // this then stays in failedstatesync, maybe don't revert, but ignore?
         require(newConversion >= currentConversion, "Exchange rate declined");
+        lastExchangeRateUpdate = block.timestamp;
     }
 
     function requestMigration() external whenNotPaused {
@@ -184,6 +188,7 @@ contract sPOLChild is Initializable, PausableUpgradeable, BaseChildTunnel, ERC20
     }
 
     function buySPOL(uint256 _polAmount) external payable whenNotPaused {
+        require(lastExchangeRateUpdate + maxExchangeRateUpdateDelay <= block.timestamp, "Exchange rate update too old");
         require(msg.value == _polAmount, "Incorrect POL amount sent");
         uint256 spolToMint = convertPOLToSPOL(_polAmount);
         locallyMintedSPOL += spolToMint;
@@ -246,6 +251,15 @@ contract sPOLChild is Initializable, PausableUpgradeable, BaseChildTunnel, ERC20
 
     function setQuickRedeemBufferSize(uint256 _newSize) external onlyAdmin {
         targetQuickRedeemReserve = _newSize;
+    }
+
+    function setSafetyFee(uint16 _newFee) external onlyAdmin {
+        require(_newFee <= SAFETY_FEE_DENOMINATOR / 10, "Fee too high");
+        safetyFee = _newFee;
+    }
+
+    function setMaxExchangeRateUpdateDelay(uint256 _newDelay) external onlyAdmin {
+        maxExchangeRateUpdateDelay = _newDelay;
     }
 
     function pauseUserFunctions() external onlyAdmin {
