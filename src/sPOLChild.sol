@@ -12,6 +12,7 @@ import {Initializable} from "@openzeppelin-contracts-upgradeable/proxy/utils/Ini
 import {
     AccessManagedUpgradeable
 } from "@openzeppelin-contracts-upgradeable/access/manager/AccessManagedUpgradeable.sol";
+import {PolBridger} from "./polBridger.sol";
 
 contract sPOLChild is
     Initializable,
@@ -51,6 +52,10 @@ contract sPOLChild is
     uint256 public locallyMintedSPOL;
     // sPOL that was burned on L2 needs to be released from bridge on L1 and also burned there
     uint256 public locallyToBeBurnedSPOL;
+    // L1 Messenger that needs to receive the sPOL to complete migrations/backfills
+    address public l1Messenger;
+    // Bridge helper contract, because POL has no withdrawFor function
+    PolBridger public bridgeHelper;
 
     // Migration and backfill tracking
     uint256 public backFillCycle;
@@ -74,7 +79,7 @@ contract sPOLChild is
         _disableInitializers();
     }
 
-    function initialize(address _authority) external initializer {
+    function initialize(address _authority, address _l1Messenger, address _bridgeHelper) external initializer {
         __Pausable_init();
         __ERC20_init("Staked POL", "sPOL");
         __ERC20Permit_init("Staked POL");
@@ -83,6 +88,8 @@ contract sPOLChild is
         // we get about 0,25% rewards in a month, so if we pause after a month of no update
         // 0,3% should be safe so sPOL doesn't become cheaper than L1
         safetyFee = 30; // 0.3%
+        l1Messenger = _l1Messenger;
+        bridgeHelper = PolBridger(_bridgeHelper);
     }
 
     function _processMessageFromRoot(bytes memory message) internal virtual override {
@@ -129,6 +136,7 @@ contract sPOLChild is
             locallyToBeBurnedSPOL -= locallyMintedSPOL;
             locallyMintedSPOL = 0;
         }
+        exitPOLforMessenger(polToMigrate);
         _sendMessageToRoot(
             abi.encode(MsgType.L2_MIGRATION_REQUEST, encodeL2MigrationRequestMessage(polToMigrate, sPOLToAddToBridge))
         );
@@ -141,7 +149,8 @@ contract sPOLChild is
         onGoingMigration = false;
         (uint256 returnedSPOL) = decodeL1MigrationResponseMessage(_msg);
         // if this fails we need to keep the statesync to perform it after the bridging completes
-        _burn(address(this), returnedSPOL);
+        // this allows an exit again, stupid
+        burnUnextiableSPOL(returnedSPOL);
     }
 
     function requestBackfill() external whenNotPaused {
@@ -158,6 +167,7 @@ contract sPOLChild is
         uint256 bridgeMissingSPOL;
         if (locallyMintedSPOL > locallyToBeBurnedSPOL) {
             bridgeMissingSPOL = locallyMintedSPOL - locallyToBeBurnedSPOL;
+            burnSPOLForMessenger(bridgeMissingSPOL);
         }
         // we need to create spol and bridge it back over to L1
         _sendMessageToRoot(
@@ -223,7 +233,6 @@ contract sPOLChild is
     }
 
     function sellSPOL(uint256 _sPOLAmount) external whenNotPaused {
-        //_burn(msg.sender, _sPOLAmount);
         _transfer(msg.sender, address(this), _sPOLAmount);
         locallyToBeBurnedSPOL += _sPOLAmount;
         uint256 polToReturn = convertSPOLToPOL(_sPOLAmount);
@@ -291,6 +300,24 @@ contract sPOLChild is
 
     function unpauseUserFunctions() external restricted {
         _unpause();
+    }
+
+    function burnSPOLForMessenger(uint256 _sPOLAmount) internal {
+        _transfer(address(this), l1Messenger, _sPOLAmount);
+        _burn(l1Messenger, _sPOLAmount);
+    }
+
+    // this doesn't work as any address can exit for anyone on L1
+    function burnUnextiableSPOL(uint256 _sPOLAmount) internal {
+        address deadAddress = address(0xdead);
+        _transfer(deadAddress, address(this), _sPOLAmount);
+        _burn(deadAddress, _sPOLAmount);
+    }
+
+    // this is a problem, as pol can't withdraw for
+    // we will need two contracts with same address
+    function exitPOLforMessenger(uint256 _polAmount) internal {
+        bridgeHelper.bridgePOL{value: _polAmount}(_polAmount);
     }
 }
 
