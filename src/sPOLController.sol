@@ -3,13 +3,15 @@ pragma solidity ^0.8.30;
 
 import {ERC20Permit, ERC20} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Permit.sol";
 import {Initializable} from "@openzeppelin-contracts-upgradeable-5.5.0/proxy/utils/Initializable.sol";
+import {PausableUpgradeable} from "@openzeppelin-contracts-upgradeable-5.5.0/utils/PausableUpgradeable.sol";
+
 import {IPolygonMigration} from "./interfaces/IPolygonMigration.sol";
 import {StakeManager as IStakeManager, StakeManagerStorage as StakeManagerStatus} from "./interfaces/IStakeManager.sol";
 import {ValidatorShare as IValidatorShare} from "./interfaces/IValidatorShare.sol";
 import {sPOL} from "./sPOL.sol";
 import "forge-std/console.sol";
 
-contract sPOLController is Initializable {
+contract sPOLController is Initializable, PausableUpgradeable {
     struct ValidatorInfo {
         ValidatorStatus status;
         uint8 depositShare;
@@ -211,13 +213,13 @@ contract sPOLController is Initializable {
         validators[_newValidator].totalStaked += _amount;
     }
 
-    function restakeValidator(uint16 _validator) public {
+    function restakeValidator(uint16 _validator) public whenNotPaused {
         (uint256 amountRestaked,) = validators[_validator].validatorContract.restakePOL();
         _adddPOLBalanceFee(amountRestaked);
         validators[_validator].totalStaked += amountRestaked;
     }
 
-    function restakeAllActiveValidators() external {
+    function restakeAllActiveValidators() external whenNotPaused {
         for (uint256 i = 0; i < activeValidators.length; i++) {
             (uint256 amountRestaked,) = validators[activeValidators[i]].validatorContract.restakePOL();
             _adddPOLBalanceFee(amountRestaked);
@@ -282,12 +284,13 @@ contract sPOLController is Initializable {
     ///  POL -> sPOL Exchange   ///
     ///////////////////////////////
 
-    function buySPOL(uint256 _amount) external returns (uint256) {
+    function buySPOL(uint256 _amount) external whenNotPaused returns (uint256) {
         return _buySPOLMulti(_amount, msg.sender);
     }
 
     function buySPOLPermit(uint256 _amount, address _user, uint256 _deadline, uint8 _v, bytes32 _r, bytes32 _s)
         external
+        whenNotPaused
         returns (uint256)
     {
         uint256 nonceBefore = polToken.nonces(_user);
@@ -296,7 +299,7 @@ contract sPOLController is Initializable {
         return _buySPOLMulti(_amount, _user);
     }
 
-    function buySPOL(uint256 _amount, uint16 _validator) public returns (uint256) {
+    function buySPOL(uint256 _amount, uint16 _validator) public whenNotPaused returns (uint256) {
         return _buySPOLSingle(_amount, _validator, msg.sender);
     }
 
@@ -308,7 +311,7 @@ contract sPOLController is Initializable {
         uint8 _v,
         bytes32 _r,
         bytes32 _s
-    ) public returns (uint256) {
+    ) public whenNotPaused returns (uint256) {
         uint256 nonceBefore = polToken.nonces(_user);
         polToken.permit(_user, address(this), _amount, _deadline, _v, _r, _s);
         require(polToken.nonces(_user) == nonceBefore + 1, "Invalid permit");
@@ -425,12 +428,13 @@ contract sPOLController is Initializable {
     ///  sPOL -> POL Exchange   ///
     ///////////////////////////////
 
-    function sellSPOL(uint256 _amount) external returns (uint256[] memory) {
+    function sellSPOL(uint256 _amount) external whenNotPaused returns (uint256[] memory) {
         return _sellSPOLMulti(_amount, msg.sender);
     }
 
     function sellSPOLPermit(uint256 _amount, address _user, uint256 _deadline, uint8 _v, bytes32 _r, bytes32 _s)
         external
+        whenNotPaused
         returns (uint256[] memory)
     {
         // consume permit resets allowance to 0 after use, as we don't want any leftover allowance
@@ -441,7 +445,7 @@ contract sPOLController is Initializable {
         return _sellSPOLMulti(_amount, _user);
     }
 
-    function sellSPOL(uint256 _amount, uint16 _validator) external returns (uint256) {
+    function sellSPOL(uint256 _amount, uint16 _validator) external whenNotPaused returns (uint256) {
         return _sellSPOLSingle(_amount, _validator, msg.sender);
     }
 
@@ -453,7 +457,7 @@ contract sPOLController is Initializable {
         uint8 _v,
         bytes32 _r,
         bytes32 _s
-    ) external returns (uint256) {
+    ) external whenNotPaused returns (uint256) {
         // consume permit resets allowance to 0 after use, as we don't want any leftover allowance
         // allowance should have no negative downsides, we do this to be safe
         uint256 nonceBefore = sPOLToken.nonces(_user);
@@ -541,11 +545,11 @@ contract sPOLController is Initializable {
         return (selectedValidator, maxFundsRedeemable);
     }
 
-    function withdrawPOL(uint256 _nonce) external {
+    function withdrawPOL(uint256 _nonce) external whenNotPaused {
         _withdrawPOL(msg.sender, _nonce);
     }
 
-    function withdrawPOL(address _user, uint256 _nonce) external {
+    function withdrawPOL(address _user, uint256 _nonce) external whenNotPaused {
         _withdrawPOL(_user, _nonce);
     }
 
@@ -576,11 +580,11 @@ contract sPOLController is Initializable {
         revert("NONCE_NOT_FOUND");
     }
 
-    function withdrawPOL() external {
+    function withdrawPOL() external whenNotPaused {
         _withdrawPOL(msg.sender);
     }
 
-    function withdrawPOL(address _user) external {
+    function withdrawPOL(address _user) external whenNotPaused {
         _withdrawPOL(_user);
     }
 
@@ -779,5 +783,13 @@ contract sPOLController is Initializable {
         }
         emit sPOLBackfilled(msg.sender, _amountSPOL, _amountPOL);
         return nonces;
+    }
+
+    function pauseUserFunctions() external onlyAdmin {
+        _pause();
+    }
+
+    function unpauseUserFunctions() external onlyAdmin {
+        _unpause();
     }
 }

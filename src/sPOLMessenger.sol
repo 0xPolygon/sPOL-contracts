@@ -6,8 +6,10 @@ import {sPOLController as IsPOLController} from "./sPOLController.sol";
 import {IRootChainManager} from "./msg/interfaces/IRootChainManager.sol";
 import {BaseRootTunnel} from "./msg/BaseRootTunnel.sol";
 import {MsgCoder} from "./MsgCoder.sol";
+import {Initializable} from "@openzeppelin-contracts-upgradeable-5.5.0/proxy/utils/Initializable.sol";
+import {PausableUpgradeable} from "@openzeppelin-contracts-upgradeable-5.5.0/utils/PausableUpgradeable.sol";
 
-contract sPOLMessenger is BaseRootTunnel, MsgCoder {
+contract sPOLMessenger is Initializable, PausableUpgradeable, BaseRootTunnel, MsgCoder {
     IERC20 public immutable polToken;
     IERC20 public immutable sPOLToken;
     address public child;
@@ -31,6 +33,11 @@ contract sPOLMessenger is BaseRootTunnel, MsgCoder {
         sPOLToken = IERC20(_sPOLToken);
         sPOLController = IsPOLController(_sPOLController);
         rootChainManager = IRootChainManager(_rootChainManager);
+        _disableInitializers();
+    }
+
+    function initialize() external initializer {
+        __Pausable_init();
     }
 
     function _processMessageFromChild(bytes memory _message) internal override {
@@ -66,7 +73,7 @@ contract sPOLMessenger is BaseRootTunnel, MsgCoder {
         backfillNonces[_backFillCycle] = nonces;
     }
 
-    function completeBackfill(uint256 _backFillCycle) external {
+    function completeBackfill(uint256 _backFillCycle) external whenNotPaused {
         require(!completedBackfill[_backFillCycle], "Backfill already completed");
         uint256 totalWithdraw;
         for (uint256 i = 0; i < backfillNonces[_backFillCycle].length; i++) {
@@ -80,7 +87,7 @@ contract sPOLMessenger is BaseRootTunnel, MsgCoder {
         completedBackfill[_backFillCycle] = true;
     }
 
-    function updateL2ExchangeRate() external {
+    function updateL2ExchangeRate() external whenNotPaused {
         _sendMessageToChild(
             abi.encode(
                 MsgType.EXCHANGE_UPDATE,
@@ -90,5 +97,13 @@ contract sPOLMessenger is BaseRootTunnel, MsgCoder {
                 )
             )
         );
+    }
+
+    function pauseUserFunctions() external {
+        _pause();
+    }
+
+    function unpauseUserFunctions() external {
+        _unpause();
     }
 }

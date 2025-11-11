@@ -7,8 +7,10 @@ import {MsgCoder} from "./MsgCoder.sol";
 import {
     ERC20PermitUpgradeable
 } from "@openzeppelin-contracts-upgradeable-5.5.0/token/ERC20/extensions/ERC20PermitUpgradeable.sol";
+import {PausableUpgradeable} from "@openzeppelin-contracts-upgradeable-5.5.0/utils/PausableUpgradeable.sol";
+import {Initializable} from "@openzeppelin-contracts-upgradeable-5.5.0/proxy/utils/Initializable.sol";
 
-contract sPOLChild is BaseChildTunnel, ERC20PermitUpgradeable, MsgCoder {
+contract sPOLChild is Initializable, PausableUpgradeable, BaseChildTunnel, ERC20PermitUpgradeable, MsgCoder {
     // exchange info
     uint256 public l1SPOLBalance;
     uint256 public l1DPOLBalance;
@@ -57,6 +59,13 @@ contract sPOLChild is BaseChildTunnel, ERC20PermitUpgradeable, MsgCoder {
 
     constructor(address _admin, address _stateSyncer) BaseChildTunnel(_stateSyncer) {
         admin = _admin;
+        _disableInitializers();
+    }
+
+    function initialize() external initializer {
+        __ERC20_init("Staked POL", "sPOL");
+        __ERC20Permit_init("Staked POL");
+        __Pausable_init();
     }
 
     //   function _sendMessageToRoot(bytes memory message)
@@ -84,7 +93,7 @@ contract sPOLChild is BaseChildTunnel, ERC20PermitUpgradeable, MsgCoder {
         require(newConversion >= currentConversion, "Exchange rate declined");
     }
 
-    function requestMigration() external {
+    function requestMigration() external whenNotPaused {
         require(!onGoingMigration, "Migration already ongoing");
         require(targetQuickRedeemReserve <= actualQuickRedeemReserve, "Nothing to migrate");
         onGoingMigration = true;
@@ -118,7 +127,7 @@ contract sPOLChild is BaseChildTunnel, ERC20PermitUpgradeable, MsgCoder {
         _burn(address(this), returnedSPOL);
     }
 
-    function requestBackfill() external {
+    function requestBackfill() external whenNotPaused {
         backFillCycle += 1;
         uint256 _backFillCycle = backFillCycle;
         uint256 amountToBackfill = missingWithdrawPOLBalance;
@@ -174,7 +183,7 @@ contract sPOLChild is BaseChildTunnel, ERC20PermitUpgradeable, MsgCoder {
             (_polAmount * l1SPOLBalance / l1DPOLBalance) * (SAFETY_FEE_DENOMINATOR - safetyFee) / SAFETY_FEE_DENOMINATOR;
     }
 
-    function buySPOL(uint256 _polAmount) external payable {
+    function buySPOL(uint256 _polAmount) external payable whenNotPaused {
         require(msg.value == _polAmount, "Incorrect POL amount sent");
         uint256 spolToMint = convertPOLToSPOL(_polAmount);
         locallyMintedSPOL += spolToMint;
@@ -184,7 +193,7 @@ contract sPOLChild is BaseChildTunnel, ERC20PermitUpgradeable, MsgCoder {
         emit sPOLMinted(msg.sender, _polAmount, spolToMint);
     }
 
-    function sellSPOL(uint256 _sPOLAmount) external {
+    function sellSPOL(uint256 _sPOLAmount) external whenNotPaused {
         //_burn(msg.sender, _sPOLAmount);
         _transfer(msg.sender, address(this), _sPOLAmount);
         sPOLtoBeBurned += _sPOLAmount;
@@ -212,7 +221,7 @@ contract sPOLChild is BaseChildTunnel, ERC20PermitUpgradeable, MsgCoder {
         userOutstandingPOL[msg.sender].push(userOutstanding);
     }
 
-    function withdrawPOL() external {
+    function withdrawPOL() external whenNotPaused {
         UserOutstanding[] storage outstandings = userOutstandingPOL[msg.sender];
         uint256 totalToWithdraw = 0;
         for (uint256 i = 0; i < outstandings.length; i++) {
@@ -237,6 +246,14 @@ contract sPOLChild is BaseChildTunnel, ERC20PermitUpgradeable, MsgCoder {
 
     function setQuickRedeemBufferSize(uint256 _newSize) external onlyAdmin {
         targetQuickRedeemReserve = _newSize;
+    }
+
+    function pauseUserFunctions() external onlyAdmin {
+        _pause();
+    }
+
+    function unpauseUserFunctions() external onlyAdmin {
+        _unpause();
     }
 }
 

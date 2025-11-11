@@ -4,8 +4,9 @@ pragma solidity ^0.8.30;
 import {
     ERC20PermitUpgradeable
 } from "@openzeppelin-contracts-upgradeable-5.5.0/token/ERC20/extensions/ERC20PermitUpgradeable.sol";
+import {Initializable} from "@openzeppelin-contracts-upgradeable-5.5.0/proxy/utils/Initializable.sol";
 
-contract sPOL is ERC20PermitUpgradeable {
+contract sPOL is Initializable, ERC20PermitUpgradeable {
     address public immutable sPOLController;
 
     modifier onlyController() {
