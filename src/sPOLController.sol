@@ -288,10 +288,26 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         whenNotPaused
         returns (uint256)
     {
-        uint256 nonceBefore = polToken.nonces(_user);
-        polToken.permit(_user, address(this), _amount, _deadline, _v, _r, _s);
-        require(polToken.nonces(_user) == nonceBefore + 1, "Invalid permit");
+        _applyPermit(_amount, _user, _deadline, _v, _r, _s, false);
         return _buySPOLMulti(_amount, _user);
+    }
+
+    function _applyPermit(
+        uint256 _amount,
+        address _user,
+        uint256 _deadline,
+        uint8 _v,
+        bytes32 _r,
+        bytes32 _s,
+        bool _consume
+    ) internal {
+        uint256 nonceBefore = polToken.nonces(_user);
+        if (_consume) {
+            sPOLToken.consumePermit(_user, address(this), _amount, _deadline, _v, _r, _s);
+        } else {
+            polToken.permit(_user, address(this), _amount, _deadline, _v, _r, _s);
+        }
+        require(polToken.nonces(_user) == nonceBefore + 1, "Invalid permit");
     }
 
     function buySPOL(uint256 _amount, uint16 _validator) public whenNotPaused returns (uint256) {
@@ -307,9 +323,7 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         bytes32 _r,
         bytes32 _s
     ) public whenNotPaused returns (uint256) {
-        uint256 nonceBefore = polToken.nonces(_user);
-        polToken.permit(_user, address(this), _amount, _deadline, _v, _r, _s);
-        require(polToken.nonces(_user) == nonceBefore + 1, "Invalid permit");
+        _applyPermit(_amount, _user, _deadline, _v, _r, _s, false);
         return _buySPOLSingle(_amount, _validator, _user);
     }
 
@@ -434,9 +448,7 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     {
         // consume permit resets allowance to 0 after use, as we don't want any leftover allowance
         // allowance should have no negative downsides, we do this to be safe
-        uint256 nonceBefore = sPOLToken.nonces(_user);
-        sPOLToken.consumePermit(_user, address(this), _amount, _deadline, _v, _r, _s);
-        require(sPOLToken.nonces(_user) == nonceBefore + 1, "Invalid permit");
+        _applyPermit(_amount, _user, _deadline, _v, _r, _s, true);
         return _sellSPOLMulti(_amount, _user);
     }
 
@@ -455,9 +467,7 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     ) external whenNotPaused returns (uint256) {
         // consume permit resets allowance to 0 after use, as we don't want any leftover allowance
         // allowance should have no negative downsides, we do this to be safe
-        uint256 nonceBefore = sPOLToken.nonces(_user);
-        sPOLToken.consumePermit(_user, address(this), _amount, _deadline, _v, _r, _s);
-        require(sPOLToken.nonces(_user) == nonceBefore + 1, "Invalid permit");
+        _applyPermit(_amount, _user, _deadline, _v, _r, _s, true);
         return _sellSPOLSingle(_amount, _validator, _user);
     }
 
