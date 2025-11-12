@@ -66,8 +66,8 @@ contract sPOLMessenger is Initializable, PausableUpgradeable, AccessManagedUpgra
 
         sPOLController.completeMigration(_polAmount, _mintedSPOL);
         rootChainManager.depositFor(child, address(sPOLToken), abi.encodePacked(_mintedSPOL));
-        // maybe make it so that if the target of the deposit is the child it doesn't need a msg and just burns directly
-        _sendMessageToChild(abi.encode(MsgType.L1_MIGRATION_RESPONSE, encodeL1MigrationResponseMessage(_mintedSPOL)));
+        // disabled for portal because of cyclical exit issue, should be activated for lxly
+        //_sendMessageToChild(abi.encode(MsgType.L1_MIGRATION_RESPONSE, encodeL1MigrationResponseMessage(_mintedSPOL)));
     }
 
     function handleBackfill(bytes memory _msg) internal {

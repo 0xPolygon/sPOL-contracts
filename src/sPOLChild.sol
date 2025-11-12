@@ -57,10 +57,13 @@ contract sPOLChild is
     // Bridge helper contract, because POL has no withdrawFor function
     PolBridger public bridgeHelper;
 
+    address public childChainManager;
+
     // Migration and backfill tracking
     uint256 public backFillCycle;
     mapping(uint256 => bool) public completedBackfills;
     bool public onGoingMigration;
+    uint256 public backMigratingSPOL;
 
     struct UserOutstanding {
         uint256 outstandingPOL;
@@ -71,6 +74,11 @@ contract sPOLChild is
     mapping(address => UserOutstanding[]) public userOutstandingPOL;
     uint256 public globalWithdrawNonce;
 
+    modifier onlyChildChainManager() {
+        require(msg.sender == childChainManager, "Only Child Chain Manager can call this function");
+        _;
+    }
+
     event sPOLMinted(address user, uint256 amountPOL, uint256 amountSPOL);
     event sPOLBurned(address user, uint256 amountSPOL, uint256 amountPOL, uint256 nonce);
     event POLWithdrawn(address user, uint256 amountPOL, uint256 nonce);
@@ -79,7 +87,10 @@ contract sPOLChild is
         _disableInitializers();
     }
 
-    function initialize(address _authority, address _l1Messenger, address _bridgeHelper) external initializer {
+    function initialize(address _authority, address _l1Messenger, address _bridgeHelper, address _childChainManager)
+        external
+        initializer
+    {
         __Pausable_init();
         __ERC20_init("Staked POL", "sPOL");
         __ERC20Permit_init("Staked POL");
@@ -97,7 +108,8 @@ contract sPOLChild is
         if (msgType == MsgType.EXCHANGE_UPDATE) {
             handleExchangeRateUpdate(actualMessage);
         } else if (msgType == MsgType.L1_MIGRATION_RESPONSE) {
-            handleMigrationResponse(actualMessage);
+            revert("Migration response handling for portal disabled");
+            //handleMigrationResponse(actualMessage);
         } else if (msgType == MsgType.L1_BACKFILL_RESPONSE) {
             handleBackfillResponse(actualMessage);
         } else {
@@ -136,6 +148,7 @@ contract sPOLChild is
             locallyToBeBurnedSPOL -= locallyMintedSPOL;
             locallyMintedSPOL = 0;
         }
+        backMigratingSPOL = sPOLToAddToBridge;
         exitPOLforMessenger(polToMigrate);
         _sendMessageToRoot(
             abi.encode(MsgType.L2_MIGRATION_REQUEST, encodeL2MigrationRequestMessage(polToMigrate, sPOLToAddToBridge))
@@ -143,15 +156,17 @@ contract sPOLChild is
     }
 
     // this could be skipped, if we detect on the deposit that it comes from the messenger, then just don't mint
-    function handleMigrationResponse(bytes memory _msg) internal {
-        // failedStateSync issue again
-        require(onGoingMigration, "No migration ongoing");
-        onGoingMigration = false;
-        (uint256 returnedSPOL) = decodeL1MigrationResponseMessage(_msg);
-        // if this fails we need to keep the statesync to perform it after the bridging completes
-        // this allows an exit again, stupid
-        burnUnextiableSPOL(returnedSPOL);
-    }
+    // doesn't work with portal, so we take the shortcut through deposit
+    // for lxly migration this needs to be activated
+    // function handleMigrationResponse(bytes memory _msg) internal {
+    //     // failedStateSync issue again
+    //     require(onGoingMigration, "No migration ongoing");
+    //     onGoingMigration = false;
+    //     (uint256 returnedSPOL) = decodeL1MigrationResponseMessage(_msg);
+    //     // if this fails we need to keep the statesync to perform it after the bridging completes
+    //     // this allows an exit again, stupid
+    //     burnUnextiableSPOL(returnedSPOL);
+    // }
 
     function requestBackfill() external whenNotPaused {
         backFillCycle += 1;
@@ -307,17 +322,26 @@ contract sPOLChild is
         _burn(l1Messenger, _sPOLAmount);
     }
 
-    // this doesn't work as any address can exit for anyone on L1
-    function burnUnextiableSPOL(uint256 _sPOLAmount) internal {
-        address deadAddress = address(0xdead);
-        _transfer(deadAddress, address(this), _sPOLAmount);
-        _burn(deadAddress, _sPOLAmount);
-    }
-
     // this is a problem, as pol can't withdraw for
     // we will need two contracts with same address
     function exitPOLforMessenger(uint256 _polAmount) internal {
         bridgeHelper.bridgePOL{value: _polAmount}(_polAmount);
+    }
+
+    function deposit(address user, bytes calldata depositData) external onlyChildChainManager {
+        uint256 amount = abi.decode(depositData, (uint256));
+        if (user == address(this) && onGoingMigration && amount == backMigratingSPOL) {
+            onGoingMigration = false;
+            backMigratingSPOL = 0;
+            // this means the bridged sPOL from the current migration has arrived
+            // we don't mint it, as the needed burn would generate an exit event again
+        } else {
+            _mint(user, amount);
+        }
+    }
+
+    function withdraw(uint256 amount) external {
+        _burn(_msgSender(), amount);
     }
 }
 
