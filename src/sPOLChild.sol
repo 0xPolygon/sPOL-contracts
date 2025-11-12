@@ -219,9 +219,7 @@ contract sPOLChild is
         if (_sPOLAmount == 0) {
             return 0;
         }
-        if (l1SPOLBalance == 0) {
-            return _sPOLAmount;
-        }
+        // we intentionally create a revert here if no sPOL is on L1/no rate update happened
         return (_sPOLAmount * l1DPOLBalance / l1SPOLBalance);
     }
 
@@ -229,9 +227,7 @@ contract sPOLChild is
         if (_polAmount == 0) {
             return 0;
         }
-        if (_polAmount == 0) {
-            return _polAmount;
-        }
+        // we intentionally create a revert here if no sPOL is on L1/no rate update happened
         return
             (_polAmount * l1SPOLBalance / l1DPOLBalance) * (SAFETY_FEE_DENOMINATOR - safetyFee) / SAFETY_FEE_DENOMINATOR;
     }
