@@ -513,9 +513,9 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
                 maxDistance = distance;
                 selectedValidator = validator.index;
             }
-            if (_positive && maxDistance == 0) {
-                maxDistance = type(uint256).max;
-            }
+        }
+        if (_positive && maxDistance == 0) {
+            maxDistance = type(uint256).max;
         }
         return (selectedValidator, maxDistance);
     }
