@@ -2,11 +2,13 @@
 pragma solidity ^0.8.0;
 
 import "forge-std/Script.sol";
+import {DummyImpl} from "./DummyImpl.sol";
 import {
     TransparentUpgradeableProxy,
     ITransparentUpgradeableProxy
 } from "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol";
 import {ProxyAdmin} from "@openzeppelin/contracts/proxy/transparent/ProxyAdmin.sol";
+import {AccessManager} from "@openzeppelin/contracts/access/manager/AccessManager.sol";
 
 import {sPOL} from "../src/sPOL.sol";
 import {sPOLController} from "../src/sPOLController.sol";
@@ -30,6 +32,7 @@ contract Deploy is Script {
     TransparentUpgradeableProxy public sPOLControllerProxy;
     ProxyAdmin public sPOLproxyAdmin;
     ProxyAdmin public sPOLControllerproxyAdmin;
+    AccessManager public accessManager;
 
     function run() public {
         uint256 pk = vm.envUint("DEPLOYER_PRIVATE_KEY");
@@ -129,12 +132,14 @@ contract Deploy is Script {
         require(rewardFee <= 1000, "Reward fee too high"); // Max 100%
         require(maxDivergence <= 100, "Max divergence too high"); // Max 100%
 
-        // Step 1: Deploy temporary sPOLController implementation
-        sPOLController tempImpl = new sPOLController(polToken, maticToken, polygonMigration, address(0), stakeManager);
-        console.log("Temporary sPOLController implementation deployed at:", address(tempImpl));
+        // Step 0: Deploy dummyImpl
+        address dummyImpl = address(new DummyImpl());
+
+        // Step 1: Deploy AccessManager
+        accessManager = new AccessManager{salt: "polygon-access-manager"}(admin);
 
         // Step 2: Deploy sPOLController proxy with temporary implementation (no initialization)
-        sPOLControllerProxy = new TransparentUpgradeableProxy(address(tempImpl), _deployer, "");
+        sPOLControllerProxy = new TransparentUpgradeableProxy(dummyImpl, _deployer, "");
         console.log("sPOLController proxy deployed at:", address(sPOLControllerProxy));
 
         // Get the proxy admin address from EIP-1967 admin slot
@@ -181,7 +186,7 @@ contract Deploy is Script {
 
         // Step 6: Use the proxy admin to upgrade sPOLController proxy
         bytes memory controllerInitData =
-            abi.encodeCall(sPOLController.initialize, (rewardFee, feeReceiver, maxDivergence, admin));
+            abi.encodeCall(sPOLController.initialize, (rewardFee, feeReceiver, maxDivergence, address(accessManager)));
 
         sPOLControllerproxyAdmin.upgradeAndCall(
             ITransparentUpgradeableProxy(address(sPOLControllerProxy)), address(sPOLControllerImpl), controllerInitData
@@ -221,7 +226,7 @@ contract Deploy is Script {
         );
 
         // Verify sPOLController
-        require(controller.authority() == admin, "Controller admin incorrect");
+        require(controller.authority() == address(accessManager), "Controller admin incorrect");
         require(address(controller.polToken()) == polToken, "Controller POL token incorrect");
         require(address(controller.sPOLToken()) == address(sPOLProxy), "Controller sPOL token incorrect");
         require(controller.rewardFee() == rewardFee, "Controller reward fee incorrect");
