@@ -101,6 +101,7 @@ contract sPOLChild is
         safetyFee = 30; // 0.3%
         l1Messenger = _l1Messenger;
         bridgeHelper = PolBridger(_bridgeHelper);
+        childChainManager = _childChainManager;
     }
 
     function _processMessageFromRoot(bytes memory message) internal virtual override {
