@@ -58,7 +58,7 @@ contract sPOLControllerTest is Test, Deploy {
         controller = sPOLController(address(sPOLControllerProxy));
 
         // Verify initial state
-        assertEq(controller.authority(), testAdmin);
+        assertEq(controller.authority(), address(accessManager));
         assertEq(controller.feeReceiver(), testFeeReceiver);
         assertEq(controller.rewardFee(), INITIAL_REWARD_FEE);
     }
@@ -76,7 +76,7 @@ contract sPOLControllerTest is Test, Deploy {
 
     function test_changeFeeReceiver_OnlyAdmin() public {
         vm.prank(nonAdmin);
-        vm.expectRevert("ONLY_ADMIN");
+        vm.expectRevert(abi.encodeWithSignature("AccessManagedUnauthorized(address)", nonAdmin));
         controller.changeFeeReceiver(newFeeReceiver);
     }
 
@@ -104,7 +104,7 @@ contract sPOLControllerTest is Test, Deploy {
         uint16 newFee = 200;
 
         vm.prank(nonAdmin);
-        vm.expectRevert("ONLY_ADMIN");
+        vm.expectRevert(abi.encodeWithSignature("AccessManagedUnauthorized(address)", nonAdmin));
         controller.changeRewardFee(newFee);
     }
 
@@ -136,8 +136,8 @@ contract sPOLControllerTest is Test, Deploy {
         uint256 dPOLBalance = 10000e18;
         uint256 totalsPOLSupply = 50e18;
 
-        vm.store(address(controller), bytes32(uint256(7)), bytes32(feePOLBalance));
-        vm.store(address(controller), bytes32(uint256(5)), bytes32(dPOLBalance));
+        vm.store(address(controller), bytes32(uint256(6)), bytes32(feePOLBalance));
+        vm.store(address(controller), bytes32(uint256(4)), bytes32(dPOLBalance));
         vm.mockCall(address(sPOLToken), abi.encodeWithSelector(ERC20.totalSupply.selector), abi.encode(totalsPOLSupply));
 
         uint256 expectedSPOLMint = feePOLBalance * totalsPOLSupply / (dPOLBalance - feePOLBalance);
@@ -154,7 +154,7 @@ contract sPOLControllerTest is Test, Deploy {
 
     function test_takeFee_OnlyAdmin() public {
         vm.prank(nonAdmin);
-        vm.expectRevert("ONLY_ADMIN");
+        vm.expectRevert(abi.encodeWithSignature("AccessManagedUnauthorized(address)", nonAdmin));
         controller.takeFee();
     }
 
@@ -241,7 +241,7 @@ contract sPOLControllerTest is Test, Deploy {
 
     function test_reloadAllActiveValidatorInfo_OnlyAdmin() public {
         vm.prank(nonAdmin);
-        vm.expectRevert("ONLY_ADMIN");
+        vm.expectRevert(abi.encodeWithSignature("AccessManagedUnauthorized(address)", nonAdmin));
         controller.reloadAllActiveValidatorInfo();
     }
 
@@ -280,7 +280,7 @@ contract sPOLControllerTest is Test, Deploy {
 
     function test_reloadAllValidatorInfo_OnlyAdmin() public {
         vm.prank(nonAdmin);
-        vm.expectRevert("ONLY_ADMIN");
+        vm.expectRevert(abi.encodeWithSignature("AccessManagedUnauthorized(address)", nonAdmin));
         controller.reloadAllValidatorInfo();
     }
 

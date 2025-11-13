@@ -13,6 +13,7 @@ contract sPOLControllerVLDSelectTest is Test, sPOLController {
     address testStakeManager = makeAddr("testStakeManager");
     address testSPOLToken = makeAddr("testSPOLToken");
     address testValidatorShare = makeAddr("testValidatorShare");
+    address testAuthority = makeAddr("testAuthority");
     uint8 testMaxDivergence = 20;
     uint8 testRewardFeee = 10;
 
@@ -24,6 +25,10 @@ contract sPOLControllerVLDSelectTest is Test, sPOLController {
         rewardFee = testRewardFeee;
         feeReceiver = testFeeReceiver;
         maxDivergence = testMaxDivergence;
+        _setAuthority(testAuthority);
+        // here is no access rights test, so always allow calls
+        vm.mockCall(testAuthority, bytes(""), abi.encode(true));
+
         // Mocks
         // We don't test adding, so all validators are valid
         vm.mockCall(testStakeManager, abi.encodeWithSelector(IStakeManager.isValidator.selector), abi.encode(true));

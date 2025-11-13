@@ -333,7 +333,7 @@ contract sPOLControllerConversionTest is Test, Deploy {
 
     function _setTotaldPOLBalance(uint256 amount) internal {
         // Set totaldPOLBalance storage slot 5
-        vm.store(address(controller), bytes32(uint256(5)), bytes32(amount));
+        vm.store(address(controller), bytes32(uint256(4)), bytes32(amount));
     }
 
     function _setsPOLTotalSupply(uint256 amount) internal {
@@ -343,6 +343,6 @@ contract sPOLControllerConversionTest is Test, Deploy {
 
     function _setFeedPOLBalance(uint256 amount) internal {
         // Set feedPOLBalance storage slot 7
-        vm.store(address(controller), bytes32(uint256(7)), bytes32(amount));
+        vm.store(address(controller), bytes32(uint256(6)), bytes32(amount));
     }
 }

@@ -121,7 +121,7 @@ contract sPOLControllerVldMgnTest is Test, Deploy {
 
     function test_AddValidator_RevertsForNonAdmin() public {
         vm.prank(nonAdmin);
-        vm.expectRevert("ONLY_ADMIN");
+        vm.expectRevert(abi.encodeWithSignature("AccessManagedUnauthorized(address)", nonAdmin));
         controller.addValidator(VALIDATOR_1);
     }
 
@@ -179,7 +179,7 @@ contract sPOLControllerVldMgnTest is Test, Deploy {
         controller.addValidator(VALIDATOR_1);
 
         vm.prank(nonAdmin);
-        vm.expectRevert("ONLY_ADMIN");
+        vm.expectRevert(abi.encodeWithSignature("AccessManagedUnauthorized(address)", nonAdmin));
         controller.removeValidator(VALIDATOR_1);
     }
 
@@ -239,7 +239,7 @@ contract sPOLControllerVldMgnTest is Test, Deploy {
         controller.addValidator(VALIDATOR_1);
 
         vm.prank(nonAdmin);
-        vm.expectRevert("ONLY_ADMIN");
+        vm.expectRevert(abi.encodeWithSignature("AccessManagedUnauthorized(address)", nonAdmin));
         controller.freezeValidator(VALIDATOR_1);
     }
 
@@ -293,7 +293,7 @@ contract sPOLControllerVldMgnTest is Test, Deploy {
         controller.freezeValidator(VALIDATOR_1);
 
         vm.prank(nonAdmin);
-        vm.expectRevert("ONLY_ADMIN");
+        vm.expectRevert(abi.encodeWithSignature("AccessManagedUnauthorized(address)", nonAdmin));
         controller.unfreezeValidator(VALIDATOR_1);
     }
 
@@ -354,7 +354,7 @@ contract sPOLControllerVldMgnTest is Test, Deploy {
         targetShares[0] = 100;
 
         vm.prank(nonAdmin);
-        vm.expectRevert("ONLY_ADMIN");
+        vm.expectRevert(abi.encodeWithSignature("AccessManagedUnauthorized(address)", nonAdmin));
         controller.updateValidatorTargetShare(validatorIds, targetShares);
     }
 
@@ -391,7 +391,7 @@ contract sPOLControllerVldMgnTest is Test, Deploy {
 
     function test_ChangeMaxDivergence_RevertsForNonAdmin() public {
         vm.prank(nonAdmin);
-        vm.expectRevert("ONLY_ADMIN");
+        vm.expectRevert(abi.encodeWithSignature("AccessManagedUnauthorized(address)", nonAdmin));
         controller.changeMaxDivergence(25);
     }
 }
