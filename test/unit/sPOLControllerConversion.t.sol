@@ -26,7 +26,7 @@ contract sPOLControllerConversionTest is Test, Deploy {
             100, // 10% fee
             10 // 10% max divergence
         );
-        _deploy(address(this));
+        _deployL1(address(this));
 
         controller = sPOLController(address(sPOLControllerProxy));
         token = sPOL(address(sPOLProxy));

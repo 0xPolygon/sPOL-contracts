@@ -322,7 +322,7 @@ contract sPOLChild is
     // this is a problem, as pol can't withdraw for
     // we will need two contracts with same address
     function exitPOLforMessenger(uint256 _polAmount) internal {
-        bridgeHelper.bridgePOL{value: _polAmount}(_polAmount);
+        bridgeHelper.bridgePOLToL1{value: _polAmount}(_polAmount);
     }
 
     function deposit(address user, bytes calldata depositData) external onlyChildChainManager {

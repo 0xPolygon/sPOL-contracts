@@ -51,14 +51,14 @@ contract sPOLControllerTest is Test, Deploy {
             INITIAL_REWARD_FEE,
             MAX_DIVERGENCE
         );
-        _deploy(address(this));
+        _deployL1(address(this));
 
         // Get deployed contract instances
         sPOLToken = sPOL(address(sPOLProxy));
         controller = sPOLController(address(sPOLControllerProxy));
 
         // Verify initial state
-        assertEq(controller.authority(), address(accessManager));
+        assertEq(controller.authority(), address(accessManagerL1));
         assertEq(controller.feeReceiver(), testFeeReceiver);
         assertEq(controller.rewardFee(), INITIAL_REWARD_FEE);
     }

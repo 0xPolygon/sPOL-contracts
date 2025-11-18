@@ -41,7 +41,7 @@ contract sPOLControllerVldMgnTest is Test, Deploy {
             100, // 10% fee
             10 // 10% max divergence
         );
-        _deploy(address(this));
+        _deployL1(address(this));
 
         controller = sPOLController(address(sPOLControllerProxy));
 
