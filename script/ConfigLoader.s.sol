@@ -67,7 +67,7 @@ contract ConfigLoader is Script {
         chainIdL1 = vm.parseJsonUint(json, string.concat(scenarioName, ".chainIdL1"));
         chainIdL2 = vm.parseJsonUint(json, string.concat(scenarioName, ".chainIdL2"));
 
-        maticTokenL1 = vm.parseJsonAddress(json, string.concat(scenarioName, ".maticToken"));
+        maticTokenL1 = vm.parseJsonAddress(json, string.concat(scenarioName, ".maticTokenL1"));
         polygonMigration = vm.parseJsonAddress(json, string.concat(scenarioName, ".polygonMigration"));
         stakeManager = vm.parseJsonAddress(json, string.concat(scenarioName, ".stakeManager"));
         admin = vm.parseJsonAddress(json, string.concat(scenarioName, ".admin"));
@@ -88,7 +88,7 @@ contract ConfigLoader is Script {
     // Set custom configuration (for advanced usage)
     function setCustomConfig(
         address _polToken,
-        address _maticToken,
+        address _maticTokenL1,
         address _polygonMigration,
         address _stakeManager,
         address _admin,
@@ -97,7 +97,7 @@ contract ConfigLoader is Script {
         uint8 _maxDivergence
     ) public {
         polTokenL1 = _polToken;
-        maticTokenL1 = _maticToken;
+        maticTokenL1 = _maticTokenL1;
         polygonMigration = _polygonMigration;
         stakeManager = _stakeManager;
         admin = _admin;

@@ -112,7 +112,7 @@ contract Deploy is Script, ConfigLoader {
         console.log("sPOL Controller ProxyAdmin ownership transferred to:", admin);
 
         // Verify deployment
-        _verifyDeployment();
+        _verifyDeploymentL1();
 
         console.log("Deployment completed successfully!");
         console.log("sPOL Token (proxy):", address(sPOLProxy));
@@ -176,7 +176,7 @@ contract Deploy is Script, ConfigLoader {
         console.log("sPOLChild Proxy Admin Address:", address(sPOLChildproxyAdmin));
     }
 
-    function _verifyDeployment() internal view {
+    function _verifyDeploymentL1() internal view {
         sPOL token = sPOL(address(sPOLProxy));
         sPOLController controller = sPOLController(address(sPOLControllerProxy));
 
