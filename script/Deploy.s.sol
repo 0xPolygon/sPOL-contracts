@@ -56,25 +56,34 @@ contract Deploy is Script, ConfigLoader {
     }
 
     function deployContractsL1(address _deployer) public {
-        address dummyImplL1 = address(new DummyImpl{salt: "dummy"}());
+        address dummyImplL1 = address(new DummyImpl{salt: "dummy-impl"}());
 
-        address polBridgerAddress =
-            address(new PolBridger(polTokenL1, polTokenL2, chainIdL1, chainIdL2, erc20predicate, withdrawManager));
+        address polBridgerAddress = address(
+            new PolBridger{salt: "pol-bridger"}(
+                polTokenL1, polTokenL2, chainIdL1, chainIdL2, erc20predicate, withdrawManager
+            )
+        );
         address accessManagerL1Address = address(new AccessManager{salt: "polygon-access-manager"}(_deployer));
-        address sPOLControllerProxyAddress = address(new TransparentUpgradeableProxy(dummyImplL1, _deployer, ""));
+        address sPOLControllerProxyAddress =
+            address(new TransparentUpgradeableProxy{salt: "spol-controller-proxy"}(dummyImplL1, _deployer, ""));
         address sPOLControllerproxyAdminAddress =
             address(getProxyAdmin(TransparentUpgradeableProxy(payable(sPOLControllerProxyAddress))));
-        address sPOLProxyAddress = address(new TransparentUpgradeableProxy(dummyImplL1, _deployer, ""));
+        address sPOLProxyAddress =
+            address(new TransparentUpgradeableProxy{salt: "spol-proxy"}(dummyImplL1, _deployer, ""));
         address sPOLproxyAdminAddress = address(getProxyAdmin(TransparentUpgradeableProxy(payable(sPOLProxyAddress))));
 
-        address sPOLMessengerProxyAddress = address(new TransparentUpgradeableProxy(dummyImplL1, _deployer, ""));
+        address sPOLMessengerProxyAddress =
+            address(new TransparentUpgradeableProxy{salt: "spol-messenger-proxy"}(dummyImplL1, _deployer, ""));
         address sPOLMessengerproxyAdminAddress =
             address(getProxyAdmin(TransparentUpgradeableProxy(payable(sPOLMessengerProxyAddress))));
 
-        address sPOLControllerImplAddress =
-            address(new sPOLController(polTokenL1, maticTokenL1, polygonMigration, sPOLProxyAddress, stakeManager));
+        address sPOLControllerImplAddress = address(
+            new sPOLController{salt: "spol-controller-impl"}(
+                polTokenL1, maticTokenL1, polygonMigration, sPOLProxyAddress, stakeManager
+            )
+        );
 
-        address sPOLImplAddress = address(new sPOL(sPOLControllerProxyAddress));
+        address sPOLImplAddress = address(new sPOL{salt: "spol-impl"}(sPOLControllerProxyAddress));
 
         address precalcedsPOLChildProxyAddress = computeCreate2Address(
             "sPOLChild",
@@ -86,7 +95,7 @@ contract Deploy is Script, ConfigLoader {
             _deployer
         );
         address sPOLMessengerImplAddress = address(
-            new sPOLMessenger(
+            new sPOLMessenger{salt: "spol-messenger-impl"}(
                 polTokenL1,
                 sPOLProxyAddress,
                 sPOLControllerProxyAddress,
@@ -100,14 +109,17 @@ contract Deploy is Script, ConfigLoader {
     }
 
     function deployContractsL2(address _deployer) public {
-        address dummyImplL2 = address(new DummyImpl{salt: "dummy"}());
+        address dummyImplL2 = address(new DummyImpl{salt: "dummy-impl"}());
 
-        address polBridgerAddress =
-            address(new PolBridger(polTokenL1, polTokenL2, chainIdL1, chainIdL2, erc20predicate, withdrawManager));
+        address polBridgerAddress = address(
+            new PolBridger{salt: "pol-bridger"}(
+                polTokenL1, polTokenL2, chainIdL1, chainIdL2, erc20predicate, withdrawManager
+            )
+        );
         address accessManagerL2Address = address(new AccessManager{salt: "polygon-access-manager"}(_deployer));
-        address sPOLChildImplAddress = address(new sPOLChild{salt: "sPOLChild"}(stateSyncerL2));
+        address sPOLChildImplAddress = address(new sPOLChild{salt: "spol-child-impl"}(stateSyncerL2));
         address sPOLChildProxyAddress =
-            address(new TransparentUpgradeableProxy{salt: "sPOLChild"}(dummyImplL2, accessManagerL2Address, ""));
+            address(new TransparentUpgradeableProxy{salt: "spol-child-proxy"}(dummyImplL2, accessManagerL2Address, ""));
         address sPOLChildproxyAdminAddress =
             address(getProxyAdmin(TransparentUpgradeableProxy(payable(sPOLChildProxyAddress))));
     }
