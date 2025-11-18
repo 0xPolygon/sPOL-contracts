@@ -22,19 +22,22 @@ contract Deploy is Script, ConfigLoader {
     // Deployed contracts
     sPOL public sPOLImpl;
     sPOLController public sPOLControllerImpl;
+    sPOLChild public sPOLChildImpl;
+    sPOLMessenger public sPOLMessengerImpl;
+
     TransparentUpgradeableProxy public sPOLProxy;
     TransparentUpgradeableProxy public sPOLControllerProxy;
+    TransparentUpgradeableProxy public sPOLChildProxy;
+    TransparentUpgradeableProxy public sPOLMessengerProxy;
+
     ProxyAdmin public sPOLproxyAdmin;
     ProxyAdmin public sPOLControllerproxyAdmin;
+    ProxyAdmin public sPOLChildproxyAdmin;
+    ProxyAdmin public sPOLMessengerproxyAdmin;
+
     AccessManager public accessManagerL1;
     AccessManager public accessManagerL2;
     PolBridger public polBridger;
-    sPOLChild public sPOLChildImpl;
-    sPOLMessenger public sPOLMessengerImpl;
-    TransparentUpgradeableProxy public sPOLChildProxy;
-    ProxyAdmin public sPOLChildproxyAdmin;
-    TransparentUpgradeableProxy public sPOLMessengerProxy;
-    ProxyAdmin public sPOLMessengerproxyAdmin;
 
     function run(string memory _scenarioName) public {
         uint256 pk = vm.envUint("DEPLOYER_PRIVATE_KEY");
@@ -58,70 +61,57 @@ contract Deploy is Script, ConfigLoader {
     function deployContractsL1(address _deployer) public {
         address dummyImplL1 = address(new DummyImpl{salt: "dummy-impl"}());
 
-        address polBridgerAddress = address(
-            new PolBridger{salt: "pol-bridger"}(
-                polTokenL1, polTokenL2, chainIdL1, chainIdL2, erc20predicate, withdrawManager
-            )
+        polBridger = new PolBridger{salt: "pol-bridger"}(
+            polTokenL1, polTokenL2, chainIdL1, chainIdL2, erc20predicate, withdrawManager
         );
-        address accessManagerL1Address = address(new AccessManager{salt: "polygon-access-manager"}(_deployer));
-        address sPOLControllerProxyAddress =
-            address(new TransparentUpgradeableProxy{salt: "spol-controller-proxy"}(dummyImplL1, _deployer, ""));
-        address sPOLControllerproxyAdminAddress =
-            address(getProxyAdmin(TransparentUpgradeableProxy(payable(sPOLControllerProxyAddress))));
-        address sPOLProxyAddress =
-            address(new TransparentUpgradeableProxy{salt: "spol-proxy"}(dummyImplL1, _deployer, ""));
-        address sPOLproxyAdminAddress = address(getProxyAdmin(TransparentUpgradeableProxy(payable(sPOLProxyAddress))));
+        accessManagerL1 = new AccessManager{salt: "polygon-access-manager"}(_deployer);
+        sPOLControllerProxy = new TransparentUpgradeableProxy{salt: "spol-controller-proxy"}(dummyImplL1, _deployer, "");
+        sPOLControllerproxyAdmin = getProxyAdmin(sPOLControllerProxy);
+        sPOLProxy = new TransparentUpgradeableProxy{salt: "spol-proxy"}(dummyImplL1, _deployer, "");
+        sPOLproxyAdmin = getProxyAdmin(sPOLProxy);
 
-        address sPOLMessengerProxyAddress =
-            address(new TransparentUpgradeableProxy{salt: "spol-messenger-proxy"}(dummyImplL1, _deployer, ""));
-        address sPOLMessengerproxyAdminAddress =
-            address(getProxyAdmin(TransparentUpgradeableProxy(payable(sPOLMessengerProxyAddress))));
+        sPOLMessengerProxy = new TransparentUpgradeableProxy{salt: "spol-messenger-proxy"}(dummyImplL1, _deployer, "");
+        sPOLMessengerproxyAdmin = getProxyAdmin(sPOLMessengerProxy);
 
-        address sPOLControllerImplAddress = address(
-            new sPOLController{salt: "spol-controller-impl"}(
-                polTokenL1, maticTokenL1, polygonMigration, sPOLProxyAddress, stakeManager
-            )
+        sPOLControllerImpl = new sPOLController{salt: "spol-controller-impl"}(
+            polTokenL1, maticTokenL1, polygonMigration, address(sPOLProxy), stakeManager
         );
 
-        address sPOLImplAddress = address(new sPOL{salt: "spol-impl"}(sPOLControllerProxyAddress));
+        sPOLImpl = new sPOL{salt: "spol-impl"}(address(sPOLControllerProxy));
 
         address precalcedsPOLChildProxyAddress = computeCreate2Address(
             "sPOLChild",
             keccak256(
                 abi.encodePacked(
-                    type(TransparentUpgradeableProxy).creationCode, abi.encode(dummyImplL1, accessManagerL1Address, "")
+                    type(TransparentUpgradeableProxy).creationCode,
+                    abi.encode(dummyImplL1, address(accessManagerL1), "")
                 )
             ),
             _deployer
         );
-        address sPOLMessengerImplAddress = address(
-            new sPOLMessenger{salt: "spol-messenger-impl"}(
-                polTokenL1,
-                sPOLProxyAddress,
-                sPOLControllerProxyAddress,
-                rootChainManager,
-                depositManager,
-                stateSenderL1,
-                checkpointManager,
-                precalcedsPOLChildProxyAddress
-            )
+        sPOLMessengerImpl = new sPOLMessenger{salt: "spol-messenger-impl"}(
+            polTokenL1,
+            address(sPOLProxy),
+            address(sPOLControllerProxy),
+            rootChainManager,
+            depositManager,
+            stateSenderL1,
+            checkpointManager,
+            precalcedsPOLChildProxyAddress
         );
     }
 
     function deployContractsL2(address _deployer) public {
         address dummyImplL2 = address(new DummyImpl{salt: "dummy-impl"}());
 
-        address polBridgerAddress = address(
-            new PolBridger{salt: "pol-bridger"}(
-                polTokenL1, polTokenL2, chainIdL1, chainIdL2, erc20predicate, withdrawManager
-            )
+        polBridger = new PolBridger{salt: "pol-bridger"}(
+            polTokenL1, polTokenL2, chainIdL1, chainIdL2, erc20predicate, withdrawManager
         );
-        address accessManagerL2Address = address(new AccessManager{salt: "polygon-access-manager"}(_deployer));
-        address sPOLChildImplAddress = address(new sPOLChild{salt: "spol-child-impl"}(stateSyncerL2));
-        address sPOLChildProxyAddress =
-            address(new TransparentUpgradeableProxy{salt: "spol-child-proxy"}(dummyImplL2, accessManagerL2Address, ""));
-        address sPOLChildproxyAdminAddress =
-            address(getProxyAdmin(TransparentUpgradeableProxy(payable(sPOLChildProxyAddress))));
+        accessManagerL2 = new AccessManager{salt: "polygon-access-manager"}(_deployer);
+        sPOLChildImpl = new sPOLChild{salt: "spol-child-impl"}(stateSyncerL2);
+        sPOLChildProxy =
+            new TransparentUpgradeableProxy{salt: "spol-child-proxy"}(dummyImplL2, address(accessManagerL2), "");
+        sPOLChildproxyAdmin = getProxyAdmin(sPOLChildProxy);
     }
 
     function configureDeploymentL1() public {}
@@ -137,14 +127,22 @@ contract Deploy is Script, ConfigLoader {
         json = string.concat(json, '"sPOLImpl": "', vm.toString(address(sPOLImpl)), '",');
         json = string.concat(json, '"sPOLControllerProxy": "', vm.toString(address(sPOLControllerProxy)), '",');
         json = string.concat(json, '"sPOLControllerImpl": "', vm.toString(address(sPOLControllerImpl)), '",');
+        json = string.concat(json, '"sPOLMessengerProxy": "', vm.toString(address(sPOLMessengerProxy)), '",');
+        json = string.concat(json, '"sPOLMessengerImpl": "', vm.toString(address(sPOLMessengerImpl)), '",');
         json = string.concat(json, '"sPOLProxyAdmin": "', vm.toString(address(sPOLproxyAdmin)), '",');
-        json = string.concat(json, '"sPOLControllerProxyAdmin": "', vm.toString(address(sPOLControllerproxyAdmin)), '"');
+        json =
+            string.concat(json, '"sPOLControllerProxyAdmin": "', vm.toString(address(sPOLControllerproxyAdmin)), '",');
+        json = string.concat(json, '"sPOLMessengerProxyAdmin": "', vm.toString(address(sPOLMessengerproxyAdmin)), '",');
+        json = string.concat(json, '"accessManagerL1": "', vm.toString(address(accessManagerL1)), '",');
+        json = string.concat(json, '"polBridger": "', vm.toString(address(polBridger)), '"');
         json = string.concat(json, "},");
 
         json = string.concat(json, '"sPOL_L2": {');
         json = string.concat(json, '"sPOLChildProxy": "', vm.toString(address(sPOLChildProxy)), '",');
         json = string.concat(json, '"sPOLChildImpl": "', vm.toString(address(sPOLChildImpl)), '",');
-        json = string.concat(json, '"sPOLChildProxyAdmin": "', vm.toString(address(sPOLChildproxyAdmin)), '"');
+        json = string.concat(json, '"sPOLChildProxyAdmin": "', vm.toString(address(sPOLChildproxyAdmin)), '",');
+        json = string.concat(json, '"accessManagerL2": "', vm.toString(address(accessManagerL2)), '",');
+        json = string.concat(json, '"polBridger": "', vm.toString(address(polBridger)), '"');
         json = string.concat(json, "}");
 
         json = string.concat(json, "}");
