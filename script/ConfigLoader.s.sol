@@ -15,11 +15,13 @@ contract ConfigLoader is Script {
     address public childChainManager;
     address public rootChainManager;
     address public depositManager;
-    address public stateSyncer;
+    address public stateSenderL1;
     address public maticTokenL1;
     address public polygonMigration;
     address public stakeManager;
+    address public checkpointManager;
     address public feeReceiver;
+    address public stateSyncerL2;
     uint8 public rewardFee;
     uint8 public maxDivergence;
     address public admin;
@@ -42,7 +44,9 @@ contract ConfigLoader is Script {
         childChainManager = makeAddr("childChainManager");
         rootChainManager = makeAddr("rootChainManager");
         depositManager = makeAddr("depositManager");
-        stateSyncer = makeAddr("stateSyncer");
+        stateSenderL1 = makeAddr("stateSender");
+        checkpointManager = makeAddr("checkpointManager");
+        stateSyncerL2 = makeAddr("stateSyncerL2");
 
         validateConfig();
         console.log("Loaded configuration for scenario:", scenarioName);
@@ -79,7 +83,9 @@ contract ConfigLoader is Script {
         childChainManager = vm.parseJsonAddress(json, string.concat(scenarioName, ".childChainManager"));
         rootChainManager = vm.parseJsonAddress(json, string.concat(scenarioName, ".rootChainManager"));
         depositManager = vm.parseJsonAddress(json, string.concat(scenarioName, ".depositManager"));
-        stateSyncer = vm.parseJsonAddress(json, string.concat(scenarioName, ".stateSyncer"));
+        stateSenderL1 = vm.parseJsonAddress(json, string.concat(scenarioName, ".stateSenderL1"));
+        checkpointManager = vm.parseJsonAddress(json, string.concat(scenarioName, ".checkpointManager"));
+        stateSyncerL2 = vm.parseJsonAddress(json, string.concat(scenarioName, ".stateSyncerL2"));
 
         validateConfig();
         console.log("Loaded configuration for scenario:", scenarioName);
@@ -124,7 +130,9 @@ contract ConfigLoader is Script {
         require(childChainManager != address(0), "Child Chain Manager address is zero");
         require(rootChainManager != address(0), "Root Chain Manager address is zero");
         require(depositManager != address(0), "Deposit Manager address is zero");
-        require(stateSyncer != address(0), "State Syncer address is zero");
+        require(stateSenderL1 != address(0), "State Syncer address is zero");
+        require(checkpointManager != address(0), "Checkpoint Manager address is zero");
+        require(stateSyncerL2 != address(0), "State Syncer L2 address is zero");
         require(admin != address(0), "Admin address is zero");
     }
 }
