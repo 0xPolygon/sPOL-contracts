@@ -4,6 +4,7 @@ pragma solidity ^0.8.30;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {sPOLController as IsPOLController} from "./sPOLController.sol";
 import {IRootChainManager} from "./msg/interfaces/IRootChainManager.sol";
+import {DepositManager as IDepositManager} from "./interfaces/IDepositManager.sol";
 import {BaseRootTunnel} from "./msg/BaseRootTunnel.sol";
 import {MsgCoder} from "./MsgCoder.sol";
 import {Initializable} from "@openzeppelin-contracts-upgradeable/proxy/utils/Initializable.sol";
@@ -18,6 +19,7 @@ contract sPOLMessenger is Initializable, PausableUpgradeable, AccessManagedUpgra
     address public child;
 
     IRootChainManager public immutable rootChainManager;
+    IDepositManager public immutable depositManager;
     IsPOLController public immutable sPOLController;
 
     mapping(uint256 => uint256[]) public backfillNonces;
@@ -28,6 +30,7 @@ contract sPOLMessenger is Initializable, PausableUpgradeable, AccessManagedUpgra
         address _sPOLToken,
         address _sPOLController,
         address _rootChainManager,
+        address _depositManager,
         address _stateSender,
         address _checkpointManager,
         address _childTunnel
@@ -36,6 +39,7 @@ contract sPOLMessenger is Initializable, PausableUpgradeable, AccessManagedUpgra
         sPOLToken = IERC20(_sPOLToken);
         sPOLController = IsPOLController(_sPOLController);
         rootChainManager = IRootChainManager(_rootChainManager);
+        depositManager = IDepositManager(_depositManager);
         _disableInitializers();
     }
 
@@ -84,7 +88,7 @@ contract sPOLMessenger is Initializable, PausableUpgradeable, AccessManagedUpgra
             sPOLController.withdrawPOL(backfillNonces[_backFillCycle][i]);
             // add to total withdraw
         }
-        rootChainManager.depositFor(child, address(polToken), abi.encodePacked(totalWithdraw));
+        depositManager.depositERC20ForUser(address(polToken), child, totalWithdraw);
         _sendMessageToChild(
             abi.encode(MsgType.L1_BACKFILL_RESPONSE, encodeL1BackfillResponseMessage(totalWithdraw, _backFillCycle))
         );
