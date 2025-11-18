@@ -16,26 +16,9 @@ import {sPOLController} from "../src/sPOLController.sol";
 import {sPOLChild} from "../src/sPOLChild.sol";
 import {sPOLMessenger} from "../src/sPOLMessenger.sol";
 
-contract Deploy is Script {
-    // Network configuration variables
-    string public networkName;
-    uint256 public chainIdL1;
-    uint256 public chainIdL2;
-    address public polTokenL1;
-    address public polTokenL2;
-    address public withdrawManager;
-    address public erc20predicate;
-    address public childChainManager;
-    address public rootChainManager;
-    address public stateSyncer;
-    address public maticToken;
-    address public polygonMigration;
-    address public stakeManager;
-    address public admin;
-    address public feeReceiver;
-    uint8 public rewardFee;
-    uint8 public maxDivergence;
+import {ConfigLoader} from "./ConfigLoader.s.sol";
 
+contract Deploy is Script, ConfigLoader {
     // Deployed contracts
     sPOL public sPOLImpl;
     sPOLController public sPOLControllerImpl;
@@ -53,86 +36,16 @@ contract Deploy is Script {
     TransparentUpgradeableProxy public sPOLMessengerProxy;
     ProxyAdmin public sPOLMessengerproxyAdmin;
 
-    function run() public {
+    function run(string memory _scenarioName) public {
         uint256 pk = vm.envUint("DEPLOYER_PRIVATE_KEY");
         vm.startBroadcast(pk);
-        deployFromJson(vm.addr(pk));
+        deployFromJson(vm.addr(pk), _scenarioName);
         vm.stopBroadcast();
     }
 
-    function loadMockConfig() public {
-        networkName = "mock-network";
-        polTokenL1 = makeAddr("polToken");
-        polTokenL2 = makeAddr("polTokenL2");
-        chainIdL1 = 1;
-        chainIdL2 = 2;
-        maticToken = makeAddr("maticToken");
-        polygonMigration = makeAddr("polygonMigration");
-        stakeManager = makeAddr("stakeManager");
-        admin = makeAddr("admin");
-        feeReceiver = makeAddr("feeReceiver");
-        rewardFee = 100; // 10%
-        maxDivergence = 10; // 10%
-    }
-
-    // Load configuration from JSON file for specific chain ID
-    function loadConfigFromJson(uint256 chainId) public {
-        string memory root = vm.projectRoot();
-        string memory path = string.concat(root, "/script/input.json");
-        string memory json = vm.readFile(path);
-
-        string memory chainIdStr = vm.toString(chainId);
-        string memory networkKey = string.concat(".networks.", chainIdStr);
-
-        // Check if network exists in JSON
-        bytes memory networkData = vm.parseJson(json, networkKey);
-        require(networkData.length > 0, string.concat("Network configuration not found for chain ID: ", chainIdStr));
-
-        // Parse network configuration
-        networkName = vm.parseJsonString(json, string.concat(networkKey, ".name"));
-        polTokenL1 = vm.parseJsonAddress(json, string.concat(networkKey, ".polTokenL1"));
-        polTokenL2 = vm.parseJsonAddress(json, string.concat(networkKey, ".polTokenL2"));
-        chainIdL1 = vm.parseJsonUint(json, string.concat(networkKey, ".chainIdL1"));
-        chainIdL2 = vm.parseJsonUint(json, string.concat(networkKey, ".chainIdL2"));
-
-        maticToken = vm.parseJsonAddress(json, string.concat(networkKey, ".maticToken"));
-        polygonMigration = vm.parseJsonAddress(json, string.concat(networkKey, ".polygonMigration"));
-        stakeManager = vm.parseJsonAddress(json, string.concat(networkKey, ".stakeManager"));
-        admin = vm.parseJsonAddress(json, string.concat(networkKey, ".admin"));
-        feeReceiver = vm.parseJsonAddress(json, string.concat(networkKey, ".feeReceiver"));
-        rewardFee = uint8(vm.parseJsonUint(json, string.concat(networkKey, ".rewardFee")));
-        maxDivergence = uint8(vm.parseJsonUint(json, string.concat(networkKey, ".maxDivergence")));
-
-        console.log("Loaded configuration for network:", networkName);
-        console.log("Chain ID:", chainId);
-    }
-
-    // Set custom configuration (for advanced usage)
-    function setCustomConfig(
-        address _polToken,
-        address _maticToken,
-        address _polygonMigration,
-        address _stakeManager,
-        address _admin,
-        address _feeReceiver,
-        uint8 _rewardFee,
-        uint8 _maxDivergence
-    ) public {
-        networkName = "custom";
-        polTokenL1 = _polToken;
-        maticToken = _maticToken;
-        polygonMigration = _polygonMigration;
-        stakeManager = _stakeManager;
-        admin = _admin;
-        feeReceiver = _feeReceiver;
-        rewardFee = _rewardFee;
-        maxDivergence = _maxDivergence;
-        console.log("Using custom configuration");
-    }
-
     // Deploy using configuration loaded from JSON file for current chain
-    function deployFromJson(address _deployer) public {
-        loadConfigFromJson(block.chainid);
+    function deployFromJson(address _deployer, string memory _scenarioName) public {
+        loadConfigFromJson(_scenarioName);
         _deployL1(_deployer);
     }
 
@@ -144,24 +57,9 @@ contract Deploy is Script {
 
     function _deployL1(address _deployer) internal {
         console.log("Starting deployment...");
-        console.log("Network:", networkName);
+        console.log("Network:", chainIdL1);
         console.log("Deployer:", _deployer);
         console.log("Chain ID:", block.chainid);
-
-        // Validate configuration
-        require(polTokenL1 != address(0), "POL token L1 address not set");
-        require(polTokenL2 != address(0), "POL token L2 address not set");
-        require(chainIdL1 != 0, "Chain ID L1 not set");
-        require(chainIdL2 != 0, "Chain ID L2 not set");
-        require(erc20predicate != address(0), "ERC20Predicate address not set");
-        require(withdrawManager != address(0), "WithdrawManager address not set");
-        require(maticToken != address(0), "Matic token address not set");
-        require(polygonMigration != address(0), "PolygonMigration address not set");
-        require(stakeManager != address(0), "StakeManager address not set");
-        require(admin != address(0), "Admin address not set");
-        require(feeReceiver != address(0), "Fee receiver address not set");
-        require(rewardFee <= 1000, "Reward fee too high"); // Max 100%
-        require(maxDivergence <= 100, "Max divergence too high"); // Max 100%
 
         // Step 0: Deploy dummyImpl
         address dummyImpl = address(new DummyImpl());
@@ -194,7 +92,7 @@ contract Deploy is Script {
 
         // Step 5: Deploy sPOLController implementation with the real sPOL proxy address
         sPOLControllerImpl =
-            new sPOLController(polTokenL1, maticToken, polygonMigration, address(sPOLProxy), stakeManager);
+            new sPOLController(polTokenL1, maticTokenL1, polygonMigration, address(sPOLProxy), stakeManager);
         console.log("sPOLController implementation deployed at:", address(sPOLControllerImpl));
 
         // Step 6: Use the proxy admin to upgrade sPOLController proxy
@@ -227,7 +125,7 @@ contract Deploy is Script {
 
     function _deployL2(address _deployer) internal {
         console.log("Starting deployment...");
-        console.log("Network:", networkName);
+        console.log("Network:", chainIdL2);
         console.log("Deployer:", _deployer);
         console.log("Chain ID:", block.chainid);
 
@@ -238,7 +136,7 @@ contract Deploy is Script {
         require(chainIdL2 != 0, "Chain ID L2 not set");
         require(erc20predicate != address(0), "ERC20Predicate address not set");
         require(withdrawManager != address(0), "WithdrawManager address not set");
-        require(maticToken != address(0), "Matic token address not set");
+        require(maticTokenL1 != address(0), "Matic token address not set");
         require(polygonMigration != address(0), "PolygonMigration address not set");
         require(stakeManager != address(0), "StakeManager address not set");
         require(admin != address(0), "Admin address not set");
