@@ -11,8 +11,7 @@ contract sPOLControllerVldMgnTest is Test, Deploy {
     sPOLController controller;
 
     // Test addresses
-    address testAdmin = makeAddr("testAdmin");
-    address testFeeReceiver = makeAddr("testFeeReceiver");
+    address testAdmin;
     address nonAdmin = makeAddr("nonAdmin");
     address testStakeManager = makeAddr("testStakeManager");
     address testValidatorShare1 = makeAddr("testValidatorShare1");
@@ -30,18 +29,15 @@ contract sPOLControllerVldMgnTest is Test, Deploy {
     event ValidatorTargetShareChanged(uint16 validatorId, uint8 newTargetShare);
 
     function setUp() public {
-        // Deploy using the existing deploy script but with custom config
-        setCustomConfig(
-            makeAddr("polToken"),
-            makeAddr("maticToken"),
-            makeAddr("polygonMigration"),
-            testStakeManager,
-            testAdmin,
-            testFeeReceiver,
-            100, // 10% fee
-            10 // 10% max divergence
-        );
-        _deployL1(address(this));
+        // Set mock values
+        loadMockConfig();
+        // Custom config
+        stakeManager = testStakeManager;
+        // Deploy contracts
+        deployContractsL1(address(this));
+
+        // Get config values
+        testAdmin = admin;
 
         controller = sPOLController(address(sPOLControllerProxy));
 

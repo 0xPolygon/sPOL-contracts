@@ -11,22 +11,18 @@ contract sPOLControllerConversionTest is Test, Deploy {
     sPOL token;
 
     // Test addresses
-    address testAdmin = makeAddr("testAdmin");
-    address testFeeReceiver = makeAddr("testFeeReceiver");
+    address testAdmin;
 
     function setUp() public {
-        // Deploy with minimal config just for conversion tests
-        setCustomConfig(
-            makeAddr("polToken"),
-            makeAddr("maticToken"),
-            makeAddr("polygonMigration"),
-            makeAddr("stakeManager"),
-            testAdmin,
-            testFeeReceiver,
-            100, // 10% fee
-            10 // 10% max divergence
-        );
-        _deployL1(address(this));
+        // Set mock values
+        loadMockConfig();
+        // Custom config
+
+        // Deploy contracts
+        deployContractsL1(address(this));
+
+        // Get config values
+        testAdmin = admin;
 
         controller = sPOLController(address(sPOLControllerProxy));
         token = sPOL(address(sPOLProxy));

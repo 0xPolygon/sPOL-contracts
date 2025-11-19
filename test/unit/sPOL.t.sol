@@ -21,7 +21,7 @@ contract sPOLTest is Test, Deploy {
     event Approval(address indexed owner, address indexed spender, uint256 value);
 
     function setUp() public {
-        deployWithMockConfig(address(this));
+        deployL1WithMockConfig(address(this));
 
         // Get deployed contracts from deployer
         token = sPOL(address(sPOLProxy));

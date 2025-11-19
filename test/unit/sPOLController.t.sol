@@ -34,28 +34,25 @@ contract sPOLControllerTest is Test, Deploy {
 
     function setUp() public {
         // Create test addresses
-        testAdmin = makeAddr("testAdmin");
-        testFeeReceiver = makeAddr("testFeeReceiver");
         newFeeReceiver = makeAddr("newFeeReceiver");
         nonAdmin = makeAddr("nonAdmin");
         user = makeAddr("user");
 
-        // Deploy using the existing deploy script but with custom config
-        setCustomConfig(
-            makeAddr("polToken"),
-            makeAddr("maticToken"),
-            makeAddr("polygonMigration"),
-            makeAddr("stakeManager"),
-            testAdmin,
-            testFeeReceiver,
-            INITIAL_REWARD_FEE,
-            MAX_DIVERGENCE
-        );
-        _deployL1(address(this));
+        // Set mock values
+        loadMockConfig();
+        // Custom config
+        rewardFee = INITIAL_REWARD_FEE;
+        maxDivergence = MAX_DIVERGENCE;
+        // Deploy contracts
+        deployContractsL1(address(this));
 
         // Get deployed contract instances
         sPOLToken = sPOL(address(sPOLProxy));
         controller = sPOLController(address(sPOLControllerProxy));
+
+        // Get config values
+        testAdmin = admin;
+        testFeeReceiver = feeReceiver;
 
         // Verify initial state
         assertEq(controller.authority(), address(accessManagerL1));
