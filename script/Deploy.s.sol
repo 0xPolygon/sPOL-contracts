@@ -181,8 +181,8 @@ contract Deploy is Script, ConfigLoader {
         );
         accessManagerL2.execute(address(sPOLChildproxyAdmin), upgradeAndCalldata);
 
-        accessManagerL2.grantRole(accessManagerL1.ADMIN_ROLE(), admin, 0);
-        accessManagerL2.renounceRole(accessManagerL1.ADMIN_ROLE(), _deployer);
+        accessManagerL2.grantRole(accessManagerL2.ADMIN_ROLE(), admin, 0);
+        accessManagerL2.renounceRole(accessManagerL2.ADMIN_ROLE(), _deployer);
 
         _verifyDeploymentL2();
     }
@@ -255,7 +255,7 @@ contract Deploy is Script, ConfigLoader {
         // Verify sPOLChild
         require(child.stateSyncer() == stateSyncerL2, "sPOLChild state syncer incorrect");
         require(address(child.bridgeHelper()) == address(polBridger), "sPOLChild bridger incorrect");
-        require(child.authority() == address(accessManagerL1), "sPOLChild admin incorrect");
+        require(child.authority() == address(accessManagerL2), "sPOLChild admin incorrect");
         require(child.childChainManager() == childChainManager, "sPOLChild child chain manager incorrect");
         require(child.l1Messenger() == address(sPOLMessengerProxy), "sPOLChild messenger incorrect");
         require(
