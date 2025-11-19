@@ -49,13 +49,24 @@ contract Deploy is Script, ConfigLoader {
     // Deploy using configuration loaded from JSON file for current chain
     function deployFromJson(address _deployer, string memory _scenarioName) public {
         loadConfigFromJson(_scenarioName);
-        _deployL1(_deployer);
+        deployContractsL1(_deployer);
+        deployContractsL2(_deployer);
     }
 
-    // Deploy using mock configuration (for testing)
-    function deployWithMockConfig(address _deployer) public {
+    function deployL1WithMockConfig(address _deployer) public {
         loadMockConfig();
-        _deployL1(_deployer);
+        deployContractsL1(_deployer);
+    }
+
+    function deployL2WithMockConfig(address _deployer) public {
+        loadMockConfig();
+        deployContractsL2(_deployer);
+    }
+
+    function deployFullWithMockConfig(address _deployer) public {
+        loadMockConfig();
+        deployContractsL1(_deployer);
+        deployContractsL2(_deployer);
     }
 
     function deployContractsL1(address _deployer) public {
@@ -65,12 +76,16 @@ contract Deploy is Script, ConfigLoader {
             polTokenL1, polTokenL2, chainIdL1, chainIdL2, erc20predicate, withdrawManager
         );
         accessManagerL1 = new AccessManager{salt: "polygon-access-manager"}(_deployer);
-        sPOLControllerProxy = new TransparentUpgradeableProxy{salt: "spol-controller-proxy"}(dummyImplL1, _deployer, "");
+
+        sPOLControllerProxy =
+            new TransparentUpgradeableProxy{salt: "spol-controller-proxy"}(dummyImplL1, address(accessManagerL1), "");
         sPOLControllerproxyAdmin = getProxyAdmin(sPOLControllerProxy);
-        sPOLProxy = new TransparentUpgradeableProxy{salt: "spol-proxy"}(dummyImplL1, _deployer, "");
+
+        sPOLProxy = new TransparentUpgradeableProxy{salt: "spol-proxy"}(dummyImplL1, address(accessManagerL1), "");
         sPOLproxyAdmin = getProxyAdmin(sPOLProxy);
 
-        sPOLMessengerProxy = new TransparentUpgradeableProxy{salt: "spol-messenger-proxy"}(dummyImplL1, _deployer, "");
+        sPOLMessengerProxy =
+            new TransparentUpgradeableProxy{salt: "spol-messenger-proxy"}(dummyImplL1, address(accessManagerL1), "");
         sPOLMessengerproxyAdmin = getProxyAdmin(sPOLMessengerProxy);
 
         sPOLControllerImpl = new sPOLController{salt: "spol-controller-impl"}(
@@ -79,8 +94,8 @@ contract Deploy is Script, ConfigLoader {
 
         sPOLImpl = new sPOL{salt: "spol-impl"}(address(sPOLControllerProxy));
 
-        address precalcedsPOLChildProxyAddress = computeCreate2Address(
-            "sPOLChild",
+        address precalcedsPOLChildProxyAddress = vm.computeCreate2Address(
+            "spol-child-proxy",
             keccak256(
                 abi.encodePacked(
                     type(TransparentUpgradeableProxy).creationCode,
@@ -99,6 +114,8 @@ contract Deploy is Script, ConfigLoader {
             checkpointManager,
             precalcedsPOLChildProxyAddress
         );
+
+        _configureDeploymentL1(_deployer);
     }
 
     function deployContractsL2(address _deployer) public {
@@ -112,10 +129,63 @@ contract Deploy is Script, ConfigLoader {
         sPOLChildProxy =
             new TransparentUpgradeableProxy{salt: "spol-child-proxy"}(dummyImplL2, address(accessManagerL2), "");
         sPOLChildproxyAdmin = getProxyAdmin(sPOLChildProxy);
+
+        _configureDeploymentL2(_deployer);
     }
 
-    function configureDeploymentL1() public {}
-    function configureDeploymentL2() public {}
+    function _configureDeploymentL1(address _deployer) internal {
+        bytes memory upgradeAndCallsPOLdata = abi.encodeCall(
+            ProxyAdmin.upgradeAndCall,
+            (ITransparentUpgradeableProxy(address(sPOLProxy)), address(sPOLImpl), abi.encodeCall(sPOL.initialize, ()))
+        );
+        accessManagerL1.execute(address(sPOLproxyAdmin), upgradeAndCallsPOLdata);
+
+        bytes memory upgradeAndCallsPOLMessengerdata = abi.encodeCall(
+            ProxyAdmin.upgradeAndCall,
+            (
+                ITransparentUpgradeableProxy(address(sPOLMessengerProxy)),
+                address(sPOLMessengerImpl),
+                abi.encodeCall(sPOLMessenger.initialize, (address(accessManagerL1)))
+            )
+        );
+        accessManagerL1.execute(address(sPOLMessengerproxyAdmin), upgradeAndCallsPOLMessengerdata);
+
+        bytes memory upgradeAndCallsPOLControllerdata = abi.encodeCall(
+            ProxyAdmin.upgradeAndCall,
+            (
+                ITransparentUpgradeableProxy(address(sPOLControllerProxy)),
+                address(sPOLControllerImpl),
+                abi.encodeCall(
+                    sPOLController.initialize, (rewardFee, feeReceiver, maxDivergence, address(accessManagerL1))
+                )
+            )
+        );
+        accessManagerL1.execute(address(sPOLControllerproxyAdmin), upgradeAndCallsPOLControllerdata);
+
+        accessManagerL1.grantRole(accessManagerL1.ADMIN_ROLE(), admin, 0);
+        accessManagerL1.renounceRole(accessManagerL1.ADMIN_ROLE(), _deployer);
+        _verifyDeploymentL1();
+    }
+
+    function _configureDeploymentL2(address _deployer) internal {
+        bytes memory upgradeAndCalldata = abi.encodeCall(
+            ProxyAdmin.upgradeAndCall,
+            (
+                ITransparentUpgradeableProxy(address(sPOLChildProxy)),
+                address(sPOLChildImpl),
+                abi.encodeCall(
+                    sPOLChild.initialize,
+                    (address(accessManagerL2), address(sPOLMessengerProxy), address(polBridger), childChainManager)
+                )
+            )
+        );
+        accessManagerL2.execute(address(sPOLChildproxyAdmin), upgradeAndCalldata);
+
+        accessManagerL2.grantRole(accessManagerL1.ADMIN_ROLE(), admin, 0);
+        accessManagerL2.renounceRole(accessManagerL1.ADMIN_ROLE(), _deployer);
+
+        _verifyDeploymentL2();
+    }
 
     function writeDeploymentInfoToJSON() public {
         string memory root = vm.projectRoot();
@@ -148,127 +218,6 @@ contract Deploy is Script, ConfigLoader {
         json = string.concat(json, "}");
 
         vm.writeFile(path, json);
-    }
-
-    function _deployL1(address _deployer) internal {
-        console.log("Starting deployment...");
-        console.log("Network:", chainIdL1);
-        console.log("Deployer:", _deployer);
-        console.log("Chain ID:", block.chainid);
-
-        // Step 0: Deploy dummyImpl
-        address dummyImpl = address(new DummyImpl());
-
-        // Step 0.1: Deploy bridger
-        polBridger = new PolBridger(polTokenL1, polTokenL2, chainIdL1, chainIdL2, erc20predicate, withdrawManager);
-
-        // Step 1: Deploy AccessManager
-        accessManagerL1 = new AccessManager{salt: "polygon-access-manager"}(admin);
-
-        // Step 2: Deploy sPOLController proxy with temporary implementation (no initialization)
-        sPOLControllerProxy = new TransparentUpgradeableProxy(dummyImpl, _deployer, "");
-        console.log("sPOLController proxy deployed at:", address(sPOLControllerProxy));
-
-        // Get the proxy admin address from EIP-1967 admin slot
-        sPOLControllerproxyAdmin = getProxyAdmin(sPOLControllerProxy);
-        console.log("Proxy admin deployed at:", address(sPOLControllerproxyAdmin));
-
-        // Step 3: Deploy sPOL implementation with the controller proxy address
-        sPOLImpl = new sPOL(address(sPOLControllerProxy));
-        console.log("sPOL implementation deployed at:", address(sPOLImpl));
-
-        // Step 4: Deploy sPOL proxy
-        bytes memory tokenInitData = abi.encodeCall(sPOL.initialize, ());
-        sPOLProxy = new TransparentUpgradeableProxy(address(sPOLImpl), _deployer, tokenInitData);
-        console.log("sPOL proxy deployed at:", address(sPOLProxy));
-
-        sPOLproxyAdmin = getProxyAdmin(sPOLProxy);
-        console.log("Proxy admin deployed at:", address(sPOLProxy));
-
-        // Step 5: Deploy sPOLController implementation with the real sPOL proxy address
-        sPOLControllerImpl =
-            new sPOLController(polTokenL1, maticTokenL1, polygonMigration, address(sPOLProxy), stakeManager);
-        console.log("sPOLController implementation deployed at:", address(sPOLControllerImpl));
-
-        // Step 6: Use the proxy admin to upgrade sPOLController proxy
-        bytes memory controllerInitData = abi.encodeCall(
-            sPOLController.initialize, (rewardFee, feeReceiver, maxDivergence, address(accessManagerL1))
-        );
-
-        sPOLControllerproxyAdmin.upgradeAndCall(
-            ITransparentUpgradeableProxy(address(sPOLControllerProxy)), address(sPOLControllerImpl), controllerInitData
-        );
-        console.log("sPOLController proxy upgraded to new implementation");
-
-        // Step 6: Transfer ProxyAdmin ownership to the designated admin
-        sPOLControllerproxyAdmin.transferOwnership(admin);
-        console.log("sPOL ProxyAdmin ownership transferred to:", admin);
-        sPOLproxyAdmin.transferOwnership(admin);
-        console.log("sPOL Controller ProxyAdmin ownership transferred to:", admin);
-
-        // Verify deployment
-        _verifyDeploymentL1();
-
-        console.log("Deployment completed successfully!");
-        console.log("sPOL Token (proxy):", address(sPOLProxy));
-        console.log("sPOL Token (implementation):", address(sPOLImpl));
-        console.log("sPOLController (proxy):", address(sPOLControllerProxy));
-        console.log("sPOLController (implementation):", address(sPOLControllerImpl));
-        console.log("sPOL Proxy Admin Address:", address(sPOLproxyAdmin));
-        console.log("sPOL Controller Proxy Admin Address:", address(sPOLControllerproxyAdmin));
-    }
-
-    function _deployL2(address _deployer) internal {
-        console.log("Starting deployment...");
-        console.log("Network:", chainIdL2);
-        console.log("Deployer:", _deployer);
-        console.log("Chain ID:", block.chainid);
-
-        // Validate configuration
-        require(polTokenL1 != address(0), "POL token L1 address not set");
-        require(polTokenL2 != address(0), "POL token L2 address not set");
-        require(chainIdL1 != 0, "Chain ID L1 not set");
-        require(chainIdL2 != 0, "Chain ID L2 not set");
-        require(erc20predicate != address(0), "ERC20Predicate address not set");
-        require(withdrawManager != address(0), "WithdrawManager address not set");
-        require(maticTokenL1 != address(0), "Matic token address not set");
-        require(polygonMigration != address(0), "PolygonMigration address not set");
-        require(stakeManager != address(0), "StakeManager address not set");
-        require(admin != address(0), "Admin address not set");
-        require(address(sPOLMessengerProxy) != address(0), "sPOLMessengerProxy address not set");
-        require(childChainManager != address(0), "ChildChainManager address not set");
-
-        // Step 0.1: Deploy bridger
-        polBridger = new PolBridger(polTokenL1, polTokenL2, chainIdL1, chainIdL2, erc20predicate, withdrawManager);
-
-        // Step 1: Deploy AccessManager
-        accessManagerL2 = new AccessManager{salt: "polygon-access-manager"}(admin);
-
-        // Step 2: Deploy sPOLChild implementation
-        sPOLChildImpl = new sPOLChild(stateSyncerL2);
-        console.log("sPOLChild implementation deployed at:", address(sPOLChildImpl));
-
-        // Step 3: Deploy sPOLChild proxy and initialize
-        bytes memory childInitData = abi.encodeCall(
-            sPOLChild.initialize,
-            (address(accessManagerL2), address(sPOLMessengerProxy), address(polBridger), childChainManager)
-        );
-        sPOLChildProxy =
-            new TransparentUpgradeableProxy(address(sPOLChildImpl), address(accessManagerL2), childInitData);
-        console.log("sPOLChild proxy deployed at:", address(sPOLControllerProxy));
-
-        sPOLChildproxyAdmin = getProxyAdmin(sPOLChildProxy);
-        console.log("sPOLChild ProxyAdmin deployed at:", address(sPOLChildproxyAdmin));
-
-        // Verify deployment
-        _verifyDeploymentL2();
-
-        console.log("Deployment completed successfully!");
-        console.log("polBridger Address:", address(polBridger));
-        console.log("AccessManager L2 Address:", address(accessManagerL2));
-        console.log("sPOLChild Token (proxy):", address(sPOLChildProxy));
-        console.log("sPOLChild Token (implementation):", address(sPOLChildImpl));
-        console.log("sPOLChild Proxy Admin Address:", address(sPOLChildproxyAdmin));
     }
 
     function _verifyDeploymentL1() internal view {
@@ -316,23 +265,6 @@ contract Deploy is Script, ConfigLoader {
         );
         require(getProxyAdmin(sPOLChildProxy).owner() == address(accessManagerL2), "sPOLChild ProxyAdmin wrong owner");
         console.log("All verifications passed for L2!");
-    }
-
-    function deployWithParams(
-        address _polToken,
-        address _maticToken,
-        address _polygonMigration,
-        address _stakeManager,
-        uint8 _rewardFee,
-        address _feeReceiver,
-        uint8 _maxDivergence,
-        address _admin,
-        address _deployer
-    ) external {
-        setCustomConfig(
-            _polToken, _maticToken, _polygonMigration, _stakeManager, _admin, _feeReceiver, _rewardFee, _maxDivergence
-        );
-        _deployL1(_deployer);
     }
 
     function getProxyAdmin(TransparentUpgradeableProxy proxy) internal view returns (ProxyAdmin) {

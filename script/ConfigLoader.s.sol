@@ -91,28 +91,6 @@ contract ConfigLoader is Script {
         console.log("Loaded configuration for scenario:", scenarioName);
     }
 
-    // Set custom configuration (for advanced usage)
-    function setCustomConfig(
-        address _polToken,
-        address _maticTokenL1,
-        address _polygonMigration,
-        address _stakeManager,
-        address _admin,
-        address _feeReceiver,
-        uint8 _rewardFee,
-        uint8 _maxDivergence
-    ) public {
-        polTokenL1 = _polToken;
-        maticTokenL1 = _maticTokenL1;
-        polygonMigration = _polygonMigration;
-        stakeManager = _stakeManager;
-        admin = _admin;
-        feeReceiver = _feeReceiver;
-        rewardFee = _rewardFee;
-        maxDivergence = _maxDivergence;
-        console.log("Using custom configuration");
-    }
-
     function validateConfig() public view {
         require(bytes(scenarioName).length != 0, "Scenario name is empty");
         require(polTokenL1 != address(0), "POL Token L1 address is zero");

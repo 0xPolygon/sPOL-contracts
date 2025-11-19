@@ -4,6 +4,7 @@ out = "out"
 libs = ["lib", "dependencies"]
 optimizer = true
 fs_permissions = [{ access = "read", path = "script"}]
+always_use_create_2_factory = true
 
 
 [lint]
