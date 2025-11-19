@@ -102,6 +102,12 @@ contract sPOLChild is
         l1Messenger = _l1Messenger;
         bridgeHelper = PolBridger(_bridgeHelper);
         childChainManager = _childChainManager;
+
+        // Init so update can work
+        // we leave lastExchangeRateUpdate at 0 so no one can buy sPOL before first update
+        // sell still works, but with this exchange rate it's very unfavorable
+        l1DPOLBalance = 1;
+        l1SPOLBalance = 1;
     }
 
     function _processMessageFromRoot(bytes memory message) internal virtual override {
@@ -220,22 +226,22 @@ contract sPOLChild is
         if (_sPOLAmount == 0) {
             return 0;
         }
-        // we intentionally create a revert here if no sPOL is on L1/no rate update happened
-        return (_sPOLAmount * l1DPOLBalance / l1SPOLBalance);
+        return (_sPOLAmount * l1DPOLBalance) / l1SPOLBalance;
     }
 
     function convertPOLToSPOL(uint256 _polAmount) public view returns (uint256) {
         if (_polAmount == 0) {
             return 0;
         }
-        // we intentionally create a revert here if no sPOL is on L1/no rate update happened
         return
-            (_polAmount * l1SPOLBalance / l1DPOLBalance) * (SAFETY_FEE_DENOMINATOR - safetyFee) / SAFETY_FEE_DENOMINATOR;
+            (_polAmount * l1SPOLBalance * (SAFETY_FEE_DENOMINATOR - safetyFee))
+                / (l1DPOLBalance * SAFETY_FEE_DENOMINATOR);
     }
 
     function buySPOL(uint256 _polAmount) external payable whenNotPaused {
         require(lastExchangeRateUpdate + maxExchangeRateUpdateDelay >= block.timestamp, "Exchange rate update too old");
         require(msg.value == _polAmount, "Incorrect POL amount sent");
+        require(_polAmount > 0, "POL amount must be greater than 0");
         uint256 spolToMint = convertPOLToSPOL(_polAmount);
         locallyMintedSPOL += spolToMint;
         actualQuickRedeemReserve += _polAmount;
@@ -248,7 +254,7 @@ contract sPOLChild is
         _transfer(msg.sender, address(this), _sPOLAmount);
         locallyToBeBurnedSPOL += _sPOLAmount;
         uint256 polToReturn = convertSPOLToPOL(_sPOLAmount);
-        emit sPOLBurned(msg.sender, _sPOLAmount, polToReturn, globalWithdrawNonce++);
+        emit sPOLBurned(msg.sender, _sPOLAmount, polToReturn, ++globalWithdrawNonce);
         if (actualQuickRedeemReserve >= polToReturn) {
             _quickSellSPOL(polToReturn);
         } else {
