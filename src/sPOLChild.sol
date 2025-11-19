@@ -234,7 +234,7 @@ contract sPOLChild is
     }
 
     function buySPOL(uint256 _polAmount) external payable whenNotPaused {
-        require(lastExchangeRateUpdate + maxExchangeRateUpdateDelay <= block.timestamp, "Exchange rate update too old");
+        require(lastExchangeRateUpdate + maxExchangeRateUpdateDelay >= block.timestamp, "Exchange rate update too old");
         require(msg.value == _polAmount, "Incorrect POL amount sent");
         uint256 spolToMint = convertPOLToSPOL(_polAmount);
         locallyMintedSPOL += spolToMint;
@@ -276,17 +276,18 @@ contract sPOLChild is
         for (uint256 i = 0; i < outstandings.length; i++) {
             if (completedBackfills[outstandings[i].backFillCycle]) {
                 reservedWithdrawPOLBalance -= outstandings[i].outstandingPOL;
-            } else if (outstandings[i].outstandingPOL >= actualQuickRedeemReserve) {
+            } else if (outstandings[i].outstandingPOL <= actualQuickRedeemReserve) {
                 actualQuickRedeemReserve -= outstandings[i].outstandingPOL;
                 missingWithdrawPOLBalance -= outstandings[i].outstandingPOL;
             } else {
                 continue;
             }
             totalToWithdraw += outstandings[i].outstandingPOL;
+            emit POLWithdrawn(msg.sender, outstandings[i].outstandingPOL, outstandings[i].nonce);
+
             outstandings[i] = outstandings[outstandings.length - 1];
             outstandings.pop();
             i--;
-            emit POLWithdrawn(msg.sender, outstandings[i].outstandingPOL, outstandings[i].nonce);
         }
         require(totalToWithdraw > 0, "No POL to withdraw");
         polBalance -= totalToWithdraw;
