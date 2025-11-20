@@ -279,7 +279,12 @@ contract sPOLChild is
     function withdrawPOL() external whenNotPaused {
         UserOutstanding[] storage outstandings = userOutstandingPOL[msg.sender];
         uint256 totalToWithdraw = 0;
+        bool reordered;
         for (uint256 i = 0; i < outstandings.length; i++) {
+            if (reordered) {
+                reordered = false;
+                i--;
+            }
             if (completedBackfills[outstandings[i].backFillCycle]) {
                 reservedWithdrawPOLBalance -= outstandings[i].outstandingPOL;
             } else if (outstandings[i].outstandingPOL <= actualQuickRedeemReserve) {
@@ -293,7 +298,7 @@ contract sPOLChild is
 
             outstandings[i] = outstandings[outstandings.length - 1];
             outstandings.pop();
-            i--;
+            reordered = true;
         }
         require(totalToWithdraw > 0, "No POL to withdraw");
         polBalance -= totalToWithdraw;
