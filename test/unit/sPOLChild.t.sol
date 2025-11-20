@@ -9,6 +9,7 @@ import {TransparentUpgradeableProxy} from "@openzeppelin/contracts/proxy/transpa
 import {MsgCoder} from "../../src/MsgCoder.sol";
 import {PausableUpgradeable} from "@openzeppelin-contracts-upgradeable/utils/PausableUpgradeable.sol";
 import {IERC20Errors} from "@openzeppelin/contracts/interfaces/draft-IERC6093.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 contract sPOLChildTest is Test, Deploy {
     sPOLChild public sPOLChildToken;
@@ -591,5 +592,185 @@ contract sPOLChildTest is Test, Deploy {
 
         uint256 convertedBack = sPOLChildToken.convertSPOLToPOL(largeSPOL);
         assertGt(convertedBack, largePOLAmount * 995 / 1000, "Round-trip conversion should be reasonable");
+    }
+
+    function test_sellSPOL_SlowSell_InsufficientReserve() public {
+        address user = makeAddr("user");
+        vm.prank(childChainManager);
+        sPOLChildToken.deposit(user, abi.encode(10e18));
+
+        uint256 sPOLBalance = sPOLChildToken.balanceOf(user);
+        uint256 expectedPOLRedeem = sPOLChildToken.convertSPOLToPOL(sPOLBalance);
+
+        uint256 initialMissingBalance = sPOLChildToken.missingWithdrawPOLBalance();
+        uint256 initialNonce = sPOLChildToken.globalWithdrawNonce();
+
+        vm.prank(user);
+
+        vm.expectEmit(true, true, true, true, address(sPOLChildToken));
+        emit IERC20.Transfer(user, address(sPOLChildToken), sPOLBalance);
+        vm.expectEmit(true, true, true, true, address(sPOLChildToken));
+        emit sPOLBurned(user, sPOLBalance, expectedPOLRedeem, initialNonce + 1);
+
+        sPOLChildToken.sellSPOL(sPOLBalance);
+
+        // Verify slow sell behavior - sPOL is burned but no immediate POL
+        assertEq(user.balance, 0, "User should not receive POL immediately");
+        assertEq(sPOLChildToken.missingWithdrawPOLBalance(), initialMissingBalance + sPOLBalance);
+        assertEq(sPOLChildToken.globalWithdrawNonce(), initialNonce + 1);
+        assertEq(sPOLChildToken.balanceOf(user), 0, "User sPOL balance should be zero");
+        assertEq(sPOLChildToken.locallyToBeBurnedSPOL(), sPOLBalance);
+        assertEq(sPOLChildToken.balanceOf(address(sPOLChildToken)), sPOLBalance, "Contract should take token to self");
+
+        // Check user outstanding POL was recorded
+        (uint256 outstandingPOL, uint256 backfillCycle, uint256 nonce) =
+            sPOLChildToken.userOutstandingPOL(user, initialNonce);
+        assertEq(outstandingPOL, expectedPOLRedeem);
+        assertEq(backfillCycle, 0);
+        assertEq(nonce, initialNonce + 1);
+    }
+
+    function test_sellSPOL_SlowSell_PartialPOL_PartialWithdraw() public {
+        address slowSeller1 = makeAddr("slowSeller1");
+        address slowSeller2 = makeAddr("slowSeller2");
+        uint256 initialBalance1 = slowSeller1.balance;
+        uint256 initialBalance2 = slowSeller2.balance;
+
+        vm.prank(childChainManager);
+        sPOLChildToken.deposit(slowSeller1, abi.encode(3e18));
+        vm.prank(childChainManager);
+        sPOLChildToken.deposit(slowSeller2, abi.encode(4e18));
+
+        uint256 sPOL1 = sPOLChildToken.balanceOf(slowSeller1);
+        uint256 sPOL2 = sPOLChildToken.balanceOf(slowSeller2);
+        uint256 expectedPOL1 = sPOLChildToken.convertSPOLToPOL(sPOL1);
+        uint256 expectedPOL2 = sPOLChildToken.convertSPOLToPOL(sPOL2);
+
+        vm.prank(slowSeller1);
+        sPOLChildToken.sellSPOL(sPOL1);
+        vm.prank(slowSeller2);
+        sPOLChildToken.sellSPOL(sPOL2);
+
+        vm.prank(slowSeller1);
+        vm.expectRevert("No POL to withdraw");
+        sPOLChildToken.withdrawPOL();
+        vm.prank(slowSeller2);
+        vm.expectRevert("No POL to withdraw");
+        sPOLChildToken.withdrawPOL();
+
+        // Add POL only enough for first seller
+        address polProvider = makeAddr("polProvider");
+        uint256 partialPOL = expectedPOL1 + 0.5e18;
+        vm.deal(polProvider, partialPOL);
+
+        vm.prank(polProvider);
+        sPOLChildToken.buySPOL{value: partialPOL}(partialPOL);
+
+        // First seller should be able to withdraw
+        vm.prank(slowSeller1);
+        sPOLChildToken.withdrawPOL();
+        assertEq(slowSeller1.balance, initialBalance1 + expectedPOL1, "First seller should receive POL");
+
+        // Second seller still can't withdraw (insufficient remaining reserve)
+        vm.prank(slowSeller2);
+        vm.expectRevert("No POL to withdraw");
+        sPOLChildToken.withdrawPOL();
+
+        // Add more POL for second seller
+        uint256 morePOL = expectedPOL2 + 0.5e18;
+        vm.deal(polProvider, morePOL);
+        vm.prank(polProvider);
+        sPOLChildToken.buySPOL{value: morePOL}(morePOL);
+
+        // Now second seller can withdraw
+        vm.prank(slowSeller2);
+        sPOLChildToken.withdrawPOL();
+        assertEq(slowSeller2.balance, initialBalance2 + expectedPOL2, "Second seller should receive POL");
+    }
+
+    function test_sellSPOL_SlowSell_MultipleOutstanding_AutoSelectiveWithdraw() public {
+        address user = makeAddr("user");
+
+        vm.prank(childChainManager);
+        sPOLChildToken.deposit(user, abi.encode(5e18));
+        uint256 firstSell = 1e18;
+        uint256 secondSell = 2e18;
+        uint256 expectedPOL1 = sPOLChildToken.convertSPOLToPOL(firstSell);
+        uint256 expectedPOL2 = sPOLChildToken.convertSPOLToPOL(secondSell);
+
+        vm.prank(user);
+        sPOLChildToken.sellSPOL(firstSell);
+        vm.prank(user);
+        sPOLChildToken.sellSPOL(secondSell);
+
+        (uint256 outstanding1,,) = sPOLChildToken.userOutstandingPOL(user, 0);
+        (uint256 outstanding2,,) = sPOLChildToken.userOutstandingPOL(user, 1);
+        assertEq(outstanding1, expectedPOL1);
+        assertEq(outstanding2, expectedPOL2);
+
+        // Add enough POL to cover only the first withdrawal
+        address polProvider = makeAddr("polProvider");
+        uint256 partialPOL = expectedPOL1 + 0.1e18;
+        vm.deal(polProvider, partialPOL);
+        vm.prank(polProvider);
+        sPOLChildToken.buySPOL{value: partialPOL}(partialPOL);
+
+        // Withdraw should only process first outstanding
+        uint256 initialBalance = user.balance;
+        vm.prank(user);
+        sPOLChildToken.withdrawPOL();
+
+        assertEq(user.balance, initialBalance + expectedPOL1, "Should only withdraw first amount");
+
+        // Second outstanding should remain
+        (uint256 remainingOutstanding,,) = sPOLChildToken.userOutstandingPOL(user, 0);
+        assertEq(remainingOutstanding, expectedPOL2, "Second outstanding should remain");
+
+        // Should revert accessing index 1 now
+        vm.expectRevert();
+        sPOLChildToken.userOutstandingPOL(user, 1);
+    }
+
+    function test_sellSPOL_SlowSell_MultipleOutstanding_LaterFirstWithdraw() public {
+        address user = makeAddr("user");
+
+        vm.prank(childChainManager);
+        sPOLChildToken.deposit(user, abi.encode(5e18));
+        uint256 firstSell = 2e18;
+        uint256 secondSell = 1e18;
+        uint256 expectedPOL1 = sPOLChildToken.convertSPOLToPOL(firstSell);
+        uint256 expectedPOL2 = sPOLChildToken.convertSPOLToPOL(secondSell);
+
+        vm.prank(user);
+        sPOLChildToken.sellSPOL(firstSell);
+        vm.prank(user);
+        sPOLChildToken.sellSPOL(secondSell);
+
+        (uint256 outstanding1,,) = sPOLChildToken.userOutstandingPOL(user, 0);
+        (uint256 outstanding2,,) = sPOLChildToken.userOutstandingPOL(user, 1);
+        assertEq(outstanding1, expectedPOL1);
+        assertEq(outstanding2, expectedPOL2);
+
+        // Add enough POL to cover only the second withdrawal
+        address polProvider = makeAddr("polProvider");
+        uint256 partialPOL = expectedPOL1 + 0.1e18;
+        vm.deal(polProvider, partialPOL);
+        vm.prank(polProvider);
+        sPOLChildToken.buySPOL{value: partialPOL}(partialPOL);
+
+        // Withdraw should only process first outstanding
+        uint256 initialBalance = user.balance;
+        vm.prank(user);
+        sPOLChildToken.withdrawPOL();
+
+        assertEq(user.balance, initialBalance + expectedPOL1, "Should only withdraw first amount");
+
+        // Second outstanding should remain
+        (uint256 remainingOutstanding,,) = sPOLChildToken.userOutstandingPOL(user, 0);
+        assertEq(remainingOutstanding, expectedPOL2, "Second outstanding should remain");
+
+        // Should revert accessing index 1 now
+        vm.expectRevert();
+        sPOLChildToken.userOutstandingPOL(user, 1);
     }
 }
