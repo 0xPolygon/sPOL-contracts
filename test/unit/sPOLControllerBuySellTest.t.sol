@@ -209,6 +209,10 @@ contract sPOLControllerBuySellTest is Test, Deploy {
         return vm.sign(pk, digest);
     }
 
+    ////////////////////////////////////////
+    ///  Buy Tests                       ///
+    ////////////////////////////////////////
+
     function test_sellSPOLMulti() public {
         uint256 amount = 1e18;
         controller.buySPOL(amount);

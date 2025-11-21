@@ -3,6 +3,7 @@ pragma solidity ^0.8.0;
 
 import "forge-std/Test.sol";
 import "../mocks/MockPOLToken.sol";
+import "../mocks/MockValidatorShare.sol";
 import "../../src/sPOLController.sol";
 import "../../script/Deploy.s.sol";
 import "../../src/interfaces/IStakeManager.sol";
@@ -14,8 +15,8 @@ contract sPOLControllerVldMgnTest is Test, Deploy {
     // Test addresses
     address testAdmin;
     address nonAdmin = makeAddr("nonAdmin");
-    address testValidatorShare1 = makeAddr("testValidatorShare1");
-    address testValidatorShare2 = makeAddr("testValidatorShare2");
+    address testValidatorShare1 = address(new MockValidatorShare());
+    address testValidatorShare2 = address(new MockValidatorShare());
 
     // Test validator IDs
     uint16 constant VALIDATOR_1 = 35;
@@ -222,9 +223,6 @@ contract sPOLControllerVldMgnTest is Test, Deploy {
             abi.encodeWithSelector(IValidatorShare.balanceOf.selector, address(controller)),
             abi.encode(100)
         );
-
-        /* (, uint8 depositShare,,,) = controller.validators(VALIDATOR_1);
-        console.log(depositShare); */
 
         MockPOLToken(polTokenL1).approve(address(controller), 1);
         controller.buySPOL(1);
