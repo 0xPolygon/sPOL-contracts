@@ -2,6 +2,8 @@
 pragma solidity ^0.8.0;
 
 import "forge-std/Test.sol";
+import "../mocks/MockPOLToken.sol";
+import "../mocks/MockValidatorShare.sol";
 import "../../src/sPOLController.sol";
 import "../../script/Deploy.s.sol";
 import "../../src/interfaces/IStakeManager.sol";
@@ -13,9 +15,8 @@ contract sPOLControllerVldMgnTest is Test, Deploy {
     // Test addresses
     address testAdmin;
     address nonAdmin = makeAddr("nonAdmin");
-    address testStakeManager = makeAddr("testStakeManager");
-    address testValidatorShare1 = makeAddr("testValidatorShare1");
-    address testValidatorShare2 = makeAddr("testValidatorShare2");
+    address testValidatorShare1 = address(new MockValidatorShare());
+    address testValidatorShare2 = address(new MockValidatorShare());
 
     // Test validator IDs
     uint16 constant VALIDATOR_1 = 35;
@@ -31,8 +32,9 @@ contract sPOLControllerVldMgnTest is Test, Deploy {
     function setUp() public {
         // Set mock values
         loadMockConfig();
-        // Custom config
-        stakeManager = testStakeManager;
+
+        polTokenL1 = address(new MockPOLToken("POL", "POL"));
+
         // Deploy contracts
         deployContractsL1(address(this));
 
@@ -48,20 +50,20 @@ contract sPOLControllerVldMgnTest is Test, Deploy {
     function _setupDefaultMocks() internal {
         // Mock stakeManager.isValidator() calls
         vm.mockCall(
-            testStakeManager, abi.encodeWithSelector(IStakeManager.isValidator.selector, VALIDATOR_1), abi.encode(true)
+            stakeManager, abi.encodeWithSelector(IStakeManager.isValidator.selector, VALIDATOR_1), abi.encode(true)
         );
         vm.mockCall(
-            testStakeManager, abi.encodeWithSelector(IStakeManager.isValidator.selector, VALIDATOR_2), abi.encode(true)
+            stakeManager, abi.encodeWithSelector(IStakeManager.isValidator.selector, VALIDATOR_2), abi.encode(true)
         );
 
         // Mock stakeManager.getValidatorContract() calls
         vm.mockCall(
-            testStakeManager,
+            stakeManager,
             abi.encodeWithSelector(IStakeManager.getValidatorContract.selector, VALIDATOR_1),
             abi.encode(testValidatorShare1)
         );
         vm.mockCall(
-            testStakeManager,
+            stakeManager,
             abi.encodeWithSelector(IStakeManager.getValidatorContract.selector, VALIDATOR_2),
             abi.encode(testValidatorShare2)
         );
@@ -124,7 +126,7 @@ contract sPOLControllerVldMgnTest is Test, Deploy {
     function test_AddValidator_RevertsForInactiveValidator() public {
         // Mock the validator as inactive
         vm.mockCall(
-            testStakeManager, abi.encodeWithSelector(IStakeManager.isValidator.selector, VALIDATOR_1), abi.encode(false)
+            stakeManager, abi.encodeWithSelector(IStakeManager.isValidator.selector, VALIDATOR_1), abi.encode(false)
         );
 
         vm.prank(testAdmin);
@@ -135,7 +137,7 @@ contract sPOLControllerVldMgnTest is Test, Deploy {
     function test_AddValidator_RevertsForZeroContract() public {
         // Mock validator contract as zero address
         vm.mockCall(
-            testStakeManager,
+            stakeManager,
             abi.encodeWithSelector(IStakeManager.getValidatorContract.selector, VALIDATOR_1),
             abi.encode(address(0))
         );
@@ -208,6 +210,25 @@ contract sPOLControllerVldMgnTest is Test, Deploy {
 
         vm.prank(testAdmin);
         vm.expectRevert("REWARDS_PENDING");
+        controller.removeValidator(VALIDATOR_1);
+    }
+
+    function test_RemoveValidator_RevertsWhenStillFunded() public {
+        vm.prank(testAdmin);
+        controller.addValidator(VALIDATOR_1);
+
+        // Mock validator share balance as non-zero
+        vm.mockCall(
+            testValidatorShare1,
+            abi.encodeWithSelector(IValidatorShare.balanceOf.selector, address(controller)),
+            abi.encode(100)
+        );
+
+        MockPOLToken(polTokenL1).approve(address(controller), 1);
+        controller.buySPOL(1);
+
+        vm.prank(testAdmin);
+        vm.expectRevert("STILL_FUNDED");
         controller.removeValidator(VALIDATOR_1);
     }
 

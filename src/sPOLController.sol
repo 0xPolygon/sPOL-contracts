@@ -299,13 +299,15 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         bytes32 _s,
         bool _consume
     ) internal {
-        uint256 nonceBefore = polToken.nonces(_user);
         if (_consume) {
+            uint256 nonceBefore = sPOLToken.nonces(_user);
             sPOLToken.consumePermit(_user, address(this), _amount, _deadline, _v, _r, _s);
+            require(sPOLToken.nonces(_user) == nonceBefore + 1, "Invalid permit");
         } else {
+            uint256 nonceBefore = polToken.nonces(_user);
             polToken.permit(_user, address(this), _amount, _deadline, _v, _r, _s);
+            require(polToken.nonces(_user) == nonceBefore + 1, "Invalid permit");
         }
-        require(polToken.nonces(_user) == nonceBefore + 1, "Invalid permit");
     }
 
     function buySPOL(uint256 _amount, uint16 _validator) public whenNotPaused returns (uint256) {
@@ -326,17 +328,20 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     }
 
     function _buySPOLSingle(uint256 _amount, uint16 _validator, address _user) internal returns (uint256) {
+        uint256 toMint = convertPOLtoSPOL(_amount);
         ValidatorInfo storage validator = validators[_validator];
-        require(_amount <= _validatorMaxTotalStakeDistance(validator, true), "VALIDATOR_OVERFUNDED");
         require(validator.status == ValidatorStatus.ACTIVE, "VALIDATOR_NOT_ACTIVE");
+        require(_amount <= _validatorMaxTotalStakeDistance(validator, true), "VALIDATOR_OVERFUNDED");
         _takePOL(_amount, _user);
 
-        uint256 gotShares = _buySharesFromValidator(validator, _amount);
-        require(gotShares == _amount, "BUY_SHARES_MISMATCH");
-        return _mintSPOL(gotShares, _user);
+        require(_buySharesFromValidator(validator, _amount) == _amount, "BUY_SHARES_MISMATCH");
+        lastSuccessfulBuyValidator = _validator;
+        _mintSPOL(_user, _amount, toMint);
+        return toMint;
     }
 
     function _buySPOLMulti(uint256 _amount, address _user) internal returns (uint256) {
+        uint256 toMint = convertPOLtoSPOL(_amount);
         (uint16[] memory validator, uint256[] memory amount) = _selectValidators(_amount, true);
         _takePOL(_amount, _user);
         uint256 totalShares;
@@ -345,18 +350,17 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         }
         lastSuccessfulBuyValidator = validator[validator.length - 1];
         require(totalShares == _amount, "BUY_SHARES_MISMATCH");
-        return _mintSPOL(totalShares, _user);
+        _mintSPOL(_user, _amount, toMint);
+        return toMint;
     }
 
     function _takePOL(uint256 _amount, address _user) internal {
         polToken.transferFrom(_user, address(this), _amount);
     }
 
-    function _mintSPOL(uint256 _amount, address _user) internal returns (uint256) {
-        uint256 toMint = convertPOLtoSPOL(_amount);
-        sPOLToken.mint(_user, toMint);
-        emit sPOLMinted(_user, _amount, toMint);
-        return toMint;
+    function _mintSPOL(address _user, uint256 amountPOL, uint256 amountSPOL) internal {
+        sPOLToken.mint(_user, amountSPOL);
+        emit sPOLMinted(_user, amountPOL, amountSPOL);
     }
 
     function getMostUnderfundedValidator() external view returns (uint16, uint256) {
@@ -473,16 +477,17 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     }
 
     function _sellSPOLMulti(uint256 _amount, address _user) internal returns (uint256[] memory) {
-        _takeSPOL(_amount, _user);
         uint256 dPOLAmount = convertSPOLtoPOL(_amount);
         (uint16[] memory validator, uint256[] memory amount) = _selectValidators(dPOLAmount, false);
         uint256[] memory nonces = new uint256[](validator.length);
         for (uint256 i = 0; i < validator.length; i++) {
+            uint256 sPOLAmount = convertPOLtoSPOL(amount[i]);
             uint256 userNonce = _sellSharesFromValidator(validators[validator[i]], amount[i]);
             uint256 nonce = _addUserWithdrawNonceDetails(_user, validator[i], uint128(amount[i]), uint96(userNonce));
             nonces[i] = nonce;
-            emit sPOLBurned(_user, convertPOLtoSPOL(amount[i]), amount[i], nonce);
+            emit sPOLBurned(_user, sPOLAmount, amount[i], nonce);
         }
+        _takeSPOL(_amount, _user);
         return nonces;
     }
 
