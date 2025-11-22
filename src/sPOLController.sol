@@ -98,6 +98,7 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         rewardFee = _rewardFee;
         feeReceiver = _feeReceiver;
         maxDivergence = _maxDivergence;
+        polToken.approve(address(stakeManager), type(uint256).max);
     }
 
     ///////////////////////////////
