@@ -24,6 +24,7 @@ contract sPOLControllerInitTest is Test {
     uint8 testMaxDivergence = 20;
 
     function setUp() public {
+        vm.etch(testPolToken, type(DummyImpl).runtimeCode);
         controllerImpl =
             new sPOLController(testPolToken, testMaticToken, testPolygonMigration, testSPOLToken, testStakeManager);
     }
