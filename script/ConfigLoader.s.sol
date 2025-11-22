@@ -2,6 +2,7 @@
 pragma solidity ^0.8.0;
 
 import "forge-std/Script.sol";
+import {DummyImpl} from "./DummyImpl.sol";
 
 contract ConfigLoader is Script {
     // Network configuration variables
@@ -29,6 +30,8 @@ contract ConfigLoader is Script {
     function loadMockConfig() public {
         scenarioName = "mock-scenario";
         polTokenL1 = makeAddr("polTokenL1");
+        vm.etch(polTokenL1, type(DummyImpl).runtimeCode);
+        //deployCodeTo("out/ERC20Permit.sol/ERC20Permit.json", abi.encode("POL Token L1", "POL L1", 18, 0), polTokenL1);
         polTokenL2 = makeAddr("polTokenL2");
         chainIdL1 = 1;
         chainIdL2 = 2;

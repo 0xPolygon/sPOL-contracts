@@ -3,4 +3,8 @@ pragma solidity ^0.8.0;
 
 contract DummyImpl {
     constructor() {}
+
+    fallback(bytes calldata) external payable returns (bytes memory) {
+        return abi.encode(true);
+    }
 }
