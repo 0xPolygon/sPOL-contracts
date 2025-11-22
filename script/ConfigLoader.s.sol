@@ -58,13 +58,12 @@ contract ConfigLoader is Script {
         string memory path = string.concat(root, "/script/input.json");
         string memory json = vm.readFile(path);
 
-        scenarioName = string.concat(".scenarioName.", _scenarioName);
+        scenarioName = string.concat(".", _scenarioName);
         require(bytes(scenarioName).length != 0, "Scenario name is empty");
-
+        console.log("Loading configuration for scenario:", scenarioName);
         // Check if network exists in JSON
-        bytes memory deployData = vm.parseJson(json, scenarioName);
+        bytes memory deployData = vm.parseJson(json, ".ethereum-polygon");
         require(deployData.length > 0, string.concat("Network configuration not found for scenario: ", _scenarioName));
-
         // Parse network configuration
         polTokenL1 = vm.parseJsonAddress(json, string.concat(scenarioName, ".polTokenL1"));
         polTokenL2 = vm.parseJsonAddress(json, string.concat(scenarioName, ".polTokenL2"));
