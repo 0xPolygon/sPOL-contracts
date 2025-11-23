@@ -265,7 +265,8 @@ contract sPOLChild is
     function _quickSellSPOL(uint256 _polAmount) internal {
         actualQuickRedeemReserve -= _polAmount;
         polBalance -= _polAmount;
-        payable(msg.sender).transfer(_polAmount);
+        (bool success,) = payable(msg.sender).call{value: _polAmount}("");
+        require(success, "POL transfer failed");
         emit POLWithdrawn(msg.sender, _polAmount, globalWithdrawNonce);
     }
 
