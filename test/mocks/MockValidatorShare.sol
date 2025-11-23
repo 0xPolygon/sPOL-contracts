@@ -24,8 +24,8 @@ contract MockValidatorShare {
         return (a, 0);
     }
 
-    function restakeAndUnstakePOL(uint256 a) public pure returns (uint256, uint256) {
-        return (a, 0);
+    function restakeAndUnstakePOL(uint256 a) public pure returns (uint256) {
+        return (0);
     }
 
     function sellVoucher_newPOL(
