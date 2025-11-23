@@ -598,6 +598,7 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
                 foundNonces++;
             }
         }
+        require(totalAmount > 0, "NO_NONCES_READY");
         // bundle transfer to save gas, separate events inform about multi withdraws
         polToken.transfer(_user, totalAmount);
     }
