@@ -101,8 +101,7 @@ contract Deploy is Script, ConfigLoader {
                     type(TransparentUpgradeableProxy).creationCode,
                     abi.encode(dummyImplL1, address(accessManagerL1), "")
                 )
-            ),
-            _deployer
+            )
         );
         sPOLMessengerImpl = new sPOLMessenger{salt: "spol-messenger-impl"}(
             polTokenL1,
