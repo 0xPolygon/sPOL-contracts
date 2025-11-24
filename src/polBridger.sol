@@ -50,7 +50,7 @@ contract PolBridger is AccessManaged, Pausable {
         require(msg.value == _amount, "Insufficient POL sent");
         require(msg.sender == sPOLMessengerL2, "Only sPOL Messenger can call");
         require(block.chainid == chainIDL2, "Invalid origin chain");
-        IMRC20(polTokenL2).withdraw(_amount);
+        IMRC20(polTokenL2).withdraw{value: _amount}(_amount);
     }
 
     function exitPOL(bytes memory proof) external whenNotPaused {
