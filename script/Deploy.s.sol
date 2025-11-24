@@ -39,6 +39,8 @@ contract Deploy is Script, ConfigLoader {
     AccessManager public accessManagerL2;
     PolBridger public polBridger;
 
+    address precalcedsPOLChildProxyAddress;
+
     function run(string memory _scenarioName) public {
         uint256 pk = vm.envUint("DEPLOYER_PRIVATE_KEY");
         vm.startBroadcast(pk);
@@ -72,10 +74,11 @@ contract Deploy is Script, ConfigLoader {
     function deployContractsL1(address _deployer) public {
         address dummyImplL1 = address(new DummyImpl{salt: "dummy-impl"}());
 
-        polBridger = new PolBridger{salt: "pol-bridger"}(
-            polTokenL1, polTokenL2, chainIdL1, chainIdL2, erc20predicate, withdrawManager
-        );
         accessManagerL1 = new AccessManager{salt: "polygon-access-manager"}(_deployer);
+
+        polBridger = new PolBridger{salt: "pol-bridger"}(
+            polTokenL1, polTokenL2, chainIdL1, chainIdL2, erc20predicate, withdrawManager, address(accessManagerL1)
+        );
 
         sPOLControllerProxy =
             new TransparentUpgradeableProxy{salt: "spol-controller-proxy"}(dummyImplL1, address(accessManagerL1), "");
@@ -94,7 +97,7 @@ contract Deploy is Script, ConfigLoader {
 
         sPOLImpl = new sPOL{salt: "spol-impl"}(address(sPOLControllerProxy));
 
-        address precalcedsPOLChildProxyAddress = vm.computeCreate2Address(
+        precalcedsPOLChildProxyAddress = vm.computeCreate2Address(
             "spol-child-proxy",
             keccak256(
                 abi.encodePacked(
@@ -120,10 +123,11 @@ contract Deploy is Script, ConfigLoader {
     function deployContractsL2(address _deployer) public {
         address dummyImplL2 = address(new DummyImpl{salt: "dummy-impl"}());
 
-        polBridger = new PolBridger{salt: "pol-bridger"}(
-            polTokenL1, polTokenL2, chainIdL1, chainIdL2, erc20predicate, withdrawManager
-        );
         accessManagerL2 = new AccessManager{salt: "polygon-access-manager"}(_deployer);
+
+        polBridger = new PolBridger{salt: "pol-bridger"}(
+            polTokenL1, polTokenL2, chainIdL1, chainIdL2, erc20predicate, withdrawManager, address(accessManagerL2)
+        );
         sPOLChildImpl = new sPOLChild{salt: "spol-child-impl"}(stateSyncerL2);
         sPOLChildProxy =
             new TransparentUpgradeableProxy{salt: "spol-child-proxy"}(dummyImplL2, address(accessManagerL2), "");
@@ -133,6 +137,8 @@ contract Deploy is Script, ConfigLoader {
     }
 
     function _configureDeploymentL1(address _deployer) internal {
+        polBridger.initialize(address(sPOLMessengerProxy), precalcedsPOLChildProxyAddress);
+
         bytes memory upgradeAndCallsPOLdata = abi.encodeCall(
             ProxyAdmin.upgradeAndCall,
             (ITransparentUpgradeableProxy(address(sPOLProxy)), address(sPOLImpl), abi.encodeCall(sPOL.initialize, ()))
@@ -163,10 +169,13 @@ contract Deploy is Script, ConfigLoader {
 
         accessManagerL1.grantRole(accessManagerL1.ADMIN_ROLE(), admin, 0);
         accessManagerL1.renounceRole(accessManagerL1.ADMIN_ROLE(), _deployer);
+
         _verifyDeploymentL1();
     }
 
     function _configureDeploymentL2(address _deployer) internal {
+        polBridger.initialize(address(sPOLMessengerProxy), address(sPOLChildProxy));
+
         bytes memory upgradeAndCalldata = abi.encodeCall(
             ProxyAdmin.upgradeAndCall,
             (
@@ -174,7 +183,13 @@ contract Deploy is Script, ConfigLoader {
                 address(sPOLChildImpl),
                 abi.encodeCall(
                     sPOLChild.initialize,
-                    (address(accessManagerL2), address(sPOLMessengerProxy), address(polBridger), childChainManager)
+                    (
+                        address(accessManagerL2),
+                        address(sPOLMessengerProxy),
+                        address(polBridger),
+                        childChainManager,
+                        childTargetQuickRedeemReserve
+                    )
                 )
             )
         );

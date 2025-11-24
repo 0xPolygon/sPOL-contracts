@@ -17,7 +17,6 @@ contract PolBridger is AccessManaged, Pausable {
     address public immutable withdrawManager;
 
     bool public initialized;
-    address public initializer;
     address public sPOLMessengerL1;
     address public sPOLMessengerL2;
 
@@ -27,27 +26,24 @@ contract PolBridger is AccessManaged, Pausable {
         uint256 _chainIDL1,
         uint256 _chainIDL2,
         address _erc20predicate,
-        address _withdrawManager
-    ) AccessManaged(address(0)) {
+        address _withdrawManager,
+        address _authority
+    ) AccessManaged(_authority) {
         polTokenL1 = _polTokenL1;
         polTokenL2 = _polTokenL2;
         chainIDL1 = _chainIDL1;
         chainIDL2 = _chainIDL2;
         erc20predicate = _erc20predicate;
         withdrawManager = _withdrawManager;
-        initializer = msg.sender;
     }
 
-    function initialize(address _sPOLMessengerL1, address _sPOLMessengerL2, address _authority) external {
+    function initialize(address _sPOLMessengerL1, address _sPOLMessengerL2) external restricted {
         require(!initialized, "Already initialized");
-        require(msg.sender == initializer, "Only initializer can call");
         require(_sPOLMessengerL1 != address(0), "Invalid sPOL Messenger L1");
         require(_sPOLMessengerL2 != address(0), "Invalid sPOL Messenger L2");
-        require(_authority != address(0), "Invalid authority address");
         sPOLMessengerL1 = _sPOLMessengerL1;
         sPOLMessengerL2 = _sPOLMessengerL2;
         initialized = true;
-        _setAuthority(_authority);
     }
 
     function bridgePOLToL1(uint256 _amount) external payable whenNotPaused {
