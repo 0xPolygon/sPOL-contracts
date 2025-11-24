@@ -92,7 +92,7 @@ contract Deploy is Script, ConfigLoader {
         sPOLMessengerproxyAdmin = getProxyAdmin(sPOLMessengerProxy);
 
         sPOLControllerImpl = new sPOLController{salt: "spol-controller-impl"}(
-            polTokenL1, maticTokenL1, polygonMigration, address(sPOLProxy), stakeManager
+            polTokenL1, maticTokenL1, polygonMigration, address(sPOLProxy), stakeManager, address(sPOLMessengerProxy)
         );
 
         sPOLImpl = new sPOL{salt: "spol-impl"}(address(sPOLControllerProxy));
@@ -114,7 +114,8 @@ contract Deploy is Script, ConfigLoader {
             depositManager,
             stateSenderL1,
             checkpointManager,
-            precalcedsPOLChildProxyAddress
+            precalcedsPOLChildProxyAddress,
+            address(polBridger)
         );
 
         _configureDeploymentL1(_deployer);

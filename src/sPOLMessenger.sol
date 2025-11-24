@@ -12,6 +12,7 @@ import {PausableUpgradeable} from "@openzeppelin-contracts-upgradeable/utils/Pau
 import {
     AccessManagedUpgradeable
 } from "@openzeppelin-contracts-upgradeable/access/manager/AccessManagedUpgradeable.sol";
+import {PolBridger} from "./polBridger.sol";
 
 contract sPOLMessenger is Initializable, PausableUpgradeable, AccessManagedUpgradeable, BaseRootTunnel, MsgCoder {
     IERC20 public immutable polToken;
@@ -21,6 +22,7 @@ contract sPOLMessenger is Initializable, PausableUpgradeable, AccessManagedUpgra
     IRootChainManager public immutable rootChainManager;
     IDepositManager public immutable depositManager;
     IsPOLController public immutable sPOLController;
+    PolBridger public immutable polBridger;
 
     mapping(uint256 => uint256[]) public backfillNonces;
     mapping(uint256 => bool) public completedBackfill;
@@ -33,19 +35,24 @@ contract sPOLMessenger is Initializable, PausableUpgradeable, AccessManagedUpgra
         address _depositManager,
         address _stateSender,
         address _checkpointManager,
-        address _childTunnel
+        address _childTunnel,
+        address _polBridger
     ) BaseRootTunnel(_stateSender, _checkpointManager, _childTunnel) {
         polToken = IERC20(_polToken);
         sPOLToken = IERC20(_sPOLToken);
         sPOLController = IsPOLController(_sPOLController);
         rootChainManager = IRootChainManager(_rootChainManager);
         depositManager = IDepositManager(_depositManager);
+        polBridger = PolBridger(_polBridger);
         _disableInitializers();
     }
 
     function initialize(address _authority) external initializer {
         __Pausable_init();
         __AccessManaged_init(_authority);
+        address erc20predicate = rootChainManager.typeToPredicate(keccak256("ERC20"));
+        polToken.approve(address(sPOLController), type(uint256).max);
+        sPOLToken.approve(erc20predicate, type(uint256).max);
     }
 
     function _processMessageFromChild(bytes memory _message) internal override {
@@ -66,10 +73,11 @@ contract sPOLMessenger is Initializable, PausableUpgradeable, AccessManagedUpgra
 
     function handleMigration(bytes memory _msg) internal {
         (uint256 _polAmount, uint256 _mintedSPOL) = decodeL2MigrationRequestMessage(_msg);
+        polBridger.takePOLL1(_polAmount);
         require(polToken.balanceOf(address(this)) >= _polAmount, "Not enough POL in messenger");
 
         sPOLController.completeMigration(_polAmount, _mintedSPOL);
-        rootChainManager.depositFor(child, address(sPOLToken), abi.encodePacked(_mintedSPOL));
+        rootChainManager.depositFor(childTunnel, address(sPOLToken), abi.encodePacked(_mintedSPOL));
         // disabled for portal because of cyclical exit issue, should be activated for lxly
         //_sendMessageToChild(abi.encode(MsgType.L1_MIGRATION_RESPONSE, encodeL1MigrationResponseMessage(_mintedSPOL)));
     }

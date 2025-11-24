@@ -33,6 +33,7 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     IPolygonMigration public immutable polygonMigration;
     IStakeManager public immutable stakeManager;
     sPOL public immutable sPOLToken;
+    address public immutable sPOLMessenger;
 
     mapping(uint16 => ValidatorInfo) public validators;
     uint16[] public validatorList;
@@ -78,13 +79,15 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         address _maticToken,
         address _polygonMigration,
         address _sPOLToken,
-        address _stakeManager
+        address _stakeManager,
+        address _sPOLMessenger
     ) {
         polToken = ERC20Permit(_polToken);
         maticToken = ERC20(_maticToken);
         polygonMigration = IPolygonMigration(_polygonMigration);
         sPOLToken = sPOL(_sPOLToken);
         stakeManager = IStakeManager(_stakeManager);
+        sPOLMessenger = _sPOLMessenger;
         _disableInitializers();
     }
 
@@ -730,7 +733,8 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         }
     }
 
-    function completeMigration(uint256 _amountPOL, uint256 _amountSPOL) external restricted {
+    function completeMigration(uint256 _amountPOL, uint256 _amountSPOL) external {
+        require(msg.sender == sPOLMessenger, "ONLY_MESSENGER");
         require(convertPOLtoSPOL(_amountPOL) <= _amountSPOL, "BAD_EXCHANGE_RATE");
         (uint16[] memory validator, uint256[] memory amount) = _selectValidators(_amountPOL, true);
         _takePOL(_amountPOL, msg.sender);
@@ -744,7 +748,8 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         emit sPOLMigrated(msg.sender, _amountPOL, _amountSPOL);
     }
 
-    function startBackfillSell(uint256 _amountSPOL, uint256 _amountPOL) external restricted returns (uint256[] memory) {
+    function startBackfillSell(uint256 _amountSPOL, uint256 _amountPOL) external returns (uint256[] memory) {
+        require(msg.sender == sPOLMessenger, "ONLY_MESSENGER");
         require(convertSPOLtoPOL(_amountSPOL) >= _amountPOL, "BAD_EXCHANGE_RATE");
         _takeSPOL(_amountSPOL, msg.sender);
         (uint16[] memory validator, uint256[] memory amount) = _selectValidators(_amountPOL, false);

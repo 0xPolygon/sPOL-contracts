@@ -9,6 +9,7 @@ import "../../src/sPOLController.sol";
 import "../../src/sPOLMessenger.sol";
 import "../../src/sPOLChild.sol";
 import "../../script/Deploy.s.sol";
+import "../mocks/MocksPOLMessenger.sol";
 
 import {IERC20Errors} from "@openzeppelin/contracts/interfaces/draft-IERC6093.sol";
 import {Registry as IRegistry} from "../../src/interfaces/IRegistry.sol";
@@ -23,6 +24,7 @@ contract sPOLControllerFullL1Test is Test, Deploy {
     sPOLController public controller;
     sPOLMessenger public messenger;
     sPOLChild public child;
+    address erc20predicatePortal;
 
     address nonAdmin;
     uint256 networkL1;
@@ -106,6 +108,8 @@ contract sPOLControllerFullL1Test is Test, Deploy {
         // Register messenger in StateSender
         vm.prank(IStateSender(stateSenderL1).owner());
         IStateSender(stateSenderL1).register(address(messenger), address(child));
+
+        erc20predicatePortal = IRootChainManager(rootChainManager).typeToPredicate(keccak256("ERC20"));
     }
 
     function test_fullL1_expected_usage() public {
@@ -319,13 +323,12 @@ contract sPOLControllerFullL1Test is Test, Deploy {
 
         // start migration
         uint256 reserveOverhang = child.actualQuickRedeemReserve() - child.targetQuickRedeemReserve();
+        bytes memory expectedData =
+            abi.encode(MsgCoder.MsgType.L2_MIGRATION_REQUEST, abi.encode(reserveOverhang, expectedReturn2));
         vm.expectEmit(true, true, true, true, address(polTokenL2));
         emit IMRC20.Withdraw(maticTokenL1, address(polBridger), reserveOverhang, 0, 0);
         vm.expectEmit(true, true, true, true, address(child));
-        emit BaseChildTunnel
-            .MessageSent(abi.encode(
-                MsgCoder.MsgType.L2_MIGRATION_REQUEST, abi.encode(reserveOverhang, expectedReturn2)
-            ));
+        emit BaseChildTunnel.MessageSent(expectedData);
         child.requestMigration();
 
         // complete migration on L1
@@ -345,8 +348,44 @@ contract sPOLControllerFullL1Test is Test, Deploy {
         vm.expectCall(withdrawManager, abi.encodeWithSelector(IWithdrawManager.processExits.selector, polTokenL1));
         polBridger.finalizeExitPOL();
 
-        // verfied correct calls are made, proof not possible here, so we just give polBridge the tokens
+        // verified correct calls are made, proof not possible here, so we just give polBridge the tokens
         deal(polTokenL1, address(polBridger), reserveOverhang);
+
+        // deploy mock messenger that skips the proof verification
+        MocksPOLMessenger mockMessenger = new MocksPOLMessenger(
+            polTokenL1,
+            address(sPOLProxy),
+            address(sPOLControllerProxy),
+            rootChainManager,
+            depositManager,
+            stateSenderL1,
+            checkpointManager,
+            precalcedsPOLChildProxyAddress,
+            address(polBridger)
+        );
+
+        bytes memory upgradeAndCallsPOLMessengerdata = abi.encodeCall(
+            ProxyAdmin.upgradeAndCall,
+            (ITransparentUpgradeableProxy(address(sPOLMessengerProxy)), address(mockMessenger), "")
+        );
+        vm.prank(admin);
+        accessManagerL1.execute(address(sPOLMessengerproxyAdmin), upgradeAndCallsPOLMessengerdata);
+
+        // finalize migration on L1
+        vm.expectEmit(true, true, true, true, polTokenL1);
+        emit IERC20.Transfer(address(polBridger), address(messenger), reserveOverhang);
+        vm.expectEmit(true, true, true, true, polTokenL1);
+        emit IERC20.Transfer(address(messenger), address(controller), reserveOverhang);
+        vm.expectEmit(true, true, true, true, polTokenL1);
+        emit IERC20.Transfer(address(controller), address(stakeManager), reserveOverhang);
+        vm.expectEmit(true, true, true, true, address(sPOLToken));
+        emit IERC20.Transfer(address(0), address(messenger), expectedReturn2);
+        vm.expectEmit(true, true, true, true, address(sPOLToken));
+        emit IERC20.Transfer(address(messenger), erc20predicatePortal, expectedReturn2);
+        vm.expectEmit(false, true, false, false, address(stateSenderL1));
+        emit IStateSender.StateSynced(0, address(childChainManager), "");
+
+        MocksPOLMessenger(address(messenger)).expose_processMessageFromChild(expectedData);
     }
 }
 

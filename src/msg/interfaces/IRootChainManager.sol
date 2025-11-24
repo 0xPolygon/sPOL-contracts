@@ -8,4 +8,5 @@ interface IRootChainManager {
     function mapToken(address rootToken, address childToken, bytes32 tokenType) external;
     function getRoleMember(bytes32 role, uint256 index) external returns (address);
     function MAPPER_ROLE() external pure returns (bytes32);
+    function typeToPredicate(bytes32) external returns (address);
 }

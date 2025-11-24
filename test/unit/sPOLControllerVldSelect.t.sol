@@ -14,10 +14,15 @@ contract sPOLControllerVLDSelectTest is Test, sPOLController {
     address testSPOLToken = makeAddr("testSPOLToken");
     address testValidatorShare = makeAddr("testValidatorShare");
     address testAuthority = makeAddr("testAuthority");
+    address testMessenger = makeAddr("testMessenger");
     uint8 testMaxDivergence = 20;
     uint8 testRewardFeee = 10;
 
-    constructor() sPOLController(testPolToken, testMaticToken, testPolygonMigration, testSPOLToken, testStakeManager) {}
+    constructor()
+        sPOLController(
+            testPolToken, testMaticToken, testPolygonMigration, testSPOLToken, testStakeManager, testMessenger
+        )
+    {}
 
     function setUp() public {
         // initialize sPOLController
