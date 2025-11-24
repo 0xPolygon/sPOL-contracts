@@ -87,10 +87,13 @@ contract sPOLChild is
         _disableInitializers();
     }
 
-    function initialize(address _authority, address _l1Messenger, address _bridgeHelper, address _childChainManager)
-        external
-        initializer
-    {
+    function initialize(
+        address _authority,
+        address _l1Messenger,
+        address _bridgeHelper,
+        address _childChainManager,
+        uint256 _targetQuickRedeemReserve
+    ) external initializer {
         __Pausable_init();
         __ERC20_init("Staked POL", "sPOL");
         __ERC20Permit_init("Staked POL");
@@ -102,6 +105,8 @@ contract sPOLChild is
         l1Messenger = _l1Messenger;
         bridgeHelper = PolBridger(_bridgeHelper);
         childChainManager = _childChainManager;
+
+        targetQuickRedeemReserve = _targetQuickRedeemReserve;
 
         // Init so update can work
         // we leave lastExchangeRateUpdate at 0 so no one can buy sPOL before first update
