@@ -44,6 +44,7 @@ contract sPOLControllerFullL1Test is Test, Deploy {
 
     uint256 smallAmount = 1 ether;
     uint256 mediumAmount = 300 ether;
+    uint256 mediumAmount2 = 2000 ether;
     uint256 largeAmount = 5000 ether;
     uint256 hugeAmount = 2000000 ether;
 
@@ -330,6 +331,8 @@ contract sPOLControllerFullL1Test is Test, Deploy {
         vm.expectEmit(true, true, true, true, address(child));
         emit BaseChildTunnel.MessageSent(expectedData);
         child.requestMigration();
+        assertEq(child.onGoingMigration(), true);
+        assertEq(child.backMigratingSPOL(), expectedReturn2);
 
         // complete migration on L1
         vm.selectFork(networkL1);
@@ -386,6 +389,80 @@ contract sPOLControllerFullL1Test is Test, Deploy {
         emit IStateSender.StateSynced(0, address(childChainManager), "");
 
         MocksPOLMessenger(address(messenger)).expose_processMessageFromChild(expectedData);
+
+        // finish migration on L2
+        vm.selectFork(networkL2);
+        uint256 childTotalSupplyBefore = child.totalSupply();
+        uint256 childBalanceBefore = child.balanceOf(address(child));
+        vm.prank(childChainManager);
+        child.deposit(address(child), abi.encode(expectedReturn2));
+        assertEq(child.balanceOf(address(child)), childBalanceBefore);
+        assertEq(child.totalSupply(), childTotalSupplyBefore);
+        assertEq(child.onGoingMigration(), false);
+
+        // user1 sells more sPOL than pol available
+        uint256 userBalance = user1.balance;
+        uint256 expectedPOL = child.convertSPOLToPOL(mediumAmount2);
+        vm.prank(user1);
+        child.sellSPOL(mediumAmount2);
+        assertEq(user1.balance, userBalance);
+        assertEq(child.missingWithdrawPOLBalance(), expectedPOL);
+        (uint256 _polAmount, uint256 _backFillCycle, uint256 _nonce) = child.userOutstandingPOL(user1, 0);
+        assertEq(_polAmount, expectedPOL);
+        assertEq(_backFillCycle, 1);
+        assertEq(_nonce, 2);
+
+        // backfill some POL to child contract
+        uint256 reserveMissing = child.missingWithdrawPOLBalance();
+
+        uint256 l2mintedSPOL = child.locallyMintedSPOL() - child.locallyToBeBurnedSPOL();
+        bytes memory expectedDataBackfill =
+            abi.encode(MsgCoder.MsgType.L2_BACKFILL_REQUEST, abi.encode(reserveMissing, l2mintedSPOL, 1));
+
+        vm.expectEmit(true, true, true, true, address(child));
+        emit IERC20.Transfer(address(child), address(messenger), l2mintedSPOL);
+        vm.expectEmit(true, true, true, true, address(child));
+        emit IERC20.Transfer(address(messenger), address(0), l2mintedSPOL);
+        vm.expectEmit(true, true, true, true, address(child));
+        emit BaseChildTunnel.MessageSent(expectedDataBackfill);
+        child.requestBackfill();
+
+        assertEq(child.missingWithdrawPOLBalance(), 0);
+        assertEq(child.locallyMintedSPOL() - l2mintedSPOL, 0);
+        assertEq(child.locallyToBeBurnedSPOL(), 0);
+
+        // complete backfill on L1
+        vm.selectFork(networkL1);
+        // deal sPOL, instead of using proof
+        vm.prank(address(controller));
+        sPOLToken.mint(address(messenger), l2mintedSPOL);
+        MocksPOLMessenger(address(messenger)).expose_processMessageFromChild(expectedDataBackfill);
+
+        // fast forward time past withdraw delay
+        vm.startPrank(IStakeManager(stakeManager).governance());
+        IStakeManager(stakeManager).setCurrentEpoch(IStakeManager(stakeManager).currentEpoch() + 80);
+        vm.stopPrank();
+        vm.recordLogs();
+        vm.expectEmit(false, false, false, false, address(stateSenderL1));
+        emit IStateSender.StateSynced(0, address(0), "");
+        messenger.completeBackfill(1);
+        Vm.Log[] memory stateSyncLogs2 = vm.getRecordedLogs();
+
+        // finish backfill on L2
+        vm.selectFork(networkL2);
+
+        // mock bridging POL to L2
+        vm.deal(address(child), reserveMissing);
+        // prank statesync using emitted data
+        vm.prank(stateSyncerL2);
+        child.onStateReceive(0, abi.decode(stateSyncLogs2[stateSyncLogs2.length - 1].data, (bytes)));
+
+        // user1 withdraws successfully
+        uint256 userBalanceBefore = user1.balance;
+        vm.prank(user1);
+        child.withdrawPOL();
+        uint256 userBalanceAfter = user1.balance;
+        assertEq(userBalanceAfter - userBalanceBefore, expectedPOL, "here");
     }
 }
 
