@@ -748,9 +748,9 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         emit sPOLMigrated(msg.sender, _amountPOL, _amountSPOL);
     }
 
-    function startBackfillSell(uint256 _amountSPOL, uint256 _amountPOL) external returns (uint256[] memory) {
+    function startBackfillSell(uint256 _amountPOL, uint256 _amountSPOL) external returns (uint256[] memory) {
         require(msg.sender == sPOLMessenger, "ONLY_MESSENGER");
-        require(convertSPOLtoPOL(_amountSPOL) >= _amountPOL, "BAD_EXCHANGE_RATE");
+        require(_amountSPOL <= convertPOLtoSPOL(_amountPOL), "BAD_EXCHANGE_RATE");
         _takeSPOL(_amountSPOL, msg.sender);
         (uint16[] memory validator, uint256[] memory amount) = _selectValidators(_amountPOL, false);
         uint256[] memory nonces = new uint256[](validator.length);

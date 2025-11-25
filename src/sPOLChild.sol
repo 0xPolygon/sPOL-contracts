@@ -40,13 +40,12 @@ contract sPOLChild is
     // These two together should always be equal to the sum of outstanding POL in userOutstandingPOL
     uint256 public missingWithdrawPOLBalance;
     uint256 public reservedWithdrawPOLBalance;
+    uint256 public pendingWithdrawPOLBalance;
 
     // Redeem reserve
     uint256 public targetQuickRedeemReserve;
     // This should be equal to polBalance - reservedWithdrawPOLBalance
     uint256 public actualQuickRedeemReserve;
-    // Marker to not overfill the quick redeem reserve
-    uint256 public pendingQuickRedeemReserveRefill;
 
     // sPOL originating on L2 needs to be locked in the bridge from L1 so it becomes "real"
     uint256 public locallyMintedSPOL;
@@ -63,6 +62,7 @@ contract sPOLChild is
     uint256 public backFillCycle;
     mapping(uint256 => bool) public completedBackfills;
     bool public onGoingMigration;
+    bool public onGoingBackfill;
     uint256 public backMigratingSPOL;
 
     struct UserOutstanding {
@@ -181,46 +181,42 @@ contract sPOLChild is
     // }
 
     function requestBackfill() external whenNotPaused {
+        require(!onGoingBackfill, "Backfill already ongoing");
+        onGoingBackfill = true;
         backFillCycle += 1;
-        uint256 _backFillCycle = backFillCycle;
-        uint256 amountToBackfill = missingWithdrawPOLBalance;
-        if (targetQuickRedeemReserve > actualQuickRedeemReserve + pendingQuickRedeemReserveRefill) {
-            uint256 missingQuickRedeem =
-                targetQuickRedeemReserve - actualQuickRedeemReserve - pendingQuickRedeemReserveRefill;
-            pendingQuickRedeemReserveRefill += missingQuickRedeem;
-            amountToBackfill += missingQuickRedeem;
-        }
+        pendingWithdrawPOLBalance += missingWithdrawPOLBalance;
+
         missingWithdrawPOLBalance = 0;
         uint256 bridgeMissingSPOL;
         if (locallyMintedSPOL > locallyToBeBurnedSPOL) {
             bridgeMissingSPOL = locallyMintedSPOL - locallyToBeBurnedSPOL;
             burnSPOLForMessenger(bridgeMissingSPOL);
+            locallyMintedSPOL -= locallyToBeBurnedSPOL;
+            locallyToBeBurnedSPOL = 0;
         }
         // we need to create spol and bridge it back over to L1
         _sendMessageToRoot(
             abi.encode(
                 MsgType.L2_BACKFILL_REQUEST,
-                encodeL2BackfillRequestMessage(amountToBackfill, bridgeMissingSPOL, _backFillCycle)
+                encodeL2BackfillRequestMessage(pendingWithdrawPOLBalance, bridgeMissingSPOL, backFillCycle)
             )
         );
     }
 
     function handleBackfillResponse(bytes memory _msg) internal {
         (uint256 _returnedPOL, uint256 _backFillCycle) = decodeL1BackfillResponseMessage(_msg);
-        if (missingWithdrawPOLBalance >= _returnedPOL) {
-            missingWithdrawPOLBalance -= _returnedPOL;
-        } else {
-            uint256 leftOver = _returnedPOL - missingWithdrawPOLBalance;
-            missingWithdrawPOLBalance = 0;
+        if (_returnedPOL > pendingWithdrawPOLBalance) {
+            uint256 leftOver = _returnedPOL - pendingWithdrawPOLBalance;
             actualQuickRedeemReserve += leftOver;
-            if (pendingQuickRedeemReserveRefill >= leftOver) {
-                pendingQuickRedeemReserveRefill -= leftOver;
-            } else {
-                pendingQuickRedeemReserveRefill = 0;
-            }
+            reservedWithdrawPOLBalance += pendingWithdrawPOLBalance;
+            pendingWithdrawPOLBalance = 0;
+        } else {
+            pendingWithdrawPOLBalance -= _returnedPOL;
+            reservedWithdrawPOLBalance += _returnedPOL;
         }
         polBalance += _returnedPOL;
         completedBackfills[_backFillCycle] = true;
+        onGoingBackfill = false;
     }
 
     // balances are delayed from L1, so converting to sPOL is better than on L1, to avoid this we add a small fee
@@ -278,7 +274,7 @@ contract sPOLChild is
     function _slowSellSPOL(uint256 _polAmount) internal {
         missingWithdrawPOLBalance += _polAmount;
         UserOutstanding memory userOutstanding =
-            UserOutstanding({outstandingPOL: _polAmount, backFillCycle: backFillCycle, nonce: globalWithdrawNonce});
+            UserOutstanding({outstandingPOL: _polAmount, backFillCycle: backFillCycle + 1, nonce: globalWithdrawNonce});
         userOutstandingPOL[msg.sender].push(userOutstanding);
     }
 
@@ -293,6 +289,8 @@ contract sPOLChild is
             }
             if (completedBackfills[outstandings[i].backFillCycle]) {
                 reservedWithdrawPOLBalance -= outstandings[i].outstandingPOL;
+            } else if (outstandings[i].backFillCycle == backFillCycle) {
+                pendingWithdrawPOLBalance -= outstandings[i].outstandingPOL;
             } else if (outstandings[i].outstandingPOL <= actualQuickRedeemReserve) {
                 actualQuickRedeemReserve -= outstandings[i].outstandingPOL;
                 missingWithdrawPOLBalance -= outstandings[i].outstandingPOL;

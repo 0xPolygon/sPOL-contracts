@@ -52,6 +52,7 @@ contract sPOLMessenger is Initializable, PausableUpgradeable, AccessManagedUpgra
         __AccessManaged_init(_authority);
         address erc20predicate = rootChainManager.typeToPredicate(keccak256("ERC20"));
         polToken.approve(address(sPOLController), type(uint256).max);
+        polToken.approve(address(depositManager), type(uint256).max);
         sPOLToken.approve(erc20predicate, type(uint256).max);
     }
 
@@ -91,11 +92,12 @@ contract sPOLMessenger is Initializable, PausableUpgradeable, AccessManagedUpgra
 
     function completeBackfill(uint256 _backFillCycle) external whenNotPaused {
         require(!completedBackfill[_backFillCycle], "Backfill already completed");
-        uint256 totalWithdraw;
+        uint256 balanceBefore = polToken.balanceOf(address(this));
         for (uint256 i = 0; i < backfillNonces[_backFillCycle].length; i++) {
             sPOLController.withdrawPOL(backfillNonces[_backFillCycle][i]);
-            // add to total withdraw
         }
+        uint256 balanceAfter = polToken.balanceOf(address(this));
+        uint256 totalWithdraw = balanceAfter - balanceBefore;
         depositManager.depositERC20ForUser(address(polToken), child, totalWithdraw);
         _sendMessageToChild(
             abi.encode(MsgType.L1_BACKFILL_RESPONSE, encodeL1BackfillResponseMessage(totalWithdraw, _backFillCycle))
