@@ -467,5 +467,51 @@ contract sPOLControllerFullL1Test is Test, Deploy {
         uint256 userBalanceAfter = user1.balance;
         assertEq(userBalanceAfter - userBalanceBefore, expectedPOL, "here");
     }
+
+    function test_buySPOLWithDPOL() public {
+        vm.selectFork(networkL1);
+
+        // Setup the system first
+        deal(polTokenL1, user1, 10000 ether);
+        deal(polTokenL1, user2, 10000 ether);
+        deal(polTokenL1, user3, 10000 ether);
+
+        vm.prank(user1);
+        IERC20(polTokenL1).approve(address(controller), type(uint256).max);
+        vm.prank(user2);
+        IERC20(polTokenL1).approve(address(controller), type(uint256).max);
+        vm.prank(user3);
+        IERC20(polTokenL1).approve(address(controller), type(uint256).max);
+
+        // Activate validators (only add validator1 to our controller, not validator2)
+        vm.prank(testAdmin);
+        controller.addValidator(validator1ID);
+        // Note: validator2ID is intentionally NOT added to make it an external validator
+
+        // Set validator shares - our validator gets 100% since we only have one managed validator
+        uint16[] memory validatorIDs = new uint16[](1);
+        validatorIDs[0] = validator1ID;
+        uint8[] memory shares = new uint8[](1);
+        shares[0] = 100;
+        vm.prank(testAdmin);
+        controller.updateValidatorTargetShare(validatorIDs, shares);
+
+        IValidatorShare externalValidator =
+            IValidatorShare(IStakeManager(stakeManager).getValidatorContract(validator2ID));
+
+        // User1 buys dPOL
+        vm.startPrank(user1);
+        ERC20(polTokenL1).approve(address(stakeManager), largeAmount);
+        externalValidator.buyVoucherPOL(largeAmount, largeAmount);
+        externalValidator.approve(address(controller), largeAmount);
+        vm.stopPrank();
+
+        uint256 expectedSPOLFromDPOL = controller.convertPOLtoSPOL(largeAmount);
+
+        // User1 uses dPOL to buy sPOL
+        vm.prank(user1);
+        controller.buySPOLWithDPOL(largeAmount, validator2ID);
+        assertEq(sPOLToken.balanceOf(user1), expectedSPOLFromDPOL);
+    }
 }
 
