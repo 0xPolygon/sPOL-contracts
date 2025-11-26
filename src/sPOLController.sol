@@ -249,7 +249,9 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
             restakeValidator(_newValidator);
         }
         stakeManager.migrateDelegation(_oldValidator, _newValidator, _amount);
-        validators[_oldValidator].totalStaked -= _amount;
+        if(validators[_oldValidator].status != ValidatorStatus.INACTIVE) {
+            validators[_oldValidator].totalStaked -= _amount;
+        }
         validators[_newValidator].totalStaked += _amount;
     }
 
