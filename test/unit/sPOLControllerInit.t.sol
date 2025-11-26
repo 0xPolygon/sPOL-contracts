@@ -80,7 +80,7 @@ contract sPOLControllerInitTest is Test {
             sPOLController.initialize.selector, 1001, testFeeReceiver, testMaxDivergence, testAdmin
         );
 
-        vm.expectRevert("FEE_TOO_LARGE");
+        vm.expectRevert(abi.encodeWithSelector(sPOLController.FeeTooLarge.selector, 1001, 1000));
         controller =
             sPOLController(address(new TransparentUpgradeableProxy(address(controllerImpl), address(this), data)));
     }

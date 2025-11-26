@@ -110,8 +110,8 @@ contract sPOLControllerBuySellTest is Test, Deploy {
     ////////////////////////////////////////
 
     function test_buySPOLSingle_VALIDATOR_OVERFUNDED() public {
-        vm.expectRevert("VALIDATOR_OVERFUNDED");
-        controller.buySPOL(1e18, VALIDATOR_1);
+        vm.expectRevert(abi.encodeWithSelector(sPOLController.ValidatorOverfunded.selector, 1 ether, 0));
+        controller.buySPOL(1 ether, VALIDATOR_1);
     }
 
     function test_buySPOLSingle_VALIDATOR_NOT_ACTIVE() public {
@@ -122,8 +122,8 @@ contract sPOLControllerBuySellTest is Test, Deploy {
         controller.updateValidatorTargetShare(validators, depositShares);
         vm.prank(testAdmin);
         controller.freezeValidator(VALIDATOR_1);
-        vm.expectRevert("VALIDATOR_NOT_ACTIVE");
-        controller.buySPOL(1, VALIDATOR_1);
+        vm.expectRevert(abi.encodeWithSelector(sPOLController.ValidatorNotActive.selector, VALIDATOR_1));
+        controller.buySPOL(1 ether, VALIDATOR_1);
     }
 
     function test_buySPOLSingle_() public {

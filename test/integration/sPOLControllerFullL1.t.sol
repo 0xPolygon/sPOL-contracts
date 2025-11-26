@@ -166,11 +166,11 @@ contract sPOLControllerFullL1Test is Test, Deploy {
 
         // attempt withdraw
         vm.prank(user1);
-        vm.expectRevert("NO_NONCES_READY");
+        vm.expectRevert(abi.encodeWithSelector(sPOLController.NoNoncesReady.selector, user1));
         controller.withdrawPOL();
 
         vm.prank(user1);
-        vm.expectRevert("WITHDRAW_NOT_READY");
+        vm.expectRevert(abi.encodeWithSelector(sPOLController.WithdrawNotReady.selector, firstSellNonces[0]));
         controller.withdrawPOL(firstSellNonces[0]);
 
         uint256 beforeWithdrawPeriod = vm.snapshotState();
@@ -318,7 +318,7 @@ contract sPOLControllerFullL1Test is Test, Deploy {
         assertLt(expectedReturn2, expectedReturn);
 
         // attempt migration
-        vm.expectRevert("Nothing to migrate");
+        vm.expectRevert(abi.encodeWithSelector(sPOLChild.NothingToMigrate.selector));
         child.requestMigration();
         console.log(polBridger.sPOLMessengerL2());
         // make migration possible

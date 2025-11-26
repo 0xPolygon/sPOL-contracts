@@ -90,8 +90,10 @@ contract sPOLChildTest is Test, Deploy {
         bytes memory message =
             abi.encode(MsgCoder.MsgType.EXCHANGE_UPDATE, abi.encode(worseL1SPOLBalance, worseL1DPOLBalance));
 
+        uint256 currentRate = sPOLChildToken.convertSPOLToPOL(1e18);
+        uint256 newRate = (1e18 * worseL1DPOLBalance) / worseL1SPOLBalance;
         vm.prank(stateSyncerL2);
-        vm.expectRevert("Exchange rate declined");
+        vm.expectRevert(abi.encodeWithSelector(sPOLChild.ExchangeRateDeclined.selector, newRate, currentRate));
         sPOLChildToken.onStateReceive(0, message);
 
         // Verify balances remain unchanged
@@ -150,7 +152,7 @@ contract sPOLChildTest is Test, Deploy {
         vm.warp(block.timestamp + 31 days);
 
         vm.prank(buyer);
-        vm.expectRevert("Exchange rate update too old");
+        vm.expectRevert(abi.encodeWithSelector(sPOLChild.ExchangeRateUpdateTooOld.selector, 0, 2592000, 2678401));
         sPOLChildToken.buySPOL{value: polAmount}(polAmount);
     }
 
@@ -243,7 +245,7 @@ contract sPOLChildTest is Test, Deploy {
         vm.warp(block.timestamp + 2);
 
         vm.prank(buyer);
-        vm.expectRevert("Exchange rate update too old");
+        vm.expectRevert(abi.encodeWithSelector(sPOLChild.ExchangeRateUpdateTooOld.selector, 0, 2592000, 2592002));
         sPOLChildToken.buySPOL{value: polAmount}(polAmount);
 
         _sendExchangeRateUpdate(1, 1); // Update exchange rate to reset timer
@@ -306,7 +308,7 @@ contract sPOLChildTest is Test, Deploy {
         vm.deal(buyer, polAmount);
 
         vm.prank(buyer);
-        vm.expectRevert("Incorrect POL amount sent");
+        vm.expectRevert(abi.encodeWithSelector(sPOLChild.IncorrectPOLAmount.selector, incorrectAmount, polAmount));
         sPOLChildToken.buySPOL{value: incorrectAmount}(polAmount);
     }
 
@@ -315,7 +317,7 @@ contract sPOLChildTest is Test, Deploy {
         vm.deal(buyer, 1e18);
 
         vm.prank(buyer);
-        vm.expectRevert("POL amount must be greater than 0");
+        vm.expectRevert(sPOLChild.POLAmountMustBeGreaterThanZero.selector);
         sPOLChildToken.buySPOL{value: 0}(0);
     }
 
@@ -468,7 +470,7 @@ contract sPOLChildTest is Test, Deploy {
         uint256 sPOLBalance = sPOLChildToken.balanceOf(user);
 
         vm.prank(user);
-        vm.expectRevert();
+        vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
         sPOLChildToken.sellSPOL(sPOLBalance);
     }
 
@@ -652,10 +654,10 @@ contract sPOLChildTest is Test, Deploy {
         sPOLChildToken.sellSPOL(sPOL2);
 
         vm.prank(slowSeller1);
-        vm.expectRevert("No POL to withdraw");
+        vm.expectRevert(abi.encodeWithSelector(sPOLChild.POLAmountMustBeGreaterThanZero.selector, slowSeller1));
         sPOLChildToken.withdrawPOL();
         vm.prank(slowSeller2);
-        vm.expectRevert("No POL to withdraw");
+        vm.expectRevert(abi.encodeWithSelector(sPOLChild.POLAmountMustBeGreaterThanZero.selector, slowSeller2));
         sPOLChildToken.withdrawPOL();
 
         // Add POL only enough for first seller
@@ -673,7 +675,7 @@ contract sPOLChildTest is Test, Deploy {
 
         // Second seller still can't withdraw (insufficient remaining reserve)
         vm.prank(slowSeller2);
-        vm.expectRevert("No POL to withdraw");
+        vm.expectRevert(abi.encodeWithSelector(sPOLChild.POLAmountMustBeGreaterThanZero.selector, slowSeller2));
         sPOLChildToken.withdrawPOL();
 
         // Add more POL for second seller

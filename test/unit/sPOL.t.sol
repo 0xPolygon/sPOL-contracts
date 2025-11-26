@@ -69,13 +69,13 @@ contract sPOLTest is Test, Deploy {
     }
 
     function test_onlyController_revertsForNonController() public {
-        vm.expectRevert("Only sPOL controller can call this function");
+        vm.expectRevert(abi.encodeWithSelector(sPOL.AddressUnauthorized.selector, user1));
         vm.prank(user1);
         token.mint(user1, 100 ether);
     }
 
     function test_onlyController_revertsForZeroAddress() public {
-        vm.expectRevert("Only sPOL controller can call this function");
+        vm.expectRevert(abi.encodeWithSelector(sPOL.AddressUnauthorized.selector, address(0)));
         vm.prank(address(0));
         token.mint(user1, 100 ether);
     }
@@ -128,7 +128,7 @@ contract sPOLTest is Test, Deploy {
         vm.prank(address(controller));
         token.mint(user1, 100 ether);
 
-        vm.expectRevert("Only sPOL controller can call this function");
+        vm.expectRevert(abi.encodeWithSelector(sPOL.AddressUnauthorized.selector, user1));
         vm.prank(user1);
         token.burn(user1, 50 ether);
     }
@@ -190,7 +190,7 @@ contract sPOLTest is Test, Deploy {
 
         (uint8 v, bytes32 r, bytes32 s) = createPermit(userAddr, spender, amount, deadline, userKey);
 
-        vm.expectRevert("Only sPOL controller can call this function");
+        vm.expectRevert(abi.encodeWithSelector(sPOL.AddressUnauthorized.selector, userAddr));
         vm.prank(userAddr);
         token.consumePermit(userAddr, spender, amount, deadline, v, r, s);
     }

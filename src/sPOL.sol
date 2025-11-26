@@ -9,8 +9,10 @@ import {
 contract sPOL is Initializable, ERC20PermitUpgradeable {
     address public immutable sPOLController;
 
+    error AddressUnauthorized(address caller);
+
     modifier onlyController() {
-        require(msg.sender == sPOLController, "Only sPOL controller can call this function");
+        require(msg.sender == sPOLController, AddressUnauthorized(msg.sender));
         _;
     }
 

@@ -130,7 +130,7 @@ contract sPOLControllerVldMgnTest is Test, Deploy {
         );
 
         vm.prank(testAdmin);
-        vm.expectRevert("NOT_ACTIVE_VALIDATOR");
+        vm.expectRevert(abi.encodeWithSelector(sPOLController.ValidatorNotActive.selector, VALIDATOR_1));
         controller.addValidator(VALIDATOR_1);
     }
 
@@ -143,7 +143,7 @@ contract sPOLControllerVldMgnTest is Test, Deploy {
         );
 
         vm.prank(testAdmin);
-        vm.expectRevert("NO_DELEGATION");
+        vm.expectRevert(abi.encodeWithSelector(sPOLController.ValidatorNotDelegating.selector, VALIDATOR_1));
         controller.addValidator(VALIDATOR_1);
     }
 
@@ -193,7 +193,7 @@ contract sPOLControllerVldMgnTest is Test, Deploy {
         );
 
         vm.prank(testAdmin);
-        vm.expectRevert("SHARES_PENDING");
+        vm.expectRevert(abi.encodeWithSelector(sPOLController.ValidatorSharesPending.selector, VALIDATOR_1, 100));
         controller.removeValidator(VALIDATOR_1);
     }
 
@@ -209,7 +209,7 @@ contract sPOLControllerVldMgnTest is Test, Deploy {
         );
 
         vm.prank(testAdmin);
-        vm.expectRevert("REWARDS_PENDING");
+        vm.expectRevert(abi.encodeWithSelector(sPOLController.ValidatorRewardsPending.selector, VALIDATOR_1, 50));
         controller.removeValidator(VALIDATOR_1);
     }
 
@@ -228,7 +228,7 @@ contract sPOLControllerVldMgnTest is Test, Deploy {
         controller.buySPOL(1);
 
         vm.prank(testAdmin);
-        vm.expectRevert("STILL_FUNDED");
+        vm.expectRevert(abi.encodeWithSelector(sPOLController.ValidatorStillFunded.selector, VALIDATOR_1, 1));
         controller.removeValidator(VALIDATOR_1);
     }
 
@@ -275,7 +275,7 @@ contract sPOLControllerVldMgnTest is Test, Deploy {
 
         // Now try to freeze - should revert because share is not zero
         vm.prank(testAdmin);
-        vm.expectRevert("SHARE_NOT_ZERO");
+        vm.expectRevert(abi.encodeWithSelector(sPOLController.ValidatorDepositShareNotZero.selector, VALIDATOR_1, 100));
         controller.freezeValidator(VALIDATOR_1);
     }
 
@@ -389,7 +389,7 @@ contract sPOLControllerVldMgnTest is Test, Deploy {
         targetShares[1] = 30; // Total = 90, not 100
 
         vm.prank(testAdmin);
-        vm.expectRevert("TOTAL_NOT_100");
+        vm.expectRevert(abi.encodeWithSelector(sPOLController.DepositSharesTotalNotOneHundred.selector, 90));
         controller.updateValidatorTargetShare(validatorIds, targetShares);
     }
 

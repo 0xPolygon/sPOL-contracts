@@ -28,6 +28,11 @@ contract sPOLMessenger is Initializable, PausableUpgradeable, AccessManagedUpgra
     mapping(uint256 => uint256[]) public backfillNonces;
     mapping(uint256 => bool) public completedBackfill;
 
+    error InvalidMessageType(uint8 msgType);
+    error NotEnoughPOLInMessenger(uint256 required, uint256 available);
+    error NotEnoughSPOLInMessenger(uint256 required, uint256 available);
+    error BackfillAlreadyCompleted(uint256 backfillCycle);
+
     constructor(
         address _polToken,
         address _sPOLToken,
@@ -63,14 +68,17 @@ contract sPOLMessenger is Initializable, PausableUpgradeable, AccessManagedUpgra
         } else if (msgType == MsgType.L2_BACKFILL_REQUEST) {
             _handleBackfill(actualMessage);
         } else {
-            revert("Invalid message type");
+            revert InvalidMessageType(uint8(msgType));
         }
     }
 
     function _handleMigration(bytes memory _msg) internal {
         (uint256 _polAmount, uint256 _mintedSPOL) = _decodeL2MigrationRequestMessage(_msg);
         polBridger.takePOLL1(_polAmount);
-        require(polToken.balanceOf(address(this)) >= _polAmount, "Not enough POL in messenger");
+        require(
+            polToken.balanceOf(address(this)) >= _polAmount,
+            NotEnoughPOLInMessenger(_polAmount, polToken.balanceOf(address(this)))
+        );
 
         sPOLController.completeMigration(_polAmount, _mintedSPOL);
         rootChainManager.depositFor(childTunnel, address(sPOLToken), abi.encodePacked(_mintedSPOL));
@@ -80,13 +88,16 @@ contract sPOLMessenger is Initializable, PausableUpgradeable, AccessManagedUpgra
 
     function _handleBackfill(bytes memory _msg) internal {
         (uint256 _polAmount, uint256 _sPOLAmount, uint256 _backFillCycle) = _decodeL2BackfillRequestMessage(_msg);
-        require(sPOLToken.balanceOf(address(this)) >= _sPOLAmount, "Not enough sPOL in messenger");
+        require(
+            sPOLToken.balanceOf(address(this)) >= _sPOLAmount,
+            NotEnoughSPOLInMessenger(_sPOLAmount, sPOLToken.balanceOf(address(this)))
+        );
         uint256[] memory nonces = sPOLController.startBackfillSell(_polAmount, _sPOLAmount);
         backfillNonces[_backFillCycle] = nonces;
     }
 
     function completeBackfill(uint256 _backFillCycle) external whenNotPaused {
-        require(!completedBackfill[_backFillCycle], "Backfill already completed");
+        require(!completedBackfill[_backFillCycle], BackfillAlreadyCompleted(_backFillCycle));
         uint256 balanceBefore = polToken.balanceOf(address(this));
         for (uint256 i = 0; i < backfillNonces[_backFillCycle].length; i++) {
             sPOLController.withdrawPOL(backfillNonces[_backFillCycle][i]);

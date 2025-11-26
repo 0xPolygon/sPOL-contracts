@@ -78,6 +78,32 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     event sPOLMigrated(address user, uint256 amountPOL, uint256 amountSPOL);
     event sPOLBackfilled(address user, uint256 amountSPOL, uint256 amountPOL);
 
+    error AddressUnauthorized(address caller);
+    error AmountTooLarge(uint256 amount, uint256 maxAmount);
+    error ArrayLengthMismatch(uint256 validatorLength, uint256 shareLength);
+    error BadExchangeRate(uint256 provided, uint256 expected);
+    error BuySharesMismatch(uint256 expected, uint256 actual);
+    error DepositSharesTotalNotOneHundred(uint8 totalPercent);
+    error DPOLRestakeTransferFromFailed();
+    error FeeTooLarge(uint16 provided, uint16 maxAllowed);
+    error IncorrectValidatorShareExchangeRate(uint256 expected, uint256 actual);
+    error InvalidPermit();
+    error NonceNotFound(address user, uint256 nonce);
+    error NoOpenNonces(address user);
+    error NoNoncesReady(address user);
+    error NotEnoughStake(uint256 remaining);
+    error ValidatorDepositShareNotZero(uint16 validatorId, uint8 depositShare);
+    error ValidatorNotActive(uint16 validatorId);
+    error ValidatorNotDelegating(uint16 validatorId);
+    error ValidatorNotFrozen(uint16 validatorId);
+    error ValidatorOverfunded(uint256 amount, uint256 maxAmount);
+    error ValidatorRewardsPending(uint16 validatorId, uint256 rewards);
+    error ValidatorSharesPending(uint16 validatorId, uint256 shares);
+    error ValidatorStillFunded(uint16 validatorId, uint256 totalStaked);
+    error ValidatorUnderfunded(uint256 amount, uint256 maxAmount);
+    error WithdrawNotReady(uint256 nonce);
+    error ZeroAddress();
+
     constructor(
         address _polToken,
         address _maticToken,
@@ -101,7 +127,7 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     {
         __Pausable_init();
         __AccessManaged_init(_authority);
-        require(_rewardFee <= MAX_FEE, "FEE_TOO_LARGE");
+        require(_rewardFee <= MAX_FEE, FeeTooLarge(_rewardFee, MAX_FEE));
         rewardFee = _rewardFee;
         feeReceiver = _feeReceiver;
         maxDivergence = _maxDivergence;
@@ -113,10 +139,10 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     ///////////////////////////////
 
     function addValidator(uint16 _validatorID) external restricted {
-        require(stakeManager.isValidator(_validatorID), "NOT_ACTIVE_VALIDATOR");
+        require(stakeManager.isValidator(_validatorID), ValidatorNotActive(_validatorID));
 
         IValidatorShare validatorContract = IValidatorShare(stakeManager.getValidatorContract(_validatorID));
-        require(address(validatorContract) != address(0), "NO_DELEGATION");
+        require(address(validatorContract) != address(0), ValidatorNotDelegating(_validatorID));
 
         validators[_validatorID] = ValidatorInfo({
             status: ValidatorStatus.ACTIVE,
@@ -133,10 +159,14 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
 
     function removeValidator(uint16 _removedValidator) external restricted {
         ValidatorInfo storage removedValidator = validators[_removedValidator];
-        require(removedValidator.totalStaked == 0, "STILL_FUNDED");
-        require(removedValidator.status == ValidatorStatus.ACTIVE, "NOT_ACTIVE");
-        require(removedValidator.validatorContract.balanceOf(address(this)) == 0, "SHARES_PENDING");
-        require(removedValidator.validatorContract.getLiquidRewards(address(this)) == 0, "REWARDS_PENDING");
+        require(
+            removedValidator.totalStaked == 0, ValidatorStillFunded(_removedValidator, removedValidator.totalStaked)
+        );
+        require(removedValidator.status == ValidatorStatus.ACTIVE, ValidatorNotActive(_removedValidator));
+        uint256 shares = removedValidator.validatorContract.balanceOf(address(this));
+        require(shares == 0, ValidatorSharesPending(_removedValidator, shares));
+        uint256 rewards = removedValidator.validatorContract.getLiquidRewards(address(this));
+        require(rewards == 0, ValidatorRewardsPending(_removedValidator, rewards));
 
         removedValidator.status = ValidatorStatus.DEACTIVATED;
         removedValidator.depositShare = 0;
@@ -145,8 +175,11 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     }
 
     function freezeValidator(uint16 _validator) external restricted {
-        require(validators[_validator].status == ValidatorStatus.ACTIVE, "NOT_ACTIVE");
-        require(validators[_validator].depositShare == 0, "SHARE_NOT_ZERO");
+        require(validators[_validator].status == ValidatorStatus.ACTIVE, ValidatorNotActive(_validator));
+        require(
+            validators[_validator].depositShare == 0,
+            ValidatorDepositShareNotZero(_validator, validators[_validator].depositShare)
+        );
 
         validators[_validator].status = ValidatorStatus.FROZEN;
         _removeFromActiveValidators(_validator);
@@ -154,7 +187,7 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     }
 
     function unfreezeValidator(uint16 _validator) external restricted {
-        require(validators[_validator].status == ValidatorStatus.FROZEN, "NOT_FROZEN");
+        require(validators[_validator].status == ValidatorStatus.FROZEN, ValidatorNotFrozen(_validator));
         validators[_validator].status = ValidatorStatus.ACTIVE;
         activeValidators.push(_validator);
         emit ValidatorUnfrozen(_validator);
@@ -180,9 +213,12 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         external
         restricted
     {
-        require(_validatorID.length == _newTargetShare.length, "LENGTH_MISMATCH");
+        require(
+            _validatorID.length == _newTargetShare.length,
+            ArrayLengthMismatch(_validatorID.length, _newTargetShare.length)
+        );
         for (uint256 i = 0; i < _validatorID.length; i++) {
-            require(validators[_validatorID[i]].status == ValidatorStatus.ACTIVE, "NOT_ACTIVE");
+            require(validators[_validatorID[i]].status == ValidatorStatus.ACTIVE, ValidatorNotActive(_validatorID[i]));
             validators[_validatorID[i]].depositShare = _newTargetShare[i];
             emit ValidatorTargetShareChanged(_validatorID[i], _newTargetShare[i]);
         }
@@ -190,7 +226,7 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         for (uint256 i = 0; i < activeValidators.length; i++) {
             totalPercent += validators[activeValidators[i]].depositShare;
         }
-        require(totalPercent == 100, "TOTAL_NOT_100");
+        require(totalPercent == 100, DepositSharesTotalNotOneHundred(totalPercent));
     }
 
     function migrateValidator(uint16 _oldValidator, uint16 _newValidator) external restricted {
@@ -200,7 +236,10 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     }
 
     function migrateValidator(uint16 _oldValidator, uint16 _newValidator, uint256 _amount) external restricted {
-        require(_amount <= validators[_oldValidator].totalStaked, "AMOUNT_TOO_LARGE");
+        require(
+            _amount <= validators[_oldValidator].totalStaked,
+            AmountTooLarge(_amount, validators[_oldValidator].totalStaked)
+        );
         _migrateValidator(_oldValidator, _newValidator, _amount, true);
     }
 
@@ -337,11 +376,13 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     function _buySPOLSingle(uint256 _amount, uint16 _validator, address _user) internal returns (uint256) {
         uint256 toMint = convertPOLtoSPOL(_amount);
         ValidatorInfo storage validator = validators[_validator];
-        require(validator.status == ValidatorStatus.ACTIVE, "VALIDATOR_NOT_ACTIVE");
-        require(_amount <= _validatorMaxTotalStakeDistance(validator, true), "VALIDATOR_OVERFUNDED");
+        require(validator.status == ValidatorStatus.ACTIVE, ValidatorNotActive(_validator));
+        uint256 maxAmount = _validatorMaxTotalStakeDistance(validator, true);
+        require(_amount <= maxAmount, ValidatorOverfunded(_amount, maxAmount));
         _takePOL(_amount, _user);
 
-        require(_buySharesFromValidator(validator, _amount) == _amount, "BUY_SHARES_MISMATCH");
+        uint256 actualShares = _buySharesFromValidator(validator, _amount);
+        require(actualShares == _amount, BuySharesMismatch(_amount, actualShares));
         lastSuccessfulBuyValidator = _validator;
         _mintSPOL(_user, _amount, toMint);
         return toMint;
@@ -356,7 +397,7 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
             totalShares += _buySharesFromValidator(validators[validator[i]], amount[i]);
         }
         lastSuccessfulBuyValidator = validator[validator.length - 1];
-        require(totalShares == _amount, "BUY_SHARES_MISMATCH");
+        require(totalShares == _amount, BuySharesMismatch(_amount, totalShares));
         _mintSPOL(_user, _amount, toMint);
         return toMint;
     }
@@ -368,7 +409,7 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
 
         IValidatorShare validatorOfDPOL = IValidatorShare(stakeManager.getValidatorContract(_validatorOfDPOL));
         (bool success, uint256 restakedAmount) = validatorOfDPOL.restakeAndTransferFrom(_user, address(this), _amount);
-        require(success, "DPOL_RESTAKE_TRANSFER_FAILED");
+        require(success, DPOLRestakeTransferFromFailed());
 
         if (validators[_validatorOfDPOL].status == ValidatorStatus.ACTIVE) {
             validators[_validatorOfDPOL].totalStaked += restakedAmount;
@@ -389,7 +430,7 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
 
     function _buySharesFromValidator(ValidatorInfo storage _validator, uint256 _amount) internal returns (uint256) {
         (uint256 amountDeposited, uint256 liquidReward) = _validator.validatorContract.restakeAndStakePOL(_amount);
-        require(amountDeposited == _amount, "INCORRECT_EXCHANGE_RATE");
+        require(amountDeposited == _amount, IncorrectValidatorShareExchangeRate(_amount, amountDeposited));
         _adddPOLBalanceFee(liquidReward);
         _adddPOLBalance(amountDeposited);
         validators[_validator.index].totalStaked += amountDeposited + liquidReward;
@@ -440,8 +481,9 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
 
     function _sellSPOLSingle(uint256 _amount, uint16 _validator, address _user) internal returns (uint256) {
         ValidatorInfo storage validator = validators[_validator];
-        require(validator.status == ValidatorStatus.ACTIVE, "VALIDATOR_NOT_ACTIVE");
-        require(_amount <= _maxRedeem(validator), "VALIDATOR_UNDERFUNDED");
+        require(validator.status == ValidatorStatus.ACTIVE, ValidatorNotActive(_validator));
+        uint256 maxRedeem = _maxRedeem(validator);
+        require(_amount <= maxRedeem, ValidatorUnderfunded(_amount, maxRedeem));
         _takeSPOL(_amount, _user);
 
         uint256 dPOLAmount = convertSPOLtoPOL(_amount);
@@ -493,7 +535,7 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         for (uint256 i = 0; i < nonces.length; i++) {
             if (nonces[i] == _nonce) {
                 uint256 shares = _redeemNonceAtValidator(_nonce);
-                require(shares > 0, "WITHDRAW_NOT_READY");
+                require(shares > 0, WithdrawNotReady(_nonce));
 
                 nonces[i] = nonces[nonces.length - 1];
                 nonces.pop();
@@ -503,7 +545,7 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
                 return;
             }
         }
-        revert("NONCE_NOT_FOUND");
+        revert NonceNotFound(_user, _nonce);
     }
 
     function withdrawPOL() external whenNotPaused {
@@ -515,7 +557,7 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     }
 
     function _withdrawPOL(address _user) internal {
-        require(0 != userNonces[_user].length, "NO_OPEN_NONCES");
+        require(userNonces[_user].length > 0, NoOpenNonces(_user));
 
         uint256 totalAmount;
         //create a copy of the array in memory to avoid SStores
@@ -539,7 +581,7 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
                 foundNonces++;
             }
         }
-        require(totalAmount > 0, "NO_NONCES_READY");
+        require(totalAmount > 0, NoNoncesReady(_user));
         // bundle transfer to save gas, separate events inform about multi withdraws
         polToken.transfer(_user, totalAmount);
     }
@@ -684,7 +726,7 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
                 }
                 selectedValidators[i] = validators[activeValidators[i]].index;
             }
-            require(remaining == 0, "Not enough stake");
+            require(remaining == 0, NotEnoughStake(remaining));
         }
         return (selectedValidators, amounts);
     }
@@ -694,13 +736,13 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     ///////////////////////////////
 
     function changeFeeReceiver(address newFeeReceiver) external restricted {
-        require(newFeeReceiver != address(0), "ZERO_ADDRESS");
+        require(newFeeReceiver != address(0), ZeroAddress());
         takeFee();
         feeReceiver = newFeeReceiver;
     }
 
     function changeRewardFee(uint16 newFee) external restricted {
-        require(newFee <= MAX_FEE, "FEE_TOO_LARGE");
+        require(newFee <= MAX_FEE, FeeTooLarge(newFee, MAX_FEE));
         rewardFee = newFee;
     }
 
@@ -718,8 +760,9 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     ////////////////////////////////
 
     function completeMigration(uint256 _amountPOL, uint256 _amountSPOL) external {
-        require(msg.sender == sPOLMessenger, "ONLY_MESSENGER");
-        require(convertPOLtoSPOL(_amountPOL) <= _amountSPOL, "BAD_EXCHANGE_RATE");
+        require(msg.sender == sPOLMessenger, AddressUnauthorized(msg.sender));
+        uint256 expectedSPOL = convertPOLtoSPOL(_amountPOL);
+        require(expectedSPOL <= _amountSPOL, BadExchangeRate(_amountSPOL, expectedSPOL));
         (uint16[] memory validator, uint256[] memory amount) = _selectValidators(_amountPOL, true);
         _takePOL(_amountPOL, msg.sender);
         uint256 totalShares;
@@ -727,14 +770,15 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
             totalShares += _buySharesFromValidator(validators[validator[i]], amount[i]);
         }
         lastSuccessfulBuyValidator = validator[validator.length - 1];
-        require(totalShares == _amountPOL, "BUY_SHARES_MISMATCH");
+        require(totalShares == _amountPOL, BuySharesMismatch(_amountPOL, totalShares));
         sPOLToken.mint(msg.sender, _amountSPOL);
         emit sPOLMigrated(msg.sender, _amountPOL, _amountSPOL);
     }
 
     function startBackfillSell(uint256 _amountPOL, uint256 _amountSPOL) external returns (uint256[] memory) {
-        require(msg.sender == sPOLMessenger, "ONLY_MESSENGER");
-        require(_amountSPOL <= convertPOLtoSPOL(_amountPOL), "BAD_EXCHANGE_RATE");
+        require(msg.sender == sPOLMessenger, AddressUnauthorized(msg.sender));
+        uint256 maxSPOL = convertPOLtoSPOL(_amountPOL);
+        require(_amountSPOL <= maxSPOL, BadExchangeRate(_amountSPOL, maxSPOL));
         _takeSPOL(_amountSPOL, msg.sender);
         (uint16[] memory validator, uint256[] memory amount) = _selectValidators(_amountPOL, false);
         uint256[] memory nonces = new uint256[](validator.length);
@@ -781,7 +825,7 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         } else {
             polToken.permit(_user, address(this), _amount, _deadline, _v, _r, _s);
         }
-        require(token.nonces(_user) == nonceBefore + 1, "Invalid permit");
+        require(token.nonces(_user) == nonceBefore + 1, InvalidPermit());
     }
 
     function _adddPOLBalanceFee(uint256 _amount) internal {
@@ -833,7 +877,7 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     ///////////////////////////////
 
     function cleanUpMaticPOL(uint16 _validator, address _receiver) external restricted {
-        require(validators[_validator].status == ValidatorStatus.ACTIVE, "VALIDATOR_NOT_ACTIVE");
+        require(validators[_validator].status == ValidatorStatus.ACTIVE, ValidatorNotActive(_validator));
 
         uint256 maticBalance = maticToken.balanceOf(address(this));
         if (maticBalance > 0) {

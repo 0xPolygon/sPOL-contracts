@@ -31,6 +31,7 @@ contract sPOLChild is
     // fee in 1/100 of a percent
     uint16 public safetyFee;
     uint16 public constant SAFETY_FEE_DENOMINATOR = 10_000;
+    uint16 public constant MAX_SAFETY_FEE = 100; // max 1%
     uint256 public maxExchangeRateUpdateDelay;
     uint256 public lastExchangeRateUpdate;
 
@@ -76,14 +77,26 @@ contract sPOLChild is
     mapping(address => UserOutstanding[]) public userOutstandingPOL;
     uint256 public globalWithdrawNonce;
 
-    modifier onlyChildChainManager() {
-        require(msg.sender == childChainManager, "Only Child Chain Manager can call this function");
-        _;
-    }
-
     event sPOLMinted(address user, uint256 amountPOL, uint256 amountSPOL);
     event sPOLBurned(address user, uint256 amountSPOL, uint256 amountPOL, uint256 nonce);
     event POLWithdrawn(address user, uint256 amountPOL, uint256 nonce);
+
+    error AddressUnauthorized(address caller);
+    error BackfillAlreadyOngoing();
+    error ExchangeRateDeclined(uint256 newRate, uint256 currentRate);
+    error ExchangeRateUpdateTooOld(uint256 lastUpdate, uint256 maxAge, uint256 currentTime);
+    error FeeTooHigh(uint16 provided, uint16 maxAllowed);
+    error IncorrectPOLAmount(uint256 sent, uint256 expected);
+    error InvalidMessageType();
+    error MigrationAlreadyOngoing();
+    error NothingToMigrate();
+    error POLAmountMustBeGreaterThanZero();
+    error POLTransferFailed();
+
+    modifier onlyChildChainManager() {
+        require(msg.sender == childChainManager, AddressUnauthorized(msg.sender));
+        _;
+    }
 
     constructor(address _stateSyncer) BaseChildTunnel(_stateSyncer) {
         _disableInitializers();
@@ -140,9 +153,12 @@ contract sPOLChild is
     }
 
     function buySPOL(uint256 _polAmount) external payable whenNotPaused {
-        require(lastExchangeRateUpdate + maxExchangeRateUpdateDelay >= block.timestamp, "Exchange rate update too old");
-        require(msg.value == _polAmount, "Incorrect POL amount sent");
-        require(_polAmount > 0, "POL amount must be greater than 0");
+        require(
+            lastExchangeRateUpdate + maxExchangeRateUpdateDelay >= block.timestamp,
+            ExchangeRateUpdateTooOld(lastExchangeRateUpdate, maxExchangeRateUpdateDelay, block.timestamp)
+        );
+        require(msg.value == _polAmount, IncorrectPOLAmount(msg.value, _polAmount));
+        require(_polAmount > 0, POLAmountMustBeGreaterThanZero());
         uint256 spolToMint = convertPOLToSPOL(_polAmount);
         locallyMintedSPOL += spolToMint;
         actualQuickRedeemReserve += _polAmount;
@@ -167,7 +183,7 @@ contract sPOLChild is
         actualQuickRedeemReserve -= _polAmount;
         polBalance -= _polAmount;
         (bool success,) = payable(msg.sender).call{value: _polAmount}("");
-        require(success, "POL transfer failed");
+        require(success, POLTransferFailed());
         emit POLWithdrawn(msg.sender, _polAmount, globalWithdrawNonce);
     }
 
@@ -204,7 +220,7 @@ contract sPOLChild is
             outstandings.pop();
             reordered = true;
         }
-        require(totalToWithdraw > 0, "No POL to withdraw");
+        require(totalToWithdraw > 0, POLAmountMustBeGreaterThanZero());
         polBalance -= totalToWithdraw;
         payable(msg.sender).transfer(totalToWithdraw);
     }
@@ -238,13 +254,13 @@ contract sPOLChild is
         if (msgType == MsgType.EXCHANGE_UPDATE) {
             _handleExchangeRateUpdate(actualMessage);
         } else if (msgType == MsgType.L1_MIGRATION_RESPONSE) {
-            revert("Migration response handling for portal disabled");
+            revert InvalidMessageType();
             //handleMigrationResponse(actualMessage);
         } else if (msgType == MsgType.L1_BACKFILL_RESPONSE) {
             _handleBackfillResponse(actualMessage);
         } else {
             // maybe don't revert here to avoid failedStateSync issues
-            revert("Invalid message type");
+            revert InvalidMessageType();
         }
     }
 
@@ -255,7 +271,7 @@ contract sPOLChild is
         l1DPOLBalance = updatedl1DPOLBalance;
         uint256 newConversion = convertSPOLToPOL(1e18);
         // this then stays in failedstatesync, maybe don't revert, but ignore?
-        require(newConversion >= currentConversion, "Exchange rate declined");
+        require(newConversion >= currentConversion, ExchangeRateDeclined(newConversion, currentConversion));
         lastExchangeRateUpdate = block.timestamp;
     }
 
@@ -280,8 +296,8 @@ contract sPOLChild is
     }
 
     function requestMigration() external whenNotPaused {
-        require(!onGoingMigration, "Migration already ongoing");
-        require(targetQuickRedeemReserve <= actualQuickRedeemReserve, "Nothing to migrate");
+        require(!onGoingMigration, MigrationAlreadyOngoing());
+        require(targetQuickRedeemReserve <= actualQuickRedeemReserve, NothingToMigrate());
         onGoingMigration = true;
 
         uint256 polToMigrate = polBalance - targetQuickRedeemReserve - reservedWithdrawPOLBalance;
@@ -306,7 +322,7 @@ contract sPOLChild is
     }
 
     function requestBackfill() external whenNotPaused {
-        require(!onGoingBackfill, "Backfill already ongoing");
+        require(!onGoingBackfill, BackfillAlreadyOngoing());
         onGoingBackfill = true;
         backFillCycle += 1;
         pendingWithdrawPOLBalance += missingWithdrawPOLBalance;
@@ -335,8 +351,8 @@ contract sPOLChild is
         targetQuickRedeemReserve = _newSize;
     }
 
-    function setSafetyFee(uint16 _newFee) external restricted {
-        require(_newFee <= SAFETY_FEE_DENOMINATOR / 10, "Fee too high");
+    function changeSafetyFee(uint16 _newFee) external restricted {
+        require(_newFee <= MAX_SAFETY_FEE, FeeTooHigh(_newFee, MAX_SAFETY_FEE));
         safetyFee = _newFee;
     }
 

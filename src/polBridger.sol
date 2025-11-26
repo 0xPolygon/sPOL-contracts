@@ -21,6 +21,12 @@ contract PolBridger is AccessManaged, Pausable {
     address public sPOLMessengerL1;
     address public sPOLMessengerL2;
 
+    error AddressUnauthorized(address caller);
+    error AlreadyInitialized();
+    error InsufficientPOLSent(uint256 sent, uint256 required);
+    error InvalidOriginChain(uint256 currentChain, uint256 expectedChain);
+    error ZeroAddress();
+
     constructor(
         address _polTokenL1,
         address _polTokenL2,
@@ -39,34 +45,34 @@ contract PolBridger is AccessManaged, Pausable {
     }
 
     function initialize(address _sPOLMessengerL1, address _sPOLMessengerL2) external restricted {
-        require(!initialized, "Already initialized");
-        require(_sPOLMessengerL1 != address(0), "Invalid sPOL Messenger L1");
-        require(_sPOLMessengerL2 != address(0), "Invalid sPOL Messenger L2");
+        require(!initialized, AlreadyInitialized());
+        require(_sPOLMessengerL1 != address(0), ZeroAddress());
+        require(_sPOLMessengerL2 != address(0), ZeroAddress());
         sPOLMessengerL1 = _sPOLMessengerL1;
         sPOLMessengerL2 = _sPOLMessengerL2;
         initialized = true;
     }
 
     function bridgePOLToL1(uint256 _amount) external payable whenNotPaused {
-        require(msg.value == _amount, "Insufficient POL sent");
-        require(msg.sender == sPOLMessengerL2, "Only sPOL Messenger can call");
-        require(block.chainid == chainIDL2, "Invalid origin chain");
+        require(msg.value == _amount, InsufficientPOLSent(msg.value, _amount));
+        require(msg.sender == sPOLMessengerL2, AddressUnauthorized(msg.sender));
+        require(block.chainid == chainIDL2, InvalidOriginChain(block.chainid, chainIDL2));
         IMRC20(polTokenL2).withdraw{value: _amount}(_amount);
     }
 
     function exitPOL(bytes memory proof) external whenNotPaused {
-        require(block.chainid == chainIDL1, "Invalid origin chain");
+        require(block.chainid == chainIDL1, InvalidOriginChain(block.chainid, chainIDL1));
         IERC20PredicateBurnOnly(erc20predicate).startExitWithBurntTokens(proof);
     }
 
     function finalizeExitPOL() external whenNotPaused {
-        require(block.chainid == chainIDL1, "Invalid origin chain");
+        require(block.chainid == chainIDL1, InvalidOriginChain(block.chainid, chainIDL1));
         IWithdrawManager(withdrawManager).processExits(polTokenL1);
     }
 
     function takePOLL1(uint256 _amount) external whenNotPaused {
-        require(msg.sender == sPOLMessengerL1, "Only sPOL Messenger can call");
-        require(block.chainid == chainIDL1, "Invalid origin chain");
+        require(msg.sender == sPOLMessengerL1, AddressUnauthorized(msg.sender));
+        require(block.chainid == chainIDL1, InvalidOriginChain(block.chainid, chainIDL1));
         IERC20(polTokenL1).transfer(sPOLMessengerL1, _amount);
     }
 

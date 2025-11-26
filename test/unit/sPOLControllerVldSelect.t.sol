@@ -250,7 +250,7 @@ contract sPOLControllerVLDSelectTest is Test, sPOLController {
         uint256 cutOffSecondValidator = 1000 - 428;
 
         if (_amountToSell > 2000) {
-            vm.expectRevert("Not enough stake");
+            vm.expectRevert(abi.encodeWithSelector(sPOLController.NotEnoughStake.selector, _amountToSell - 2000));
             _selectValidators(_amountToSell, false);
         } else {
             (uint16[] memory ids, uint256[] memory amounts) = _selectValidators(_amountToSell, false);
@@ -301,7 +301,7 @@ contract sPOLControllerVLDSelectTest is Test, sPOLController {
         // uint256 cutOffSecondValidator = 0;
 
         if (_amountToSell > 9000) {
-            vm.expectRevert("Not enough stake");
+            vm.expectRevert(abi.encodeWithSelector(sPOLController.NotEnoughStake.selector, _amountToSell - 9000));
             _selectValidators(_amountToSell, false);
         } else {
             (uint16[] memory ids, uint256[] memory amounts) = _selectValidators(_amountToSell, false);

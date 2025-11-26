@@ -80,7 +80,7 @@ contract sPOLControllerTest is Test, Deploy {
     function test_changeFeeReceiver_ZeroAddress() public {
         vm.prank(testAdmin);
 
-        vm.expectRevert("ZERO_ADDRESS");
+        vm.expectRevert(abi.encodeWithSelector(sPOLController.ZeroAddress.selector));
         controller.changeFeeReceiver(address(0));
     }
 
@@ -112,7 +112,7 @@ contract sPOLControllerTest is Test, Deploy {
     }
 
     function test_changeRewardFee_ExceedsMaxFee() public {
-        vm.expectRevert("FEE_TOO_LARGE");
+        vm.expectRevert(abi.encodeWithSelector(sPOLController.FeeTooLarge.selector, MAX_FEE + 1, MAX_FEE));
         vm.prank(testAdmin);
         controller.changeRewardFee(MAX_FEE + 1);
     }
