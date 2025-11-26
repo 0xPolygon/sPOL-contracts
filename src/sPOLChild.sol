@@ -2,17 +2,18 @@
 pragma solidity ^0.8.30;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {PolBridger} from "./polBridger.sol";
+
 import {BaseChildTunnel} from "./msg/BaseChildTunnel.sol";
 import {MsgCoder} from "./MsgCoder.sol";
-import {
-    ERC20PermitUpgradeable
-} from "@openzeppelin-contracts-upgradeable/token/ERC20/extensions/ERC20PermitUpgradeable.sol";
-import {PausableUpgradeable} from "@openzeppelin-contracts-upgradeable/utils/PausableUpgradeable.sol";
 import {Initializable} from "@openzeppelin-contracts-upgradeable/proxy/utils/Initializable.sol";
+import {PausableUpgradeable} from "@openzeppelin-contracts-upgradeable/utils/PausableUpgradeable.sol";
 import {
     AccessManagedUpgradeable
 } from "@openzeppelin-contracts-upgradeable/access/manager/AccessManagedUpgradeable.sol";
-import {PolBridger} from "./polBridger.sol";
+import {
+    ERC20PermitUpgradeable
+} from "@openzeppelin-contracts-upgradeable/token/ERC20/extensions/ERC20PermitUpgradeable.sol";
 
 contract sPOLChild is
     Initializable,
@@ -37,7 +38,7 @@ contract sPOLChild is
     // This should always be equal to reservedWithdrawPOLBalance + actualQuickRedeemReserve
     uint256 public polBalance;
     // Slow redeem
-    // These two together should always be equal to the sum of outstanding POL in userOutstandingPOL
+    // These three together should always be equal to the sum of outstanding POL in userOutstandingPOL
     uint256 public missingWithdrawPOLBalance;
     uint256 public reservedWithdrawPOLBalance;
     uint256 public pendingWithdrawPOLBalance;
@@ -56,6 +57,7 @@ contract sPOLChild is
     // Bridge helper contract, because POL has no withdrawFor function
     PolBridger public bridgeHelper;
 
+    // Depositor bridge contract of sPOL
     address public childChainManager;
 
     // Migration and backfill tracking
@@ -113,109 +115,9 @@ contract sPOLChild is
         l1SPOLBalance = 1;
     }
 
-    function _processMessageFromRoot(bytes memory message) internal virtual override {
-        (MsgType msgType, bytes memory actualMessage) = abi.decode(message, (MsgType, bytes));
-        if (msgType == MsgType.EXCHANGE_UPDATE) {
-            handleExchangeRateUpdate(actualMessage);
-        } else if (msgType == MsgType.L1_MIGRATION_RESPONSE) {
-            revert("Migration response handling for portal disabled");
-            //handleMigrationResponse(actualMessage);
-        } else if (msgType == MsgType.L1_BACKFILL_RESPONSE) {
-            handleBackfillResponse(actualMessage);
-        } else {
-            // maybe don't revert here to avoid failedStateSync issues
-            revert("Invalid message type");
-        }
-    }
-
-    function handleExchangeRateUpdate(bytes memory _msg) internal {
-        (uint256 updatedl1SPOLBalance, uint256 updatedl1DPOLBalance) = decodeExchangeUpdateMessage(_msg);
-        uint256 currentConversion = convertSPOLToPOL(1e18);
-        l1SPOLBalance = updatedl1SPOLBalance;
-        l1DPOLBalance = updatedl1DPOLBalance;
-        uint256 newConversion = convertSPOLToPOL(1e18);
-        // this then stays in failedstatesync, maybe don't revert, but ignore?
-        require(newConversion >= currentConversion, "Exchange rate declined");
-        lastExchangeRateUpdate = block.timestamp;
-    }
-
-    function requestMigration() external whenNotPaused {
-        require(!onGoingMigration, "Migration already ongoing");
-        require(targetQuickRedeemReserve <= actualQuickRedeemReserve, "Nothing to migrate");
-        onGoingMigration = true;
-
-        uint256 polToMigrate = polBalance - targetQuickRedeemReserve - reservedWithdrawPOLBalance;
-        actualQuickRedeemReserve -= polToMigrate;
-        polBalance -= polToMigrate;
-
-        uint256 sPOLToAddToBridge;
-        // maybe do this on response
-        if (locallyMintedSPOL > locallyToBeBurnedSPOL) {
-            sPOLToAddToBridge = locallyMintedSPOL - locallyToBeBurnedSPOL;
-            locallyMintedSPOL -= locallyToBeBurnedSPOL;
-            locallyToBeBurnedSPOL = 0;
-        } else {
-            locallyToBeBurnedSPOL -= locallyMintedSPOL;
-            locallyMintedSPOL = 0;
-        }
-        backMigratingSPOL = sPOLToAddToBridge;
-        exitPOLforMessenger(polToMigrate);
-        _sendMessageToRoot(
-            abi.encode(MsgType.L2_MIGRATION_REQUEST, encodeL2MigrationRequestMessage(polToMigrate, sPOLToAddToBridge))
-        );
-    }
-
-    // this could be skipped, if we detect on the deposit that it comes from the messenger, then just don't mint
-    // doesn't work with portal, so we take the shortcut through deposit
-    // for lxly migration this needs to be activated
-    // function handleMigrationResponse(bytes memory _msg) internal {
-    //     // failedStateSync issue again
-    //     require(onGoingMigration, "No migration ongoing");
-    //     onGoingMigration = false;
-    //     (uint256 returnedSPOL) = decodeL1MigrationResponseMessage(_msg);
-    //     // if this fails we need to keep the statesync to perform it after the bridging completes
-    //     // this allows an exit again, stupid
-    //     burnUnextiableSPOL(returnedSPOL);
-    // }
-
-    function requestBackfill() external whenNotPaused {
-        require(!onGoingBackfill, "Backfill already ongoing");
-        onGoingBackfill = true;
-        backFillCycle += 1;
-        pendingWithdrawPOLBalance += missingWithdrawPOLBalance;
-
-        missingWithdrawPOLBalance = 0;
-        uint256 bridgeMissingSPOL;
-        if (locallyMintedSPOL > locallyToBeBurnedSPOL) {
-            bridgeMissingSPOL = locallyMintedSPOL - locallyToBeBurnedSPOL;
-            burnSPOLForMessenger(bridgeMissingSPOL);
-            locallyMintedSPOL -= locallyToBeBurnedSPOL;
-            locallyToBeBurnedSPOL = 0;
-        }
-        // we need to create spol and bridge it back over to L1
-        _sendMessageToRoot(
-            abi.encode(
-                MsgType.L2_BACKFILL_REQUEST,
-                encodeL2BackfillRequestMessage(pendingWithdrawPOLBalance, bridgeMissingSPOL, backFillCycle)
-            )
-        );
-    }
-
-    function handleBackfillResponse(bytes memory _msg) internal {
-        (uint256 _returnedPOL, uint256 _backFillCycle) = decodeL1BackfillResponseMessage(_msg);
-        if (_returnedPOL > pendingWithdrawPOLBalance) {
-            uint256 leftOver = _returnedPOL - pendingWithdrawPOLBalance;
-            actualQuickRedeemReserve += leftOver;
-            reservedWithdrawPOLBalance += pendingWithdrawPOLBalance;
-            pendingWithdrawPOLBalance = 0;
-        } else {
-            pendingWithdrawPOLBalance -= _returnedPOL;
-            reservedWithdrawPOLBalance += _returnedPOL;
-        }
-        polBalance += _returnedPOL;
-        completedBackfills[_backFillCycle] = true;
-        onGoingBackfill = false;
-    }
+    ///////////////////////////////
+    ///  Stake/Unstake          ///
+    ///////////////////////////////
 
     // balances are delayed from L1, so converting to sPOL is better than on L1, to avoid this we add a small fee
     // this fee isn't separately collected, so it just benefits all sPOL holders
@@ -307,6 +209,128 @@ contract sPOLChild is
         payable(msg.sender).transfer(totalToWithdraw);
     }
 
+    /////////////////////////////////
+    ///  Token Bridging           ///
+    /////////////////////////////////
+
+    function deposit(address user, bytes calldata depositData) external onlyChildChainManager {
+        uint256 amount = abi.decode(depositData, (uint256));
+        if (user == address(this) && onGoingMigration && amount == backMigratingSPOL) {
+            onGoingMigration = false;
+            backMigratingSPOL = 0;
+            // this means the bridged sPOL from the current migration has arrived
+            // we don't mint it, as the needed burn would generate an exit event again
+        } else {
+            _mint(user, amount);
+        }
+    }
+
+    function withdraw(uint256 amount) external {
+        _burn(msg.sender, amount);
+    }
+
+    ///////////////////////////////
+    ///  Message Handling       ///
+    ///////////////////////////////
+
+    function _processMessageFromRoot(bytes memory message) internal virtual override {
+        (MsgType msgType, bytes memory actualMessage) = abi.decode(message, (MsgType, bytes));
+        if (msgType == MsgType.EXCHANGE_UPDATE) {
+            _handleExchangeRateUpdate(actualMessage);
+        } else if (msgType == MsgType.L1_MIGRATION_RESPONSE) {
+            revert("Migration response handling for portal disabled");
+            //handleMigrationResponse(actualMessage);
+        } else if (msgType == MsgType.L1_BACKFILL_RESPONSE) {
+            _handleBackfillResponse(actualMessage);
+        } else {
+            // maybe don't revert here to avoid failedStateSync issues
+            revert("Invalid message type");
+        }
+    }
+
+    function _handleExchangeRateUpdate(bytes memory _msg) internal {
+        (uint256 updatedl1SPOLBalance, uint256 updatedl1DPOLBalance) = _decodeExchangeUpdateMessage(_msg);
+        uint256 currentConversion = convertSPOLToPOL(1e18);
+        l1SPOLBalance = updatedl1SPOLBalance;
+        l1DPOLBalance = updatedl1DPOLBalance;
+        uint256 newConversion = convertSPOLToPOL(1e18);
+        // this then stays in failedstatesync, maybe don't revert, but ignore?
+        require(newConversion >= currentConversion, "Exchange rate declined");
+        lastExchangeRateUpdate = block.timestamp;
+    }
+
+    //////////////////////////////
+    ///  Migration/Backfill    ///
+    //////////////////////////////
+
+    function _handleBackfillResponse(bytes memory _msg) internal {
+        (uint256 _returnedPOL, uint256 _backFillCycle) = _decodeL1BackfillResponseMessage(_msg);
+        if (_returnedPOL > pendingWithdrawPOLBalance) {
+            uint256 leftOver = _returnedPOL - pendingWithdrawPOLBalance;
+            actualQuickRedeemReserve += leftOver;
+            reservedWithdrawPOLBalance += pendingWithdrawPOLBalance;
+            pendingWithdrawPOLBalance = 0;
+        } else {
+            pendingWithdrawPOLBalance -= _returnedPOL;
+            reservedWithdrawPOLBalance += _returnedPOL;
+        }
+        polBalance += _returnedPOL;
+        completedBackfills[_backFillCycle] = true;
+        onGoingBackfill = false;
+    }
+
+    function requestMigration() external whenNotPaused {
+        require(!onGoingMigration, "Migration already ongoing");
+        require(targetQuickRedeemReserve <= actualQuickRedeemReserve, "Nothing to migrate");
+        onGoingMigration = true;
+
+        uint256 polToMigrate = polBalance - targetQuickRedeemReserve - reservedWithdrawPOLBalance;
+        actualQuickRedeemReserve -= polToMigrate;
+        polBalance -= polToMigrate;
+
+        uint256 sPOLToAddToBridge;
+        // maybe do this on response
+        if (locallyMintedSPOL > locallyToBeBurnedSPOL) {
+            sPOLToAddToBridge = locallyMintedSPOL - locallyToBeBurnedSPOL;
+            locallyMintedSPOL -= locallyToBeBurnedSPOL;
+            locallyToBeBurnedSPOL = 0;
+        } else {
+            locallyToBeBurnedSPOL -= locallyMintedSPOL;
+            locallyMintedSPOL = 0;
+        }
+        backMigratingSPOL = sPOLToAddToBridge;
+        _exitPOLforMessenger(polToMigrate);
+        _sendMessageToRoot(
+            abi.encode(MsgType.L2_MIGRATION_REQUEST, _encodeL2MigrationRequestMessage(polToMigrate, sPOLToAddToBridge))
+        );
+    }
+
+    function requestBackfill() external whenNotPaused {
+        require(!onGoingBackfill, "Backfill already ongoing");
+        onGoingBackfill = true;
+        backFillCycle += 1;
+        pendingWithdrawPOLBalance += missingWithdrawPOLBalance;
+
+        missingWithdrawPOLBalance = 0;
+        uint256 bridgeMissingSPOL;
+        if (locallyMintedSPOL > locallyToBeBurnedSPOL) {
+            bridgeMissingSPOL = locallyMintedSPOL - locallyToBeBurnedSPOL;
+            _burnSPOLForMessenger(bridgeMissingSPOL);
+            locallyMintedSPOL -= locallyToBeBurnedSPOL;
+            locallyToBeBurnedSPOL = 0;
+        }
+        _sendMessageToRoot(
+            abi.encode(
+                MsgType.L2_BACKFILL_REQUEST,
+                _encodeL2BackfillRequestMessage(pendingWithdrawPOLBalance, bridgeMissingSPOL, backFillCycle)
+            )
+        );
+    }
+
+    ///////////////////////////////
+    ///  Config                 ///
+    ///////////////////////////////
+
     function setQuickRedeemBufferSize(uint256 _newSize) external restricted {
         targetQuickRedeemReserve = _newSize;
     }
@@ -328,31 +352,17 @@ contract sPOLChild is
         _unpause();
     }
 
-    function burnSPOLForMessenger(uint256 _sPOLAmount) internal {
+    /////////////////////////////////
+    ///  Internal Helpers       ///
+    /////////////////////////////////
+
+    function _burnSPOLForMessenger(uint256 _sPOLAmount) internal {
         _transfer(address(this), l1Messenger, _sPOLAmount);
         _burn(l1Messenger, _sPOLAmount);
     }
 
-    // this is a problem, as pol can't withdraw for
-    // we will need two contracts with same address
-    function exitPOLforMessenger(uint256 _polAmount) internal {
+    function _exitPOLforMessenger(uint256 _polAmount) internal {
         bridgeHelper.bridgePOLToL1{value: _polAmount}(_polAmount);
-    }
-
-    function deposit(address user, bytes calldata depositData) external onlyChildChainManager {
-        uint256 amount = abi.decode(depositData, (uint256));
-        if (user == address(this) && onGoingMigration && amount == backMigratingSPOL) {
-            onGoingMigration = false;
-            backMigratingSPOL = 0;
-            // this means the bridged sPOL from the current migration has arrived
-            // we don't mint it, as the needed burn would generate an exit event again
-        } else {
-            _mint(user, amount);
-        }
-    }
-
-    function withdraw(uint256 amount) external {
-        _burn(_msgSender(), amount);
     }
 }
 
