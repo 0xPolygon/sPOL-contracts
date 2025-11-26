@@ -184,13 +184,7 @@ contract Deploy is Script, ConfigLoader {
                 address(sPOLChildImpl),
                 abi.encodeCall(
                     sPOLChild.initialize,
-                    (
-                        address(accessManagerL2),
-                        address(sPOLMessengerProxy),
-                        address(polBridger),
-                        childChainManager,
-                        childTargetQuickRedeemReserve
-                    )
+                    (address(accessManagerL2), address(sPOLMessengerProxy), address(polBridger), childChainManager)
                 )
             )
         );

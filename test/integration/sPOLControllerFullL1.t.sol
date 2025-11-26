@@ -268,6 +268,9 @@ contract sPOLControllerFullL1Test is Test, Deploy {
         Vm.Log[] memory stateSyncLogs = vm.getRecordedLogs();
 
         vm.selectFork(networkL2);
+        vm.prank(admin);
+        child.setQuickRedeemBufferSize(10000 ether);
+
         deal(user1, 1000000000 ether);
 
         // prank statesync using emitted data
