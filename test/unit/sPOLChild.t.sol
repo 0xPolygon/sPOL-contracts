@@ -626,7 +626,7 @@ contract sPOLChildTest is Test, Deploy {
         (uint256 outstandingPOL, uint256 backfillCycle, uint256 nonce) =
             sPOLChildToken.userOutstandingPOL(user, initialNonce);
         assertEq(outstandingPOL, expectedPOLRedeem);
-        assertEq(backfillCycle, 0);
+        assertEq(backfillCycle, 1);
         assertEq(nonce, initialNonce + 1);
     }
 

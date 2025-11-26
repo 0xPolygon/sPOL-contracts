@@ -47,13 +47,12 @@ contract sPOLMessenger is Initializable, PausableUpgradeable, AccessManagedUpgra
         _disableInitializers();
     }
 
-    function initialize(address _authority) external initializer {
+    function initialize(address _authority, address _rcmERC20Predicate) external initializer {
         __Pausable_init();
         __AccessManaged_init(_authority);
-        address erc20predicate = rootChainManager.typeToPredicate(keccak256("ERC20"));
         polToken.approve(address(sPOLController), type(uint256).max);
         polToken.approve(address(depositManager), type(uint256).max);
-        sPOLToken.approve(erc20predicate, type(uint256).max);
+        sPOLToken.approve(_rcmERC20Predicate, type(uint256).max);
     }
 
     function _processMessageFromChild(bytes memory _message) internal override {

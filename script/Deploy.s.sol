@@ -151,7 +151,7 @@ contract Deploy is Script, ConfigLoader {
             (
                 ITransparentUpgradeableProxy(address(sPOLMessengerProxy)),
                 address(sPOLMessengerImpl),
-                abi.encodeCall(sPOLMessenger.initialize, (address(accessManagerL1)))
+                abi.encodeCall(sPOLMessenger.initialize, (address(accessManagerL1), rcmERC20Predicate))
             )
         );
         accessManagerL1.execute(address(sPOLMessengerproxyAdmin), upgradeAndCallsPOLMessengerdata);
