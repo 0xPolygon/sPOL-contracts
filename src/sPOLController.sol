@@ -196,17 +196,19 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     function migrateValidator(uint16 _oldValidator, uint16 _newValidator) external restricted {
         uint256 amount = validators[_oldValidator].totalStaked;
         amount += validators[_oldValidator].validatorContract.getLiquidRewards(address(this));
-        _migrateValidator(_oldValidator, _newValidator, amount);
+        _migrateValidator(_oldValidator, _newValidator, amount, true);
     }
 
     function migrateValidator(uint16 _oldValidator, uint16 _newValidator, uint256 _amount) external restricted {
         require(_amount <= validators[_oldValidator].totalStaked, "AMOUNT_TOO_LARGE");
-        _migrateValidator(_oldValidator, _newValidator, _amount);
+        _migrateValidator(_oldValidator, _newValidator, _amount, true);
     }
 
-    function _migrateValidator(uint16 _oldValidator, uint16 _newValidator, uint256 _amount) internal {
-        restakeValidator(_oldValidator);
-        restakeValidator(_newValidator);
+    function _migrateValidator(uint16 _oldValidator, uint16 _newValidator, uint256 _amount, bool _restake) internal {
+        if (_restake) {
+            restakeValidator(_oldValidator);
+            restakeValidator(_newValidator);
+        }
         stakeManager.migrateDelegation(_oldValidator, _newValidator, _amount);
         validators[_oldValidator].totalStaked -= _amount;
         validators[_newValidator].totalStaked += _amount;
@@ -290,28 +292,27 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         whenNotPaused
         returns (uint256)
     {
-        _applyPermit(_amount, _user, _deadline, _v, _r, _s, false);
+        _applyPermit(address(polToken), _amount, _user, _deadline, _v, _r, _s);
         return _buySPOLMulti(_amount, _user);
     }
 
     function _applyPermit(
+        address _token,
         uint256 _amount,
         address _user,
         uint256 _deadline,
         uint8 _v,
         bytes32 _r,
-        bytes32 _s,
-        bool _consume
+        bytes32 _s
     ) internal {
-        if (_consume) {
-            uint256 nonceBefore = sPOLToken.nonces(_user);
+        ERC20Permit token = ERC20Permit(_token);
+        uint256 nonceBefore = token.nonces(_user);
+        if (address(_token) == address(sPOLToken)) {
             sPOLToken.consumePermit(_user, address(this), _amount, _deadline, _v, _r, _s);
-            require(sPOLToken.nonces(_user) == nonceBefore + 1, "Invalid permit");
         } else {
-            uint256 nonceBefore = polToken.nonces(_user);
             polToken.permit(_user, address(this), _amount, _deadline, _v, _r, _s);
-            require(polToken.nonces(_user) == nonceBefore + 1, "Invalid permit");
         }
+        require(token.nonces(_user) == nonceBefore + 1, "Invalid permit");
     }
 
     function buySPOL(uint256 _amount, uint16 _validator) public whenNotPaused returns (uint256) {
@@ -327,8 +328,51 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         bytes32 _r,
         bytes32 _s
     ) public whenNotPaused returns (uint256) {
-        _applyPermit(_amount, _user, _deadline, _v, _r, _s, false);
+        _applyPermit(address(polToken), _amount, _user, _deadline, _v, _r, _s);
         return _buySPOLSingle(_amount, _validator, _user);
+    }
+
+    function buySPOLWithDPOLPermit(
+        uint256 _amount,
+        uint16 _validatorOfDPOL,
+        address _user,
+        uint256 _deadline,
+        uint8 _v,
+        bytes32 _r,
+        bytes32 _s
+    ) external whenNotPaused returns (uint256) {
+        _applyPermit(stakeManager.getValidatorContract(_validatorOfDPOL), _amount, _user, _deadline, _v, _r, _s);
+        return _buySPOLWithDPOLMulti(_amount, _validatorOfDPOL, _user);
+    }
+
+    function buySPOLWithDPOL(uint256 _amount, uint16 _validatorOfDPOL) external whenNotPaused returns (uint256) {
+        return _buySPOLWithDPOLMulti(_amount, _validatorOfDPOL, msg.sender);
+    }
+
+    function _buySPOLWithDPOLMulti(uint256 _amount, uint16 _validatorOfDPOL, address _user) internal returns (uint256) {
+        uint256 sPOLToMint = convertPOLtoSPOL(_amount);
+
+        (uint16[] memory validator, uint256[] memory amount) = _selectValidators(_amount, true);
+
+        IValidatorShare validatorOfDPOL = IValidatorShare(stakeManager.getValidatorContract(_validatorOfDPOL));
+        (bool success, uint256 restakedAmount) = validatorOfDPOL.restakeAndTransferFrom(_user, address(this), _amount);
+        require(success, "DPOL_RESTAKE_TRANSFER_FAILED");
+
+        if (validators[_validatorOfDPOL].status == ValidatorStatus.ACTIVE) {
+            validators[_validatorOfDPOL].totalStaked += restakedAmount;
+            _adddPOLBalanceFee(restakedAmount);
+        }
+        _adddPOLBalance(_amount);
+
+        for (uint256 i = 0; i < amount.length; i++) {
+            if (validator[i] == _validatorOfDPOL) {
+                validators[_validatorOfDPOL].totalStaked += amount[i];
+            }
+            _migrateValidator(_validatorOfDPOL, validator[i], amount[i], false);
+        }
+        lastSuccessfulBuyValidator = validator[validator.length - 1];
+        _mintSPOL(_user, _amount, sPOLToMint);
+        return sPOLToMint;
     }
 
     function _buySPOLSingle(uint256 _amount, uint16 _validator, address _user) internal returns (uint256) {
@@ -437,7 +481,7 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     {
         // consume permit resets allowance to 0 after use, as we don't want any leftover allowance
         // allowance should have no negative downsides, we do this to be safe
-        _applyPermit(_amount, _user, _deadline, _v, _r, _s, true);
+        _applyPermit(address(sPOLToken), _amount, _user, _deadline, _v, _r, _s);
         return _sellSPOLMulti(_amount, _user);
     }
 
@@ -456,7 +500,7 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     ) external whenNotPaused returns (uint256) {
         // consume permit resets allowance to 0 after use, as we don't want any leftover allowance
         // allowance should have no negative downsides, we do this to be safe
-        _applyPermit(_amount, _user, _deadline, _v, _r, _s, true);
+        _applyPermit(address(sPOLToken), _amount, _user, _deadline, _v, _r, _s);
         return _sellSPOLSingle(_amount, _validator, _user);
     }
 
