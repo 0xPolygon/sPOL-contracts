@@ -512,6 +512,102 @@ contract sPOLControllerFullL1Test is Test, Deploy {
         vm.prank(user1);
         controller.buySPOLWithDPOL(largeAmount, validator2ID);
         assertEq(sPOLToken.balanceOf(user1), expectedSPOLFromDPOL);
+
+        // user2 - Buys dPOL from known validator and attempts to convert to sPOL
+        IValidatorShare knownValidator = IValidatorShare(IStakeManager(stakeManager).getValidatorContract(validator1ID));
+
+        // user2 buys dPOL from the known validator
+        vm.startPrank(user2);
+        ERC20(polTokenL1).approve(address(stakeManager), mediumAmount);
+        knownValidator.buyVoucherPOL(mediumAmount, mediumAmount);
+        vm.stopPrank();
+
+        // Check user2's dPOL balance
+        uint256 user2DPOLBalance = knownValidator.balanceOf(user2);
+        assertEq(user2DPOLBalance, mediumAmount, "user2 should have dPOL tokens");
+
+        // user2 approves the controller to spend their dPOL
+        vm.prank(user2);
+        knownValidator.approve(address(controller), user2DPOLBalance);
+
+        // Calculate expected sPOL from user2's dPOL
+        uint256 expectedSPOLFromuser2DPOL = controller.convertPOLtoSPOL(user2DPOLBalance);
+
+        // Record initial sPOL balance before conversion
+        uint256 user2InitialSPOLBalance = sPOLToken.balanceOf(user2);
+
+        // user2 attempts to convert dPOL to sPOL
+        vm.prank(user2);
+        controller.buySPOLWithDPOL(user2DPOLBalance, validator1ID);
+
+        // Verify user2 received the expected sPOL tokens
+        uint256 user2FinalSPOLBalance = sPOLToken.balanceOf(user2);
+        assertEq(
+            user2FinalSPOLBalance - user2InitialSPOLBalance,
+            expectedSPOLFromuser2DPOL,
+            "user2 should receive the correct amount of sPOL tokens"
+        );
+
+        // Verify user2's dPOL balance is now zero (all converted)
+        assertEq(knownValidator.balanceOf(user2), 0, "user2 should have zero dPOL tokens after conversion");
+
+        // user3 - Buys dPOL from known validator with liquid rewards and attempts to convert to sPOL
+        // user3 buys dPOL from the known validator
+        vm.startPrank(user3);
+        ERC20(polTokenL1).approve(address(stakeManager), mediumAmount);
+        knownValidator.buyVoucherPOL(mediumAmount, mediumAmount);
+        vm.stopPrank();
+
+        // Send rewards to increase dPOL balance
+        0x86E4Dc95c7FBdBf52e33D563BbDB00823894C287.call(rewardIncreaseCall1);
+
+        // Check user3's dPOL balance
+        uint256 user3DPOLBalance = knownValidator.balanceOf(user3);
+        assertEq(user3DPOLBalance, mediumAmount, "user3 should have dPOL tokens");
+        // Should have rewards
+        uint256 user3liquidRewards = knownValidator.getLiquidRewards(user3);
+        assertGt(user3liquidRewards, 0, "user3 should have liquid rewards");
+        uint256 controllerliquidRewards = knownValidator.getLiquidRewards(address(controller));
+        assertGt(controllerliquidRewards, 0, "controller should have liquid rewards");
+        uint256 controllerDPOLBalance = knownValidator.balanceOf(address(controller));
+        uint256 user3POLBalance = IERC20(polTokenL1).balanceOf(user3);
+
+        // user3 approves the controller to spend their dPOL
+        vm.prank(user3);
+        knownValidator.approve(address(controller), user3DPOLBalance);
+
+        // Calculate expected sPOL from user3's dPOL
+        uint256 expectedSPOLFromuser3DPOL = controller.convertPOLtoSPOL(user3DPOLBalance);
+
+        // Record initial sPOL balance before conversion
+        uint256 user3InitialSPOLBalance = sPOLToken.balanceOf(user3);
+
+        // user3 attempts to convert dPOL to sPOL
+        vm.prank(user3);
+        controller.buySPOLWithDPOL(user3DPOLBalance, validator1ID);
+
+        // Verify user3 received the expected sPOL tokens
+        uint256 user3FinalSPOLBalance = sPOLToken.balanceOf(user3);
+        assertEq(
+            user3FinalSPOLBalance - user3InitialSPOLBalance,
+            expectedSPOLFromuser3DPOL,
+            "user3 should receive the correct amount of sPOL tokens"
+        );
+
+        // Verify user3's dPOL balance is now zero (all converted)
+        assertEq(knownValidator.balanceOf(user3), 0, "user3 should have zero dPOL tokens after conversion");
+        // Verify user got POL
+        assertEq(
+            IERC20(polTokenL1).balanceOf(user3),
+            user3liquidRewards + user3POLBalance,
+            "user3 should have received their liquid rewards in POL"
+        );
+        // Verify that the controller's dPOL balance has increased due to liquid rewards being claimed
+        uint256 controllerFinalDPOLBalance = knownValidator.balanceOf(address(controller));
+        assertEq(
+            controllerFinalDPOLBalance,
+            controllerDPOLBalance + controllerliquidRewards + mediumAmount,
+            "controller should have increased dPOL balance from rewards"
+        );
     }
 }
-
