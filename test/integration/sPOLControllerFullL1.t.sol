@@ -92,6 +92,7 @@ contract sPOLControllerFullL1Test is Test, Deploy {
         // Verify initial state
 
         // finish chain config
+        vm.deal(admin, 1000000 ether);
         vm.selectFork(networkL1);
         // Update ValidatorShare contract in Registry
         address newShare = deployCode("test/integration/ValidatorShare.json");
@@ -269,7 +270,7 @@ contract sPOLControllerFullL1Test is Test, Deploy {
 
         vm.selectFork(networkL2);
         vm.prank(admin);
-        child.setQuickRedeemBufferSize(10000 ether);
+        child.setQuickRedeemBufferSize{value: 10000 ether}(10000 ether);
 
         deal(user1, 1000000000 ether);
 
@@ -317,13 +318,22 @@ contract sPOLControllerFullL1Test is Test, Deploy {
         assertEq(child.balanceOf(user1), expectedReturn2);
         assertLt(expectedReturn2, expectedReturn);
 
+        // snapshot before migration
+        uint256 beforeMigration = vm.snapshotState();
+        // sell into reserve
+        uint256 userBalanceBeforeSell = user1.balance;
+        uint256 expectedReturnSell = child.convertSPOLToPOL(8000 ether);
+        vm.prank(childChainManager);
+        child.deposit(user1, abi.encode(8000 ether));
+        vm.prank(user1);
+        child.sellSPOL(8000 ether);
+        assertEq(child.balanceOf(user1), expectedReturn2);
+        assertEq(user1.balance, userBalanceBeforeSell + expectedReturnSell);
+
         // attempt migration
         vm.expectRevert(abi.encodeWithSelector(sPOLChild.NothingToMigrate.selector));
         child.requestMigration();
-        console.log(polBridger.sPOLMessengerL2());
-        // make migration possible
-        vm.prank(admin);
-        child.setQuickRedeemBufferSize(1000 ether);
+        vm.revertToState(beforeMigration);
 
         // start migration
         uint256 reserveOverhang = child.actualQuickRedeemReserve() - child.targetQuickRedeemReserve();
@@ -404,6 +414,11 @@ contract sPOLControllerFullL1Test is Test, Deploy {
         assertEq(child.onGoingMigration(), false);
 
         // user1 sells more sPOL than pol available
+        uint256 adminBalanceBefore = admin.balance;
+        vm.prank(admin);
+        child.setQuickRedeemBufferSize(1000 ether);
+
+        assertEq(admin.balance, adminBalanceBefore + 9000 ether);
         uint256 userBalance = user1.balance;
         uint256 expectedPOL = child.convertSPOLToPOL(mediumAmount2);
         vm.prank(user1);
@@ -416,7 +431,8 @@ contract sPOLControllerFullL1Test is Test, Deploy {
         assertEq(_nonce, 2);
 
         // backfill some POL to child contract
-        uint256 reserveMissing = child.missingWithdrawPOLBalance();
+        uint256 reserveMissing =
+            child.missingWithdrawPOLBalance() + child.targetQuickRedeemReserve() - child.actualQuickRedeemReserve();
 
         uint256 l2mintedSPOL = child.locallyMintedSPOL() - child.locallyToBeBurnedSPOL();
         bytes memory expectedDataBackfill =
@@ -436,9 +452,12 @@ contract sPOLControllerFullL1Test is Test, Deploy {
 
         // complete backfill on L1
         vm.selectFork(networkL1);
-        // deal sPOL, instead of using proof
+        // mint/burn sPOL, instead of using proof
         vm.prank(address(controller));
         sPOLToken.mint(address(messenger), l2mintedSPOL);
+        vm.prank(address(controller));
+        sPOLToken.burn(address(erc20predicatePortal), l2mintedSPOL);
+
         MocksPOLMessenger(address(messenger)).expose_processMessageFromChild(expectedDataBackfill);
 
         // fast forward time past withdraw delay

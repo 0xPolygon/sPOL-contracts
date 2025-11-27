@@ -765,7 +765,7 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     function completeMigration(uint256 _amountPOL, uint256 _amountSPOL) external nonReentrant {
         require(msg.sender == sPOLMessenger, AddressUnauthorized(msg.sender));
         uint256 expectedSPOL = convertPOLtoSPOL(_amountPOL);
-        require(expectedSPOL <= _amountSPOL, BadExchangeRate(_amountSPOL, expectedSPOL));
+        require(expectedSPOL >= _amountSPOL, BadExchangeRate(_amountSPOL, expectedSPOL));
         (uint16[] memory validator, uint256[] memory amount) = _selectValidators(_amountPOL, true);
         _takePOL(_amountPOL, msg.sender);
         uint256 totalShares;
@@ -784,8 +784,8 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         returns (uint256[] memory)
     {
         require(msg.sender == sPOLMessenger, AddressUnauthorized(msg.sender));
-        uint256 maxSPOL = convertPOLtoSPOL(_amountPOL);
-        require(_amountSPOL <= maxSPOL, BadExchangeRate(_amountSPOL, maxSPOL));
+        uint256 expectedSPOL = convertPOLtoSPOL(_amountPOL);
+        require(_amountSPOL >= expectedSPOL, BadExchangeRate(_amountSPOL, expectedSPOL));
         _takeSPOL(_amountSPOL, msg.sender);
         (uint16[] memory validator, uint256[] memory amount) = _selectValidators(_amountPOL, false);
         uint256[] memory nonces = new uint256[](validator.length);

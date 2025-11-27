@@ -300,10 +300,10 @@ contract sPOLChild is
 
     function requestMigration() external whenNotPaused nonReentrant {
         require(!onGoingMigration, MigrationAlreadyOngoing());
-        require(targetQuickRedeemReserve <= actualQuickRedeemReserve, NothingToMigrate());
+        require(targetQuickRedeemReserve < actualQuickRedeemReserve, NothingToMigrate());
         onGoingMigration = true;
 
-        uint256 polToMigrate = polBalance - targetQuickRedeemReserve - reservedWithdrawPOLBalance;
+        uint256 polToMigrate = actualQuickRedeemReserve - targetQuickRedeemReserve;
         actualQuickRedeemReserve -= polToMigrate;
         polBalance -= polToMigrate;
 
@@ -329,8 +329,13 @@ contract sPOLChild is
         onGoingBackfill = true;
         backFillCycle += 1;
         pendingWithdrawPOLBalance += missingWithdrawPOLBalance;
+        uint256 backFillAmount = pendingWithdrawPOLBalance;
 
+        if (actualQuickRedeemReserve < targetQuickRedeemReserve) {
+            backFillAmount += targetQuickRedeemReserve - actualQuickRedeemReserve;
+        }
         missingWithdrawPOLBalance = 0;
+
         uint256 bridgeMissingSPOL;
         if (locallyMintedSPOL > locallyToBeBurnedSPOL) {
             bridgeMissingSPOL = locallyMintedSPOL - locallyToBeBurnedSPOL;
@@ -341,7 +346,7 @@ contract sPOLChild is
         _sendMessageToRoot(
             abi.encode(
                 MsgType.L2_BACKFILL_REQUEST,
-                _encodeL2BackfillRequestMessage(pendingWithdrawPOLBalance, bridgeMissingSPOL, backFillCycle)
+                _encodeL2BackfillRequestMessage(backFillAmount, bridgeMissingSPOL, backFillCycle)
             )
         );
     }
@@ -350,7 +355,21 @@ contract sPOLChild is
     ///  Config                 ///
     ///////////////////////////////
 
-    function setQuickRedeemBufferSize(uint256 _newSize) external restricted {
+    function setQuickRedeemBufferSize(uint256 _newSize) external payable restricted {
+        uint256 currentReserve = targetQuickRedeemReserve;
+        if (_newSize > currentReserve) {
+            uint256 increase = _newSize - currentReserve;
+            require(msg.value == increase, IncorrectPOLAmount(msg.value, increase));
+            actualQuickRedeemReserve += increase;
+            polBalance += increase;
+        } else if (_newSize < currentReserve) {
+            uint256 decrease = currentReserve - _newSize;
+            require(actualQuickRedeemReserve >= decrease, IncorrectPOLAmount(actualQuickRedeemReserve, decrease));
+            actualQuickRedeemReserve -= decrease;
+            polBalance -= decrease;
+            (bool success,) = payable(msg.sender).call{value: decrease}("");
+            require(success, POLTransferFailed());
+        }
         targetQuickRedeemReserve = _newSize;
     }
 
