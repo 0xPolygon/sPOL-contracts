@@ -8,8 +8,9 @@ import {WithdrawManager as IWithdrawManager} from "./interfaces/IWithdrawManager
 
 import {AccessManaged} from "@openzeppelin/contracts/access/manager/AccessManaged.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
+import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 
-contract PolBridger is AccessManaged, Pausable {
+contract PolBridger is AccessManaged, Pausable, ReentrancyGuardTransient {
     address public immutable polTokenL1;
     address public immutable polTokenL2;
     uint256 public immutable chainIDL1;
@@ -53,24 +54,24 @@ contract PolBridger is AccessManaged, Pausable {
         initialized = true;
     }
 
-    function bridgePOLToL1(uint256 _amount) external payable whenNotPaused {
+    function bridgePOLToL1(uint256 _amount) external payable whenNotPaused nonReentrant {
         require(msg.value == _amount, InsufficientPOLSent(msg.value, _amount));
         require(msg.sender == sPOLMessengerL2, AddressUnauthorized(msg.sender));
         require(block.chainid == chainIDL2, InvalidOriginChain(block.chainid, chainIDL2));
         IMRC20(polTokenL2).withdraw{value: _amount}(_amount);
     }
 
-    function exitPOL(bytes memory proof) external whenNotPaused {
+    function exitPOL(bytes memory proof) external whenNotPaused nonReentrant {
         require(block.chainid == chainIDL1, InvalidOriginChain(block.chainid, chainIDL1));
         IERC20PredicateBurnOnly(erc20predicate).startExitWithBurntTokens(proof);
     }
 
-    function finalizeExitPOL() external whenNotPaused {
+    function finalizeExitPOL() external whenNotPaused nonReentrant {
         require(block.chainid == chainIDL1, InvalidOriginChain(block.chainid, chainIDL1));
         IWithdrawManager(withdrawManager).processExits(polTokenL1);
     }
 
-    function takePOLL1(uint256 _amount) external whenNotPaused {
+    function takePOLL1(uint256 _amount) external whenNotPaused nonReentrant {
         require(msg.sender == sPOLMessengerL1, AddressUnauthorized(msg.sender));
         require(block.chainid == chainIDL1, InvalidOriginChain(block.chainid, chainIDL1));
         IERC20(polTokenL1).transfer(sPOLMessengerL1, _amount);

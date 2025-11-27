@@ -14,8 +14,16 @@ import {PausableUpgradeable} from "@openzeppelin-contracts-upgradeable/utils/Pau
 import {
     AccessManagedUpgradeable
 } from "@openzeppelin-contracts-upgradeable/access/manager/AccessManagedUpgradeable.sol";
+import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 
-contract sPOLMessenger is Initializable, PausableUpgradeable, AccessManagedUpgradeable, BaseRootTunnel, MsgCoder {
+contract sPOLMessenger is
+    Initializable,
+    PausableUpgradeable,
+    AccessManagedUpgradeable,
+    ReentrancyGuardTransient,
+    BaseRootTunnel,
+    MsgCoder
+{
     IERC20 public immutable polToken;
     IERC20 public immutable sPOLToken;
     address public child;
@@ -96,7 +104,7 @@ contract sPOLMessenger is Initializable, PausableUpgradeable, AccessManagedUpgra
         backfillNonces[_backFillCycle] = nonces;
     }
 
-    function completeBackfill(uint256 _backFillCycle) external whenNotPaused {
+    function completeBackfill(uint256 _backFillCycle) external whenNotPaused nonReentrant {
         require(!completedBackfill[_backFillCycle], BackfillAlreadyCompleted(_backFillCycle));
         uint256 balanceBefore = polToken.balanceOf(address(this));
         for (uint256 i = 0; i < backfillNonces[_backFillCycle].length; i++) {
@@ -111,7 +119,7 @@ contract sPOLMessenger is Initializable, PausableUpgradeable, AccessManagedUpgra
         completedBackfill[_backFillCycle] = true;
     }
 
-    function updateL2ExchangeRate() external whenNotPaused {
+    function updateL2ExchangeRate() external whenNotPaused nonReentrant {
         _sendMessageToChild(
             abi.encode(
                 MsgType.EXCHANGE_UPDATE,

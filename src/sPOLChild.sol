@@ -14,12 +14,14 @@ import {
 import {
     ERC20PermitUpgradeable
 } from "@openzeppelin-contracts-upgradeable/token/ERC20/extensions/ERC20PermitUpgradeable.sol";
+import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 
 contract sPOLChild is
     Initializable,
     PausableUpgradeable,
     AccessManagedUpgradeable,
     ERC20PermitUpgradeable,
+    ReentrancyGuardTransient,
     BaseChildTunnel,
     MsgCoder
 {
@@ -167,7 +169,7 @@ contract sPOLChild is
         emit sPOLMinted(msg.sender, _polAmount, spolToMint);
     }
 
-    function sellSPOL(uint256 _sPOLAmount) external whenNotPaused {
+    function sellSPOL(uint256 _sPOLAmount) external whenNotPaused nonReentrant {
         _transfer(msg.sender, address(this), _sPOLAmount);
         locallyToBeBurnedSPOL += _sPOLAmount;
         uint256 polToReturn = convertSPOLToPOL(_sPOLAmount);
@@ -194,7 +196,7 @@ contract sPOLChild is
         userOutstandingPOL[msg.sender].push(userOutstanding);
     }
 
-    function withdrawPOL() external whenNotPaused {
+    function withdrawPOL() external whenNotPaused nonReentrant {
         UserOutstanding[] storage outstandings = userOutstandingPOL[msg.sender];
         uint256 totalToWithdraw = 0;
         bool reordered;
@@ -222,7 +224,8 @@ contract sPOLChild is
         }
         require(totalToWithdraw > 0, POLAmountMustBeGreaterThanZero());
         polBalance -= totalToWithdraw;
-        payable(msg.sender).transfer(totalToWithdraw);
+        (bool success,) = payable(msg.sender).call{value: totalToWithdraw}("");
+        require(success, POLTransferFailed());
     }
 
     /////////////////////////////////
@@ -295,7 +298,7 @@ contract sPOLChild is
         onGoingBackfill = false;
     }
 
-    function requestMigration() external whenNotPaused {
+    function requestMigration() external whenNotPaused nonReentrant {
         require(!onGoingMigration, MigrationAlreadyOngoing());
         require(targetQuickRedeemReserve <= actualQuickRedeemReserve, NothingToMigrate());
         onGoingMigration = true;
@@ -321,7 +324,7 @@ contract sPOLChild is
         );
     }
 
-    function requestBackfill() external whenNotPaused {
+    function requestBackfill() external whenNotPaused nonReentrant {
         require(!onGoingBackfill, BackfillAlreadyOngoing());
         onGoingBackfill = true;
         backFillCycle += 1;

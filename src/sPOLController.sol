@@ -12,8 +12,9 @@ import {PausableUpgradeable} from "@openzeppelin-contracts-upgradeable/utils/Pau
 import {
     AccessManagedUpgradeable
 } from "@openzeppelin-contracts-upgradeable/access/manager/AccessManagedUpgradeable.sol";
+import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 
-contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgradeable {
+contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgradeable, ReentrancyGuardTransient {
     struct ValidatorInfo {
         ValidatorStatus status;
         uint8 depositShare;
@@ -761,7 +762,7 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     ///  L2 interaction          ///
     ////////////////////////////////
 
-    function completeMigration(uint256 _amountPOL, uint256 _amountSPOL) external {
+    function completeMigration(uint256 _amountPOL, uint256 _amountSPOL) external nonReentrant {
         require(msg.sender == sPOLMessenger, AddressUnauthorized(msg.sender));
         uint256 expectedSPOL = convertPOLtoSPOL(_amountPOL);
         require(expectedSPOL <= _amountSPOL, BadExchangeRate(_amountSPOL, expectedSPOL));
@@ -777,7 +778,11 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         emit sPOLMigrated(msg.sender, _amountPOL, _amountSPOL);
     }
 
-    function startBackfillSell(uint256 _amountPOL, uint256 _amountSPOL) external returns (uint256[] memory) {
+    function startBackfillSell(uint256 _amountPOL, uint256 _amountSPOL)
+        external
+        nonReentrant
+        returns (uint256[] memory)
+    {
         require(msg.sender == sPOLMessenger, AddressUnauthorized(msg.sender));
         uint256 maxSPOL = convertPOLtoSPOL(_amountPOL);
         require(_amountSPOL <= maxSPOL, BadExchangeRate(_amountSPOL, maxSPOL));
