@@ -477,7 +477,7 @@ contract sPOLControllerFullL1Test is Test, Deploy {
         vm.deal(address(child), reserveMissing);
         // prank statesync using emitted data
         vm.prank(stateSyncerL2);
-        child.onStateReceive(0, abi.decode(stateSyncLogs2[stateSyncLogs2.length - 1].data, (bytes)));
+        child.onStateReceive(0, abi.decode(stateSyncLogs2[stateSyncLogs2.length - 2].data, (bytes)));
 
         // user1 withdraws successfully
         uint256 userBalanceBefore = user1.balance;

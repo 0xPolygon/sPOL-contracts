@@ -79,9 +79,24 @@ contract sPOLChild is
     mapping(address => UserOutstanding[]) public userOutstandingPOL;
     uint256 public globalWithdrawNonce;
 
+    // Stake/unstake events
     event sPOLMinted(address user, uint256 amountPOL, uint256 amountSPOL);
     event sPOLBurned(address user, uint256 amountSPOL, uint256 amountPOL, uint256 nonce);
     event POLWithdrawn(address user, uint256 amountPOL, uint256 nonce);
+
+    // Exchange rate and operational events
+    event ExchangeRateUpdated(
+        uint256 oldSPOLBalance, uint256 oldDPOLBalance, uint256 newSPOLBalance, uint256 newDPOLBalance
+    );
+    event QuickRedeemReserveUpdated(uint256 oldReserve, uint256 newReserve, uint256 actualReserve);
+    event SafetyFeeChanged(uint16 oldFee, uint16 newFee);
+    event MaxExchangeRateDelayChanged(uint256 oldDelay, uint256 newDelay);
+
+    // Migration and backfill events
+    event MigrationRequested(uint256 migratingPOLAmount, uint256 backMigratingSPOL);
+    event MigrationCompleted(uint256 backMigratingSPOL);
+    event BackfillRequested(uint256 backfillPOLAmount, uint256 bridgeMissingSPOL, uint256 backfillCycle);
+    event BackfillCompleted(uint256 returnedPOL, uint256 backfillCycle);
 
     error AddressUnauthorized(address caller);
     error BackfillAlreadyOngoing();
@@ -236,9 +251,11 @@ contract sPOLChild is
         uint256 amount = abi.decode(depositData, (uint256));
         if (user == address(this) && onGoingMigration && amount == backMigratingSPOL) {
             onGoingMigration = false;
+            uint256 completedMigration = backMigratingSPOL;
             backMigratingSPOL = 0;
             // this means the bridged sPOL from the current migration has arrived
             // we don't mint it, as the needed burn would generate an exit event again
+            emit MigrationCompleted(completedMigration);
         } else {
             _mint(user, amount);
         }
@@ -270,12 +287,15 @@ contract sPOLChild is
     function _handleExchangeRateUpdate(bytes memory _msg) internal {
         (uint256 updatedl1SPOLBalance, uint256 updatedl1DPOLBalance) = _decodeExchangeUpdateMessage(_msg);
         uint256 currentConversion = convertSPOLToPOL(1e18);
+        uint256 oldSPOLBalance = l1SPOLBalance;
+        uint256 oldDPOLBalance = l1DPOLBalance;
         l1SPOLBalance = updatedl1SPOLBalance;
         l1DPOLBalance = updatedl1DPOLBalance;
         uint256 newConversion = convertSPOLToPOL(1e18);
         // this then stays in failedstatesync, maybe don't revert, but ignore?
         require(newConversion >= currentConversion, ExchangeRateDeclined(newConversion, currentConversion));
         lastExchangeRateUpdate = block.timestamp;
+        emit ExchangeRateUpdated(oldSPOLBalance, oldDPOLBalance, updatedl1SPOLBalance, updatedl1DPOLBalance);
     }
 
     //////////////////////////////
@@ -296,6 +316,7 @@ contract sPOLChild is
         polBalance += _returnedPOL;
         completedBackfills[_backFillCycle] = true;
         onGoingBackfill = false;
+        emit BackfillCompleted(_returnedPOL, _backFillCycle);
     }
 
     function requestMigration() external whenNotPaused nonReentrant {
@@ -322,6 +343,7 @@ contract sPOLChild is
         _sendMessageToRoot(
             abi.encode(MsgType.L2_MIGRATION_REQUEST, _encodeL2MigrationRequestMessage(polToMigrate, sPOLToAddToBridge))
         );
+        emit MigrationRequested(polToMigrate, sPOLToAddToBridge);
     }
 
     function requestBackfill() external whenNotPaused nonReentrant {
@@ -349,6 +371,7 @@ contract sPOLChild is
                 _encodeL2BackfillRequestMessage(backFillAmount, bridgeMissingSPOL, backFillCycle)
             )
         );
+        emit BackfillRequested(backFillAmount, bridgeMissingSPOL, backFillCycle);
     }
 
     ///////////////////////////////
@@ -371,15 +394,20 @@ contract sPOLChild is
             require(success, POLTransferFailed());
         }
         targetQuickRedeemReserve = _newSize;
+        emit QuickRedeemReserveUpdated(currentReserve, _newSize, actualQuickRedeemReserve);
     }
 
     function changeSafetyFee(uint16 _newFee) external restricted {
         require(_newFee <= MAX_SAFETY_FEE, FeeTooHigh(_newFee, MAX_SAFETY_FEE));
+        uint16 oldFee = safetyFee;
         safetyFee = _newFee;
+        emit SafetyFeeChanged(oldFee, _newFee);
     }
 
     function setMaxExchangeRateUpdateDelay(uint256 _newDelay) external restricted {
+        uint256 oldDelay = maxExchangeRateUpdateDelay;
         maxExchangeRateUpdateDelay = _newDelay;
+        emit MaxExchangeRateDelayChanged(oldDelay, _newDelay);
     }
 
     function pauseUserFunctions() external restricted {

@@ -43,6 +43,7 @@ contract sPOLControllerVLDSelectTest is Test, sPOLController {
             abi.encodeWithSelector(IStakeManager.getValidatorContract.selector),
             abi.encode(testValidatorShare)
         );
+        vm.mockCall(testSPOLToken, abi.encodeWithSelector(ERC20.totalSupply.selector), abi.encode(0));
     }
 
     function test_buy_single_val(uint256 _amountToBuy) public {

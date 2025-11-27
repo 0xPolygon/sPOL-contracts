@@ -68,21 +68,35 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     // Global user withdraw nonce counter
     uint256 public globalWithdrawNonce;
 
+    // Validator management events
     event ValidatorAdded(uint16 validatorId);
     event ValidatorRemoved(uint16 validatorId);
     event ValidatorFrozen(uint16 validatorId);
     event ValidatorUnfrozen(uint16 validatorId);
     event ValidatorTargetShareChanged(uint16 validatorId, uint8 newTargetShare);
+    event ValidatorMigrated(uint16 oldValidator, uint16 newValidator, uint256 amount);
+    // sPOL exchange events
     event sPOLMinted(address user, uint256 amountPOL, uint256 amountSPOL);
     event sPOLBurned(address user, uint256 amountSPOL, uint256 amountPOL, uint256 nonce);
     event POLWithdrawn(address user, uint256 amountPOL, uint256 nonce);
+    event ExchangeRateSnapshot(uint256 totalsPOLSupply, uint256 totalbPOLBalance);
+    // L2 message events
     event sPOLMigrated(address user, uint256 amountPOL, uint256 amountSPOL);
     event sPOLBackfilled(address user, uint256 amountSPOL, uint256 amountPOL);
+    // Fee management events
+    event FeeCollected(address feeReceiver, uint256 feePOLAmount, uint256 feesPOLAmount);
+    event FeeReceiverChanged(address oldReceiver, address newReceiver);
+    event RewardFeeChanged(uint16 oldFee, uint16 newFee);
+    // Configuration events
+    event MaxDivergenceChanged(uint8 oldDivergence, uint8 newDivergence);
+    // Cleanup events
+    event MaticTokensCleaned(uint256 maticAmount);
+    event POLTokensCleaned(uint16 validatorId, address receiver, uint256 polAmount, uint256 sPOLMinted);
 
     error AddressUnauthorized(address caller);
     error AmountTooLarge(uint256 amount, uint256 maxAmount);
     error ArrayLengthMismatch(uint256 validatorLength, uint256 shareLength);
-    error BadExchangeRate(uint256 provided, uint256 expected);
+    error BadExchangeRate(uint256 polProvided, uint256 sPOLProvided, uint256 polCurrent, uint256 sPOLCurrent);
     error BuySharesMismatch(uint256 expected, uint256 actual);
     error DepositSharesTotalNotOneHundred(uint8 totalPercent);
     error DPOLRestakeTransferFromFailed();
@@ -254,18 +268,21 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
             validators[_oldValidator].totalStaked -= _amount;
         }
         validators[_newValidator].totalStaked += _amount;
+        emit ValidatorMigrated(_oldValidator, _newValidator, _amount);
     }
 
     function restakeValidator(uint16 _validator) public whenNotPaused {
         (uint256 amountRestaked,) = validators[_validator].validatorContract.restakePOL();
         _adddPOLBalanceFee(amountRestaked);
         validators[_validator].totalStaked += amountRestaked;
+        _emitExchangeRateUpdate();
     }
 
     function restakeAllActiveValidators() external whenNotPaused {
         for (uint256 i = 0; i < activeValidators.length; i++) {
             restakeValidator(activeValidators[i]);
         }
+        _emitExchangeRateUpdate();
     }
 
     function reloadAllActiveValidatorInfo() external restricted {
@@ -278,6 +295,7 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
             amountToAdd += validator.totalStaked;
         }
         totaldPOLBalance = totaldPOLBalance - amountToReduce + amountToAdd;
+        _emitExchangeRateUpdate();
     }
 
     // very expensive, includes frozen validators
@@ -289,6 +307,7 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
             totalDPOL += validator.totalStaked;
         }
         totaldPOLBalance = totalDPOL;
+        _emitExchangeRateUpdate();
     }
 
     ///////////////////////////////
@@ -388,6 +407,7 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         require(actualShares == _amount, BuySharesMismatch(_amount, actualShares));
         lastSuccessfulBuyValidator = _validator;
         _mintSPOL(_user, _amount, toMint);
+        _emitExchangeRateUpdate();
         return toMint;
     }
 
@@ -402,6 +422,7 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         lastSuccessfulBuyValidator = validator[validator.length - 1];
         require(totalShares == _amount, BuySharesMismatch(_amount, totalShares));
         _mintSPOL(_user, _amount, toMint);
+        _emitExchangeRateUpdate();
         return toMint;
     }
 
@@ -428,6 +449,7 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         }
         lastSuccessfulBuyValidator = validator[validator.length - 1];
         _mintSPOL(_user, _amount, sPOLToMint);
+        _emitExchangeRateUpdate();
         return sPOLToMint;
     }
 
@@ -495,7 +517,7 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         uint256 nonce = _addUserWithdrawNonceDetails(_user, _validator, uint128(dPOLAmount), uint96(userNonce));
 
         emit sPOLBurned(_user, _amount, dPOLAmount, nonce);
-
+        _emitExchangeRateUpdate();
         return nonce;
     }
 
@@ -511,6 +533,7 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
             emit sPOLBurned(_user, sPOLAmount, amount[i], nonce);
         }
         _takeSPOL(_amount, _user);
+        _emitExchangeRateUpdate();
         return nonces;
     }
 
@@ -738,15 +761,19 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     ///  Fee Management         ///
     ///////////////////////////////
 
-    function changeFeeReceiver(address newFeeReceiver) external restricted {
-        require(newFeeReceiver != address(0), ZeroAddress());
+    function changeFeeReceiver(address _newFeeReceiver) external restricted {
+        require(_newFeeReceiver != address(0), ZeroAddress());
         takeFee();
-        feeReceiver = newFeeReceiver;
+        address oldReceiver = feeReceiver;
+        feeReceiver = _newFeeReceiver;
+        emit FeeReceiverChanged(oldReceiver, feeReceiver);
     }
 
-    function changeRewardFee(uint16 newFee) external restricted {
-        require(newFee <= MAX_FEE, FeeTooLarge(newFee, MAX_FEE));
-        rewardFee = newFee;
+    function changeRewardFee(uint16 _newFee) external restricted {
+        require(_newFee <= MAX_FEE, FeeTooLarge(_newFee, MAX_FEE));
+        uint16 oldFee = rewardFee;
+        rewardFee = _newFee;
+        emit RewardFeeChanged(oldFee, rewardFee);
     }
 
     function takeFee() public restricted {
@@ -754,8 +781,11 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
             return;
         }
         uint256 feeInsPOL = convertPOLtoSPOL(feedPOLBalance);
+        uint256 feePOLAmount = feedPOLBalance;
         feedPOLBalance = 0;
         sPOLToken.mint(feeReceiver, feeInsPOL);
+        emit FeeCollected(feeReceiver, feePOLAmount, feeInsPOL);
+        _emitExchangeRateUpdate();
     }
 
     ////////////////////////////////
@@ -765,7 +795,10 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     function completeMigration(uint256 _amountPOL, uint256 _amountSPOL) external nonReentrant {
         require(msg.sender == sPOLMessenger, AddressUnauthorized(msg.sender));
         uint256 expectedSPOL = convertPOLtoSPOL(_amountPOL);
-        require(expectedSPOL >= _amountSPOL, BadExchangeRate(_amountSPOL, expectedSPOL));
+        require(
+            expectedSPOL >= _amountSPOL,
+            BadExchangeRate(_amountPOL, _amountSPOL, totaldPOLBalance - feedPOLBalance, totalsPOLBalance())
+        );
         (uint16[] memory validator, uint256[] memory amount) = _selectValidators(_amountPOL, true);
         _takePOL(_amountPOL, msg.sender);
         uint256 totalShares;
@@ -776,6 +809,7 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         require(totalShares == _amountPOL, BuySharesMismatch(_amountPOL, totalShares));
         sPOLToken.mint(msg.sender, _amountSPOL);
         emit sPOLMigrated(msg.sender, _amountPOL, _amountSPOL);
+        _emitExchangeRateUpdate();
     }
 
     function startBackfillSell(uint256 _amountPOL, uint256 _amountSPOL)
@@ -785,7 +819,10 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     {
         require(msg.sender == sPOLMessenger, AddressUnauthorized(msg.sender));
         uint256 expectedSPOL = convertPOLtoSPOL(_amountPOL);
-        require(_amountSPOL >= expectedSPOL, BadExchangeRate(_amountSPOL, expectedSPOL));
+        require(
+            _amountSPOL >= expectedSPOL,
+            BadExchangeRate(_amountPOL, _amountSPOL, totaldPOLBalance - feedPOLBalance, totalsPOLBalance())
+        );
         _takeSPOL(_amountSPOL, msg.sender);
         (uint16[] memory validator, uint256[] memory amount) = _selectValidators(_amountPOL, false);
         uint256[] memory nonces = new uint256[](validator.length);
@@ -796,6 +833,7 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
             nonces[i] = nonce;
         }
         emit sPOLBackfilled(msg.sender, _amountSPOL, _amountPOL);
+        _emitExchangeRateUpdate();
         return nonces;
     }
 
@@ -863,12 +901,18 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         return nonce;
     }
 
+    function _emitExchangeRateUpdate() internal {
+        emit ExchangeRateSnapshot(totalsPOLBalance(), totaldPOLBalance - feedPOLBalance);
+    }
+
     ///////////////////////////////
     ///  Config                 ///
     ///////////////////////////////
 
-    function changeMaxDivergence(uint8 newDivergence) external restricted {
-        maxDivergence = newDivergence;
+    function changeMaxDivergence(uint8 _newDivergence) external restricted {
+        uint8 oldDivergence = maxDivergence;
+        maxDivergence = _newDivergence;
+        emit MaxDivergenceChanged(oldDivergence, maxDivergence);
     }
 
     function pauseUserFunctions() external restricted {
@@ -889,15 +933,19 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         uint256 maticBalance = maticToken.balanceOf(address(this));
         if (maticBalance > 0) {
             polygonMigration.migrate(maticBalance);
+            emit MaticTokensCleaned(maticBalance);
         }
         uint256 polBalance = polToken.balanceOf(address(this));
         if (polBalance > 0) {
             if (_receiver == address(0)) {
                 _buySharesFromValidator(validators[_validator], polBalance);
+                emit POLTokensCleaned(_validator, address(0), polBalance, 0);
             } else {
                 uint256 mintedSPOL = buySPOL(polBalance, _validator);
                 sPOLToken.transfer(_receiver, mintedSPOL);
+                emit POLTokensCleaned(_validator, _receiver, polBalance, mintedSPOL);
             }
         }
+        _emitExchangeRateUpdate();
     }
 }

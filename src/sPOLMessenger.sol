@@ -36,6 +36,11 @@ contract sPOLMessenger is
     mapping(uint256 => uint256[]) public backfillNonces;
     mapping(uint256 => bool) public completedBackfill;
 
+    event MigrationProcessed(uint256 polAmount, uint256 mintedSPOL);
+    event BackfillStarted(uint256 indexed backfillCycle, uint256 polAmount, uint256 sPOLAmount);
+    event BackfillCompleted(uint256 indexed backfillCycle, uint256 totalWithdraw);
+    event ExchangeRateUpdateSent(uint256 totalsPOLBalance, uint256 totaldPOLBalance);
+
     error InvalidMessageType(uint8 msgType);
     error NotEnoughPOLInMessenger(uint256 required, uint256 available);
     error NotEnoughSPOLInMessenger(uint256 required, uint256 available);
@@ -92,6 +97,7 @@ contract sPOLMessenger is
         rootChainManager.depositFor(childTunnel, address(sPOLToken), abi.encodePacked(_mintedSPOL));
         // disabled for portal because of cyclical exit issue, should be activated for lxly
         //_sendMessageToChild(abi.encode(MsgType.L1_MIGRATION_RESPONSE, encodeL1MigrationResponseMessage(_mintedSPOL)));
+        emit MigrationProcessed(_polAmount, _mintedSPOL);
     }
 
     function _handleBackfill(bytes memory _msg) internal {
@@ -102,6 +108,7 @@ contract sPOLMessenger is
         );
         uint256[] memory nonces = sPOLController.startBackfillSell(_polAmount, _sPOLAmount);
         backfillNonces[_backFillCycle] = nonces;
+        emit BackfillStarted(_backFillCycle, _polAmount, _sPOLAmount);
     }
 
     function completeBackfill(uint256 _backFillCycle) external whenNotPaused nonReentrant {
@@ -117,18 +124,17 @@ contract sPOLMessenger is
             abi.encode(MsgType.L1_BACKFILL_RESPONSE, _encodeL1BackfillResponseMessage(totalWithdraw, _backFillCycle))
         );
         completedBackfill[_backFillCycle] = true;
+        emit BackfillCompleted(_backFillCycle, totalWithdraw);
     }
 
     function updateL2ExchangeRate() external whenNotPaused nonReentrant {
+        uint256 totalsPOLBalance = sPOLController.totalsPOLBalance();
+        uint256 totaldPOLBalance = sPOLController.totaldPOLBalance() - sPOLController.feedPOLBalance();
+
         _sendMessageToChild(
-            abi.encode(
-                MsgType.EXCHANGE_UPDATE,
-                _encodeExchangeUpdateMessage(
-                    sPOLController.totalsPOLBalance(),
-                    (sPOLController.totaldPOLBalance() - sPOLController.feedPOLBalance())
-                )
-            )
+            abi.encode(MsgType.EXCHANGE_UPDATE, _encodeExchangeUpdateMessage(totalsPOLBalance, totaldPOLBalance))
         );
+        emit ExchangeRateUpdateSent(totalsPOLBalance, totaldPOLBalance);
     }
 
     function pauseUserFunctions() external {
