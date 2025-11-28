@@ -509,9 +509,10 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         require(validator.status == ValidatorStatus.ACTIVE, ValidatorNotActive(_validator));
         uint256 maxRedeem = _maxRedeem(validator);
         require(_amount <= maxRedeem, ValidatorUnderfunded(_amount, maxRedeem));
-        _takeSPOL(_amount, _user);
 
         uint256 dPOLAmount = convertSPOLtoPOL(_amount);
+        _takeSPOL(_amount, _user);
+
         uint256 userNonce = _sellSharesFromValidator(validator, dPOLAmount);
 
         uint256 nonce = _addUserWithdrawNonceDetails(_user, _validator, uint128(dPOLAmount), uint96(userNonce));
