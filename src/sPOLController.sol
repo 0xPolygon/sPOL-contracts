@@ -595,7 +595,7 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
                 continue;
             }
             totalAmount += shares;
-            emit POLWithdrawn(_user, totalAmount, withdrawNonceDetails[memNonces[i]].validatorNonce);
+            emit POLWithdrawn(_user, shares, withdrawNonceDetails[memNonces[i]].validatorNonce);
             memNonces[i] = 0;
         }
         // shrink the array in storage as needed
