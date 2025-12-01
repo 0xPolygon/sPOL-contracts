@@ -314,26 +314,26 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     ///  General Exchange       ///
     ///////////////////////////////
 
-    // limit by maxDeposit?
     function convertPOLtoSPOL(uint256 _amountPOL) public view returns (uint256) {
+        uint256 currentTotalsPOLBalance = totalsPOLBalance();
         if (_amountPOL == 0) {
             return 0;
         }
-        if (totalsPOLBalance() == 0) {
+        if (currentTotalsPOLBalance == 0) {
             return _amountPOL;
         }
-        return _amountPOL * totalsPOLBalance() / (totaldPOLBalance - feedPOLBalance);
+        return _amountPOL * currentTotalsPOLBalance / (totaldPOLBalance - feedPOLBalance);
     }
 
-    // limit by maxRedeem?
     function convertSPOLtoPOL(uint256 _amountSPOL) public view returns (uint256) {
+        uint256 currentTotalsPOLBalance = totalsPOLBalance();
         if (_amountSPOL == 0) {
             return 0;
         }
-        if (totalsPOLBalance() == 0) {
+        if (currentTotalsPOLBalance == 0) {
             return _amountSPOL;
         }
-        return _amountSPOL * (totaldPOLBalance - feedPOLBalance) / totalsPOLBalance();
+        return _amountSPOL * (totaldPOLBalance - feedPOLBalance) / currentTotalsPOLBalance;
     }
 
     function totalsPOLBalance() public view returns (uint256) {
