@@ -43,9 +43,16 @@ contract Deploy is Script, ConfigLoader {
 
     function run(string memory _scenarioName) public {
         uint256 pk = vm.envUint("DEPLOYER_PRIVATE_KEY");
+        loadConfigFromJson(_scenarioName);
+        vm.createSelectFork(vm.envString("L1_RPC_URL"));
         vm.startBroadcast(pk);
-        deployFromJson(vm.addr(pk), _scenarioName);
+        deployContractsL1(vm.addr(pk));
         vm.stopBroadcast();
+        vm.createSelectFork(vm.envString("L2_RPC_URL"));
+        vm.startBroadcast(pk);
+        deployContractsL2(vm.addr(pk));
+        vm.stopBroadcast();
+        writeDeploymentInfoToJSON();
     }
 
     // Deploy using configuration loaded from JSON file for current chain
@@ -168,9 +175,10 @@ contract Deploy is Script, ConfigLoader {
         );
         accessManagerL1.execute(address(sPOLControllerproxyAdmin), upgradeAndCallsPOLControllerdata);
 
-        accessManagerL1.grantRole(accessManagerL1.ADMIN_ROLE(), admin, 0);
-        accessManagerL1.renounceRole(accessManagerL1.ADMIN_ROLE(), _deployer);
-
+        if (_deployer != admin) {
+            accessManagerL1.grantRole(accessManagerL1.ADMIN_ROLE(), admin, 0);
+            accessManagerL1.renounceRole(accessManagerL1.ADMIN_ROLE(), _deployer);
+        }
         _verifyDeploymentL1();
     }
 
@@ -190,9 +198,10 @@ contract Deploy is Script, ConfigLoader {
         );
         accessManagerL2.execute(address(sPOLChildproxyAdmin), upgradeAndCalldata);
 
-        accessManagerL2.grantRole(accessManagerL2.ADMIN_ROLE(), admin, 0);
-        accessManagerL2.renounceRole(accessManagerL2.ADMIN_ROLE(), _deployer);
-
+        if (_deployer != admin) {
+            accessManagerL2.grantRole(accessManagerL2.ADMIN_ROLE(), admin, 0);
+            accessManagerL2.renounceRole(accessManagerL2.ADMIN_ROLE(), _deployer);
+        }
         _verifyDeploymentL2();
     }
 
