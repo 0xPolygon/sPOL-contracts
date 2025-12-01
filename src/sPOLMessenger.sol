@@ -137,11 +137,11 @@ contract sPOLMessenger is
         emit ExchangeRateUpdateSent(totalsPOLBalance, totaldPOLBalance);
     }
 
-    function pauseUserFunctions() external {
+    function pauseUserFunctions() external restricted {
         _pause();
     }
 
-    function unpauseUserFunctions() external {
+    function unpauseUserFunctions() external restricted {
         _unpause();
     }
 }
