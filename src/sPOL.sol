@@ -1,15 +1,18 @@
-// SPDX-License-Identifier: UNLICENSED
+// SPDX-License-Identifier: SEE LICENSE IN LICENSE
 pragma solidity ^0.8.30;
 
+import {Initializable} from "@openzeppelin-contracts-upgradeable/proxy/utils/Initializable.sol";
 import {
     ERC20PermitUpgradeable
-} from "@openzeppelin-contracts-upgradeable-5.5.0/token/ERC20/extensions/ERC20PermitUpgradeable.sol";
+} from "@openzeppelin-contracts-upgradeable/token/ERC20/extensions/ERC20PermitUpgradeable.sol";
 
-contract sPOL is ERC20PermitUpgradeable {
+contract sPOL is Initializable, ERC20PermitUpgradeable {
     address public immutable sPOLController;
 
+    error AddressUnauthorized(address caller);
+
     modifier onlyController() {
-        require(msg.sender == sPOLController, "Only sPOL controller can call this function");
+        require(msg.sender == sPOLController, AddressUnauthorized(msg.sender));
         _;
     }
 

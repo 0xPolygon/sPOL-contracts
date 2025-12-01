@@ -13,10 +13,16 @@ contract sPOLControllerVLDSelectTest is Test, sPOLController {
     address testStakeManager = makeAddr("testStakeManager");
     address testSPOLToken = makeAddr("testSPOLToken");
     address testValidatorShare = makeAddr("testValidatorShare");
+    address testAuthority = makeAddr("testAuthority");
+    address testMessenger = makeAddr("testMessenger");
     uint8 testMaxDivergence = 20;
     uint8 testRewardFeee = 10;
 
-    constructor() sPOLController(testPolToken, testMaticToken, testPolygonMigration, testSPOLToken, testStakeManager) {}
+    constructor()
+        sPOLController(
+            testPolToken, testMaticToken, testPolygonMigration, testSPOLToken, testStakeManager, testMessenger
+        )
+    {}
 
     function setUp() public {
         // initialize sPOLController
@@ -24,7 +30,10 @@ contract sPOLControllerVLDSelectTest is Test, sPOLController {
         rewardFee = testRewardFeee;
         feeReceiver = testFeeReceiver;
         maxDivergence = testMaxDivergence;
-        admin = testAdmin;
+        _setAuthority(testAuthority);
+        // here is no access rights test, so always allow calls
+        vm.mockCall(testAuthority, bytes(""), abi.encode(true));
+
         // Mocks
         // We don't test adding, so all validators are valid
         vm.mockCall(testStakeManager, abi.encodeWithSelector(IStakeManager.isValidator.selector), abi.encode(true));
@@ -34,6 +43,7 @@ contract sPOLControllerVLDSelectTest is Test, sPOLController {
             abi.encodeWithSelector(IStakeManager.getValidatorContract.selector),
             abi.encode(testValidatorShare)
         );
+        vm.mockCall(testSPOLToken, abi.encodeWithSelector(ERC20.totalSupply.selector), abi.encode(0));
     }
 
     function test_buy_single_val(uint256 _amountToBuy) public {
@@ -45,7 +55,7 @@ contract sPOLControllerVLDSelectTest is Test, sPOLController {
         stakes[0] = 1000;
         addValidators(valIds, shares, stakes);
 
-        (uint16[] memory ids, uint256[] memory amounts) = _selectValidatorToBuy(_amountToBuy);
+        (uint16[] memory ids, uint256[] memory amounts) = _selectValidators(_amountToBuy, true);
 
         assertEq(ids.length, 1);
         assertEq(ids[0], 1);
@@ -61,7 +71,7 @@ contract sPOLControllerVLDSelectTest is Test, sPOLController {
         stakes[0] = 0;
         addValidators(valIds, shares, stakes);
 
-        (uint16[] memory ids, uint256[] memory amounts) = _selectValidatorToBuy(_amountToBuy);
+        (uint16[] memory ids, uint256[] memory amounts) = _selectValidators(_amountToBuy, true);
 
         assertEq(ids.length, 1);
         assertEq(ids[0], 1);
@@ -81,7 +91,7 @@ contract sPOLControllerVLDSelectTest is Test, sPOLController {
 
         addValidators(valIds, shares, stakes);
 
-        (uint16[] memory ids, uint256[] memory amounts) = _selectValidatorToBuy(_amountToBuy);
+        (uint16[] memory ids, uint256[] memory amounts) = _selectValidators(_amountToBuy, true);
         console.log(ids.length);
         console.log("Amount to buy:", _amountToBuy);
 
@@ -126,7 +136,7 @@ contract sPOLControllerVLDSelectTest is Test, sPOLController {
 
         addValidators(valIds, shares, stakes);
 
-        (uint16[] memory ids, uint256[] memory amounts) = _selectValidatorToBuy(_amountToBuy);
+        (uint16[] memory ids, uint256[] memory amounts) = _selectValidators(_amountToBuy, true);
 
         // take full other stake / their min share * our max share minus our current stake
         uint256 cutOffFirstValidator = (2500 / (25 - 20) * (75 + 20)) - 7500; //2000
@@ -167,7 +177,7 @@ contract sPOLControllerVLDSelectTest is Test, sPOLController {
 
         addValidators(valIds, shares, stakes);
 
-        (uint16[] memory ids, uint256[] memory amounts) = _selectValidatorToBuy(_amountToBuy);
+        (uint16[] memory ids, uint256[] memory amounts) = _selectValidators(_amountToBuy, true);
 
         assertEq(ids.length, 1, "should select one validator");
         assertEq(ids[0], 1);
@@ -188,7 +198,7 @@ contract sPOLControllerVLDSelectTest is Test, sPOLController {
 
         addValidators(valIds, shares, stakes);
 
-        (uint16[] memory ids, uint256[] memory amounts) = _selectValidatorToBuy(_amountToBuy);
+        (uint16[] memory ids, uint256[] memory amounts) = _selectValidators(_amountToBuy, true);
 
         // take full other stake / their min share * our max share minus our current stake
         uint256 cutOffFirstValidator = uint256(9900 * 21) / 79 - 100; //2000
@@ -216,7 +226,7 @@ contract sPOLControllerVLDSelectTest is Test, sPOLController {
         stakes[0] = 1000;
         addValidators(valIds, shares, stakes);
 
-        (uint16[] memory ids, uint256[] memory amounts) = _selectValidatorToSell(_amountToSell);
+        (uint16[] memory ids, uint256[] memory amounts) = _selectValidators(_amountToSell, false);
         console.log(amounts[0]);
         assertEq(ids.length, 1);
         assertEq(ids[0], 1);
@@ -241,10 +251,10 @@ contract sPOLControllerVLDSelectTest is Test, sPOLController {
         uint256 cutOffSecondValidator = 1000 - 428;
 
         if (_amountToSell > 2000) {
-            vm.expectRevert("Not enough stake");
-            _selectValidatorToSell(_amountToSell);
+            vm.expectRevert(abi.encodeWithSelector(sPOLController.NotEnoughStake.selector, _amountToSell - 2000));
+            _selectValidators(_amountToSell, false);
         } else {
-            (uint16[] memory ids, uint256[] memory amounts) = _selectValidatorToSell(_amountToSell);
+            (uint16[] memory ids, uint256[] memory amounts) = _selectValidators(_amountToSell, false);
 
             if (_amountToSell > cutOffFirstValidator) {
                 if (_amountToSell < cutOffFirstValidator + cutOffSecondValidator) {
@@ -292,10 +302,10 @@ contract sPOLControllerVLDSelectTest is Test, sPOLController {
         // uint256 cutOffSecondValidator = 0;
 
         if (_amountToSell > 9000) {
-            vm.expectRevert("Not enough stake");
-            _selectValidatorToSell(_amountToSell);
+            vm.expectRevert(abi.encodeWithSelector(sPOLController.NotEnoughStake.selector, _amountToSell - 9000));
+            _selectValidators(_amountToSell, false);
         } else {
-            (uint16[] memory ids, uint256[] memory amounts) = _selectValidatorToSell(_amountToSell);
+            (uint16[] memory ids, uint256[] memory amounts) = _selectValidators(_amountToSell, false);
 
             if (_amountToSell > cutOffFirstValidator) {
                 if (_amountToSell > 7000) {

@@ -1,15 +1,20 @@
-// SPDX-License-Identifier: UNLICENSED
+// SPDX-License-Identifier: SEE LICENSE IN LICENSE
 pragma solidity ^0.8.30;
 
 import {ERC20Permit, ERC20} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Permit.sol";
-import {Initializable} from "@openzeppelin-contracts-upgradeable-5.5.0/proxy/utils/Initializable.sol";
 import {IPolygonMigration} from "./interfaces/IPolygonMigration.sol";
-import {StakeManager as IStakeManager, StakeManagerStorage as StakeManagerStatus} from "./interfaces/IStakeManager.sol";
+import {StakeManager as IStakeManager} from "./interfaces/IStakeManager.sol";
 import {ValidatorShare as IValidatorShare} from "./interfaces/IValidatorShare.sol";
 import {sPOL} from "./sPOL.sol";
-import "forge-std/console.sol";
 
-contract sPOLController is Initializable {
+import {Initializable} from "@openzeppelin-contracts-upgradeable/proxy/utils/Initializable.sol";
+import {PausableUpgradeable} from "@openzeppelin-contracts-upgradeable/utils/PausableUpgradeable.sol";
+import {
+    AccessManagedUpgradeable
+} from "@openzeppelin-contracts-upgradeable/access/manager/AccessManagedUpgradeable.sol";
+import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
+
+contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgradeable, ReentrancyGuardTransient {
     struct ValidatorInfo {
         ValidatorStatus status;
         uint8 depositShare;
@@ -25,27 +30,28 @@ contract sPOLController is Initializable {
         FROZEN
     }
 
-    address public admin;
-
+    // External contracts
     ERC20Permit public immutable polToken;
     ERC20 public immutable maticToken;
     IPolygonMigration public immutable polygonMigration;
     IStakeManager public immutable stakeManager;
     sPOL public immutable sPOLToken;
+    address public immutable sPOLMessenger;
 
+    // Validator management
     mapping(uint16 => ValidatorInfo) public validators;
     uint16[] public validatorList;
     uint16[] public activeValidators;
     uint16 public lastSuccessfulBuyValidator;
     uint16 public lastSuccessfulSellValidator;
-
-    uint256 public totaldPOLBalance;
-
     // in percentage points
     uint8 public maxDivergence;
 
-    uint16 public rewardFee;
+    // Total dPOL balance managed by the controller, including outstanding fees
+    uint256 public totaldPOLBalance;
+
     // In per mill, so 100 = 10%
+    uint16 public rewardFee;
     uint16 public constant MAX_FEE = 1000;
     address public feeReceiver;
     uint256 public feedPOLBalance;
@@ -56,60 +62,102 @@ contract sPOLController is Initializable {
         uint96 validatorNonce;
     }
 
+    // User withdraw nonce management
     mapping(address => uint256[]) public userNonces;
     mapping(uint256 => NonceDetails) public withdrawNonceDetails;
-
+    // Global user withdraw nonce counter
     uint256 public globalWithdrawNonce;
 
+    // Validator management events
     event ValidatorAdded(uint16 validatorId);
     event ValidatorRemoved(uint16 validatorId);
     event ValidatorFrozen(uint16 validatorId);
     event ValidatorUnfrozen(uint16 validatorId);
     event ValidatorTargetShareChanged(uint16 validatorId, uint8 newTargetShare);
+    event ValidatorMigrated(uint16 oldValidator, uint16 newValidator, uint256 amount);
+    // sPOL exchange events
     event sPOLMinted(address user, uint256 amountPOL, uint256 amountSPOL);
     event sPOLBurned(address user, uint256 amountSPOL, uint256 amountPOL, uint256 nonce);
     event POLWithdrawn(address user, uint256 amountPOL, uint256 nonce);
+    event ExchangeRateSnapshot(uint256 totalsPOLSupply, uint256 totalbPOLBalance);
+    // L2 message events
+    event sPOLMigrated(address user, uint256 amountPOL, uint256 amountSPOL);
+    event sPOLBackfilled(address user, uint256 amountSPOL, uint256 amountPOL);
+    // Fee management events
+    event FeeCollected(address feeReceiver, uint256 feePOLAmount, uint256 feesPOLAmount);
+    event FeeReceiverChanged(address oldReceiver, address newReceiver);
+    event RewardFeeChanged(uint16 oldFee, uint16 newFee);
+    // Configuration events
+    event MaxDivergenceChanged(uint8 oldDivergence, uint8 newDivergence);
+    // Cleanup events
+    event MaticTokensCleaned(uint256 maticAmount);
+    event POLTokensCleaned(uint16 validatorId, address receiver, uint256 polAmount, uint256 sPOLMinted);
 
-    modifier onlyAdmin() {
-        require(msg.sender == admin, "ONLY_ADMIN");
-        _;
-    }
+    error AddressUnauthorized(address caller);
+    error AmountTooLarge(uint256 amount, uint256 maxAmount);
+    error ArrayLengthMismatch(uint256 validatorLength, uint256 shareLength);
+    error BadExchangeRate(uint256 polProvided, uint256 sPOLProvided, uint256 polCurrent, uint256 sPOLCurrent);
+    error BuySharesMismatch(uint256 expected, uint256 actual);
+    error DepositSharesTotalNotOneHundred(uint8 totalPercent);
+    error DPOLRestakeTransferFromFailed();
+    error FeeTooLarge(uint16 provided, uint16 maxAllowed);
+    error IncorrectValidatorShareExchangeRate(uint256 expected, uint256 actual);
+    error InvalidPermit();
+    error NonceNotFound(address user, uint256 nonce);
+    error NoOpenNonces(address user);
+    error NoNoncesReady(address user);
+    error NotEnoughStake(uint256 remaining);
+    error ValidatorDepositShareNotZero(uint16 validatorId, uint8 depositShare);
+    error ValidatorNotActive(uint16 validatorId);
+    error ValidatorNotDelegating(uint16 validatorId);
+    error ValidatorNotFrozen(uint16 validatorId);
+    error ValidatorOverfunded(uint256 amount, uint256 maxAmount);
+    error ValidatorRewardsPending(uint16 validatorId, uint256 rewards);
+    error ValidatorSharesPending(uint16 validatorId, uint256 shares);
+    error ValidatorStillFunded(uint16 validatorId, uint256 totalStaked);
+    error ValidatorUnderfunded(uint256 amount, uint256 maxAmount);
+    error WithdrawNotReady(uint256 nonce);
+    error ZeroAddress();
 
     constructor(
         address _polToken,
         address _maticToken,
         address _polygonMigration,
         address _sPOLToken,
-        address _stakeManager
+        address _stakeManager,
+        address _sPOLMessenger
     ) {
         polToken = ERC20Permit(_polToken);
         maticToken = ERC20(_maticToken);
         polygonMigration = IPolygonMigration(_polygonMigration);
         sPOLToken = sPOL(_sPOLToken);
         stakeManager = IStakeManager(_stakeManager);
+        sPOLMessenger = _sPOLMessenger;
         _disableInitializers();
     }
 
-    function initialize(uint16 _rewardFee, address _feeReceiver, uint8 _maxDivergence, address _admin)
+    function initialize(uint16 _rewardFee, address _feeReceiver, uint8 _maxDivergence, address _authority)
         external
         initializer
     {
-        require(_rewardFee <= MAX_FEE, "FEE_TOO_LARGE");
+        __Pausable_init();
+        __AccessManaged_init(_authority);
+        require(_rewardFee <= MAX_FEE, FeeTooLarge(_rewardFee, MAX_FEE));
         rewardFee = _rewardFee;
         feeReceiver = _feeReceiver;
         maxDivergence = _maxDivergence;
-        admin = _admin;
+        polToken.approve(address(stakeManager), type(uint256).max);
     }
 
     ///////////////////////////////
     ///  Validator Management   ///
     ///////////////////////////////
 
-    function addValidator(uint16 _validatorID) external onlyAdmin {
-        require(stakeManager.isValidator(_validatorID), "NOT_ACTIVE_VALIDATOR");
+    function addValidator(uint16 _validatorID) external restricted {
+        require(stakeManager.isValidator(_validatorID), ValidatorNotActive(_validatorID));
 
         IValidatorShare validatorContract = IValidatorShare(stakeManager.getValidatorContract(_validatorID));
-        require(address(validatorContract) != address(0), "NO_DELEGATION");
+        require(address(validatorContract) != address(0), ValidatorNotDelegating(_validatorID));
 
         validators[_validatorID] = ValidatorInfo({
             status: ValidatorStatus.ACTIVE,
@@ -124,12 +172,16 @@ contract sPOLController is Initializable {
         emit ValidatorAdded(_validatorID);
     }
 
-    function removeValidator(uint16 _removedValidator) external onlyAdmin {
+    function removeValidator(uint16 _removedValidator) external restricted {
         ValidatorInfo storage removedValidator = validators[_removedValidator];
-        require(removedValidator.totalStaked == 0, "STILL_FUNDED");
-        require(removedValidator.status == ValidatorStatus.ACTIVE, "NOT_ACTIVE");
-        require(removedValidator.validatorContract.balanceOf(address(this)) == 0, "SHARES_PENDING");
-        require(removedValidator.validatorContract.getLiquidRewards(address(this)) == 0, "REWARDS_PENDING");
+        require(
+            removedValidator.totalStaked == 0, ValidatorStillFunded(_removedValidator, removedValidator.totalStaked)
+        );
+        require(removedValidator.status == ValidatorStatus.ACTIVE, ValidatorNotActive(_removedValidator));
+        uint256 shares = removedValidator.validatorContract.balanceOf(address(this));
+        require(shares == 0, ValidatorSharesPending(_removedValidator, shares));
+        uint256 rewards = removedValidator.validatorContract.getLiquidRewards(address(this));
+        require(rewards == 0, ValidatorRewardsPending(_removedValidator, rewards));
 
         removedValidator.status = ValidatorStatus.DEACTIVATED;
         removedValidator.depositShare = 0;
@@ -137,17 +189,20 @@ contract sPOLController is Initializable {
         emit ValidatorRemoved(_removedValidator);
     }
 
-    function freezeValidator(uint16 _validator) external onlyAdmin {
-        require(validators[_validator].status == ValidatorStatus.ACTIVE, "NOT_ACTIVE");
-        require(validators[_validator].depositShare == 0, "SHARE_NOT_ZERO");
+    function freezeValidator(uint16 _validator) external restricted {
+        require(validators[_validator].status == ValidatorStatus.ACTIVE, ValidatorNotActive(_validator));
+        require(
+            validators[_validator].depositShare == 0,
+            ValidatorDepositShareNotZero(_validator, validators[_validator].depositShare)
+        );
 
         validators[_validator].status = ValidatorStatus.FROZEN;
         _removeFromActiveValidators(_validator);
         emit ValidatorFrozen(_validator);
     }
 
-    function unfreezeValidator(uint16 _validator) external onlyAdmin {
-        require(validators[_validator].status == ValidatorStatus.FROZEN, "NOT_FROZEN");
+    function unfreezeValidator(uint16 _validator) external restricted {
+        require(validators[_validator].status == ValidatorStatus.FROZEN, ValidatorNotFrozen(_validator));
         validators[_validator].status = ValidatorStatus.ACTIVE;
         activeValidators.push(_validator);
         emit ValidatorUnfrozen(_validator);
@@ -169,17 +224,16 @@ contract sPOLController is Initializable {
         }
     }
 
-    function changeMaxDivergence(uint8 newDivergence) external onlyAdmin {
-        maxDivergence = newDivergence;
-    }
-
     function updateValidatorTargetShare(uint16[] calldata _validatorID, uint8[] calldata _newTargetShare)
         external
-        onlyAdmin
+        restricted
     {
-        require(_validatorID.length == _newTargetShare.length, "LENGTH_MISMATCH");
+        require(
+            _validatorID.length == _newTargetShare.length,
+            ArrayLengthMismatch(_validatorID.length, _newTargetShare.length)
+        );
         for (uint256 i = 0; i < _validatorID.length; i++) {
-            require(validators[_validatorID[i]].status == ValidatorStatus.ACTIVE, "NOT_ACTIVE");
+            require(validators[_validatorID[i]].status == ValidatorStatus.ACTIVE, ValidatorNotActive(_validatorID[i]));
             validators[_validatorID[i]].depositShare = _newTargetShare[i];
             emit ValidatorTargetShareChanged(_validatorID[i], _newTargetShare[i]);
         }
@@ -187,43 +241,51 @@ contract sPOLController is Initializable {
         for (uint256 i = 0; i < activeValidators.length; i++) {
             totalPercent += validators[activeValidators[i]].depositShare;
         }
-        require(totalPercent == 100, "TOTAL_NOT_100");
+        require(totalPercent == 100, DepositSharesTotalNotOneHundred(totalPercent));
     }
 
-    function migrateValidator(uint16 _oldValidator, uint16 _newValidator) external onlyAdmin {
+    function migrateValidator(uint16 _oldValidator, uint16 _newValidator) external restricted {
         uint256 amount = validators[_oldValidator].totalStaked;
         amount += validators[_oldValidator].validatorContract.getLiquidRewards(address(this));
-        _migrateValidator(_oldValidator, _newValidator, amount);
+        _migrateValidator(_oldValidator, _newValidator, amount, true);
     }
 
-    function migrateValidator(uint16 _oldValidator, uint16 _newValidator, uint256 _amount) external onlyAdmin {
-        require(_amount <= validators[_oldValidator].totalStaked, "AMOUNT_TOO_LARGE");
-        _migrateValidator(_oldValidator, _newValidator, _amount);
+    function migrateValidator(uint16 _oldValidator, uint16 _newValidator, uint256 _amount) external restricted {
+        require(
+            _amount <= validators[_oldValidator].totalStaked,
+            AmountTooLarge(_amount, validators[_oldValidator].totalStaked)
+        );
+        _migrateValidator(_oldValidator, _newValidator, _amount, true);
     }
 
-    function _migrateValidator(uint16 _oldValidator, uint16 _newValidator, uint256 _amount) internal {
-        restakeValidator(_oldValidator);
-        restakeValidator(_newValidator);
+    function _migrateValidator(uint16 _oldValidator, uint16 _newValidator, uint256 _amount, bool _restake) internal {
+        if (_restake) {
+            restakeValidator(_oldValidator);
+            restakeValidator(_newValidator);
+        }
         stakeManager.migrateDelegation(_oldValidator, _newValidator, _amount);
-        validators[_oldValidator].totalStaked -= _amount;
+        if (validators[_oldValidator].status != ValidatorStatus.INACTIVE) {
+            validators[_oldValidator].totalStaked -= _amount;
+        }
         validators[_newValidator].totalStaked += _amount;
+        emit ValidatorMigrated(_oldValidator, _newValidator, _amount);
     }
 
-    function restakeValidator(uint16 _validator) public {
+    function restakeValidator(uint16 _validator) public whenNotPaused {
         (uint256 amountRestaked,) = validators[_validator].validatorContract.restakePOL();
         _adddPOLBalanceFee(amountRestaked);
         validators[_validator].totalStaked += amountRestaked;
+        _emitExchangeRateUpdate();
     }
 
-    function restakeAllActiveValidators() external {
+    function restakeAllActiveValidators() external whenNotPaused {
         for (uint256 i = 0; i < activeValidators.length; i++) {
-            (uint256 amountRestaked,) = validators[activeValidators[i]].validatorContract.restakePOL();
-            _adddPOLBalanceFee(amountRestaked);
-            validators[activeValidators[i]].totalStaked += amountRestaked;
+            restakeValidator(activeValidators[i]);
         }
+        _emitExchangeRateUpdate();
     }
 
-    function reloadAllActiveValidatorInfo() external onlyAdmin {
+    function reloadAllActiveValidatorInfo() external restricted {
         uint256 amountToReduce;
         uint256 amountToAdd;
         for (uint256 i = 0; i < activeValidators.length; i++) {
@@ -233,10 +295,11 @@ contract sPOLController is Initializable {
             amountToAdd += validator.totalStaked;
         }
         totaldPOLBalance = totaldPOLBalance - amountToReduce + amountToAdd;
+        _emitExchangeRateUpdate();
     }
 
     // very expensive, includes frozen validators
-    function reloadAllValidatorInfo() external onlyAdmin {
+    function reloadAllValidatorInfo() external restricted {
         uint256 totalDPOL;
         for (uint256 i = 0; i < validatorList.length; i++) {
             ValidatorInfo storage validator = validators[validatorList[i]];
@@ -244,6 +307,7 @@ contract sPOLController is Initializable {
             totalDPOL += validator.totalStaked;
         }
         totaldPOLBalance = totalDPOL;
+        _emitExchangeRateUpdate();
     }
 
     ///////////////////////////////
@@ -251,23 +315,25 @@ contract sPOLController is Initializable {
     ///////////////////////////////
 
     function convertPOLtoSPOL(uint256 _amountPOL) public view returns (uint256) {
+        uint256 currentTotalsPOLBalance = totalsPOLBalance();
         if (_amountPOL == 0) {
             return 0;
         }
-        if (totalsPOLBalance() == 0) {
+        if (currentTotalsPOLBalance == 0) {
             return _amountPOL;
         }
-        return _amountPOL * totalsPOLBalance() / (totaldPOLBalance - feedPOLBalance);
+        return _amountPOL * currentTotalsPOLBalance / (totaldPOLBalance - feedPOLBalance);
     }
 
     function convertSPOLtoPOL(uint256 _amountSPOL) public view returns (uint256) {
+        uint256 currentTotalsPOLBalance = totalsPOLBalance();
         if (_amountSPOL == 0) {
             return 0;
         }
-        if (totalsPOLBalance() == 0) {
+        if (currentTotalsPOLBalance == 0) {
             return _amountSPOL;
         }
-        return _amountSPOL * (totaldPOLBalance - feedPOLBalance) / totalsPOLBalance();
+        return _amountSPOL * (totaldPOLBalance - feedPOLBalance) / currentTotalsPOLBalance;
     }
 
     function totalsPOLBalance() public view returns (uint256) {
@@ -278,21 +344,24 @@ contract sPOLController is Initializable {
     ///  POL -> sPOL Exchange   ///
     ///////////////////////////////
 
-    function buySPOL(uint256 _amount) external returns (uint256) {
+    function buySPOL(uint256 _amount) external whenNotPaused returns (uint256) {
         return _buySPOLMulti(_amount, msg.sender);
     }
 
     function buySPOLPermit(uint256 _amount, address _user, uint256 _deadline, uint8 _v, bytes32 _r, bytes32 _s)
         external
+        whenNotPaused
         returns (uint256)
     {
-        uint256 nonceBefore = polToken.nonces(_user);
-        polToken.permit(_user, address(this), _amount, _deadline, _v, _r, _s);
-        require(polToken.nonces(_user) == nonceBefore + 1, "Invalid permit");
+        _applyPermit(address(polToken), _amount, _user, _deadline, _v, _r, _s);
         return _buySPOLMulti(_amount, _user);
     }
 
-    function buySPOL(uint256 _amount, uint16 _validator) public returns (uint256) {
+    function getMostUnderfundedValidator() external view returns (uint16, uint256) {
+        return _validatorWithHighestTotalStakeDistance(true);
+    }
+
+    function buySPOL(uint256 _amount, uint16 _validator) public whenNotPaused returns (uint256) {
         return _buySPOLSingle(_amount, _validator, msg.sender);
     }
 
@@ -304,77 +373,280 @@ contract sPOLController is Initializable {
         uint8 _v,
         bytes32 _r,
         bytes32 _s
-    ) public returns (uint256) {
-        uint256 nonceBefore = polToken.nonces(_user);
-        polToken.permit(_user, address(this), _amount, _deadline, _v, _r, _s);
-        require(polToken.nonces(_user) == nonceBefore + 1, "Invalid permit");
+    ) public whenNotPaused returns (uint256) {
+        _applyPermit(address(polToken), _amount, _user, _deadline, _v, _r, _s);
         return _buySPOLSingle(_amount, _validator, _user);
     }
 
+    function buySPOLWithDPOLPermit(
+        uint256 _amount,
+        uint16 _validatorOfDPOL,
+        address _user,
+        uint256 _deadline,
+        uint8 _v,
+        bytes32 _r,
+        bytes32 _s
+    ) external whenNotPaused returns (uint256) {
+        _applyPermit(stakeManager.getValidatorContract(_validatorOfDPOL), _amount, _user, _deadline, _v, _r, _s);
+        return _buySPOLWithDPOLMulti(_amount, _validatorOfDPOL, _user);
+    }
+
+    function buySPOLWithDPOL(uint256 _amount, uint16 _validatorOfDPOL) external whenNotPaused returns (uint256) {
+        return _buySPOLWithDPOLMulti(_amount, _validatorOfDPOL, msg.sender);
+    }
+
     function _buySPOLSingle(uint256 _amount, uint16 _validator, address _user) internal returns (uint256) {
+        uint256 toMint = convertPOLtoSPOL(_amount);
         ValidatorInfo storage validator = validators[_validator];
-        require(_amount <= _validatorMaxTotalStakeDistance(validator, true), "VALIDATOR_OVERFUNDED");
-        require(validator.status == ValidatorStatus.ACTIVE, "VALIDATOR_NOT_ACTIVE");
+        require(validator.status == ValidatorStatus.ACTIVE, ValidatorNotActive(_validator));
+        uint256 maxAmount = _validatorMaxTotalStakeDistance(validator, true);
+        require(_amount <= maxAmount, ValidatorOverfunded(_amount, maxAmount));
         _takePOL(_amount, _user);
 
-        uint256 gotShares = _buySharesFromValidator(validator, _amount);
-        return _mintSPOL(gotShares, _user);
+        uint256 actualShares = _buySharesFromValidator(validator, _amount);
+        require(actualShares == _amount, BuySharesMismatch(_amount, actualShares));
+        lastSuccessfulBuyValidator = _validator;
+        _mintSPOL(_user, _amount, toMint);
+        _emitExchangeRateUpdate();
+        return toMint;
     }
 
     function _buySPOLMulti(uint256 _amount, address _user) internal returns (uint256) {
-        (uint16[] memory validator, uint256[] memory amount) = _selectValidatorToBuy(_amount);
+        uint256 toMint = convertPOLtoSPOL(_amount);
+        (uint16[] memory validator, uint256[] memory amount) = _selectValidators(_amount, true);
         _takePOL(_amount, _user);
         uint256 totalShares;
         for (uint256 i = 0; i < amount.length; i++) {
             totalShares += _buySharesFromValidator(validators[validator[i]], amount[i]);
         }
         lastSuccessfulBuyValidator = validator[validator.length - 1];
-        require(totalShares == _amount, "BUY_SHARES_MISMATCH");
-        return _mintSPOL(totalShares, _user);
-    }
-
-    function _takePOL(uint256 _amount, address _user) internal {
-        require(polToken.transferFrom(_user, address(this), _amount), "TRANSFER_FAILED");
-    }
-
-    function _mintSPOL(uint256 _amount, address _user) internal returns (uint256) {
-        uint256 toMint = convertPOLtoSPOL(_amount);
-        sPOLToken.mint(_user, toMint);
-        emit sPOLMinted(_user, _amount, toMint);
+        require(totalShares == _amount, BuySharesMismatch(_amount, totalShares));
+        _mintSPOL(_user, _amount, toMint);
+        _emitExchangeRateUpdate();
         return toMint;
     }
 
-    function getMostUnderfundedValidator() external view returns (uint16, uint256) {
-        uint16 selectedValidator = activeValidators[0];
-        uint256 maxFundsDepositable;
-        for (uint256 i = 0; i < activeValidators.length; i++) {
-            ValidatorInfo storage validator = validators[activeValidators[i]];
-            uint256 amount = _validatorMaxTotalStakeDistance(validator, true);
-            if (maxFundsDepositable < amount) {
-                maxFundsDepositable = amount;
-                selectedValidator = validator.index;
+    function _buySPOLWithDPOLMulti(uint256 _amount, uint16 _validatorOfDPOL, address _user) internal returns (uint256) {
+        uint256 sPOLToMint = convertPOLtoSPOL(_amount);
+
+        (uint16[] memory validator, uint256[] memory amount) = _selectValidators(_amount, true);
+
+        IValidatorShare validatorOfDPOL = IValidatorShare(stakeManager.getValidatorContract(_validatorOfDPOL));
+        (bool success, uint256 restakedAmount) = validatorOfDPOL.restakeAndTransferFrom(_user, address(this), _amount);
+        require(success, DPOLRestakeTransferFromFailed());
+
+        if (validators[_validatorOfDPOL].status == ValidatorStatus.ACTIVE) {
+            validators[_validatorOfDPOL].totalStaked += restakedAmount;
+            _adddPOLBalanceFee(restakedAmount);
+        }
+        _adddPOLBalance(_amount);
+
+        for (uint256 i = 0; i < amount.length; i++) {
+            if (validator[i] == _validatorOfDPOL) {
+                validators[_validatorOfDPOL].totalStaked += amount[i];
             }
+            _migrateValidator(_validatorOfDPOL, validator[i], amount[i], false);
         }
-        if (maxFundsDepositable == 0) {
-            maxFundsDepositable = type(uint256).max;
-        }
-        return (selectedValidator, maxFundsDepositable);
+        lastSuccessfulBuyValidator = validator[validator.length - 1];
+        _mintSPOL(_user, _amount, sPOLToMint);
+        _emitExchangeRateUpdate();
+        return sPOLToMint;
     }
 
     function _buySharesFromValidator(ValidatorInfo storage _validator, uint256 _amount) internal returns (uint256) {
-        // use restake and buyVoucher in one
-        (uint256 amountRestaked, uint256 rewards) = _validator.validatorContract.restakePOL();
-        if (amountRestaked < rewards) {
-            // dropped some rewards
+        (uint256 amountDeposited, uint256 liquidReward) = _validator.validatorContract.restakeAndStakePOL(_amount);
+        require(amountDeposited == _amount, IncorrectValidatorShareExchangeRate(_amount, amountDeposited));
+        _adddPOLBalanceFee(liquidReward);
+        _adddPOLBalance(amountDeposited);
+        validators[_validator.index].totalStaked += amountDeposited + liquidReward;
+        return amountDeposited;
+    }
+
+    ///////////////////////////////
+    ///  sPOL -> POL Exchange   ///
+    ///////////////////////////////
+
+    function sellSPOL(uint256 _amount) external whenNotPaused returns (uint256[] memory) {
+        return _sellSPOLMulti(_amount, msg.sender);
+    }
+
+    function sellSPOLPermit(uint256 _amount, address _user, uint256 _deadline, uint8 _v, bytes32 _r, bytes32 _s)
+        external
+        whenNotPaused
+        returns (uint256[] memory)
+    {
+        // consume permit resets allowance to 0 after use, as we don't want any leftover allowance
+        // allowance should have no negative downsides, we do this to be safe
+        _applyPermit(address(sPOLToken), _amount, _user, _deadline, _v, _r, _s);
+        return _sellSPOLMulti(_amount, _user);
+    }
+
+    function getMostOverfundedValidator() external view returns (uint16, uint256) {
+        return _validatorWithHighestTotalStakeDistance(false);
+    }
+
+    function sellSPOL(uint256 _amount, uint16 _validator) external whenNotPaused returns (uint256) {
+        return _sellSPOLSingle(_amount, _validator, msg.sender);
+    }
+
+    function sellSPOLPermit(
+        uint256 _amount,
+        uint16 _validator,
+        address _user,
+        uint256 _deadline,
+        uint8 _v,
+        bytes32 _r,
+        bytes32 _s
+    ) external whenNotPaused returns (uint256) {
+        // consume permit resets allowance to 0 after use, as we don't want any leftover allowance
+        // allowance should have no negative downsides, we do this to be safe
+        _applyPermit(address(sPOLToken), _amount, _user, _deadline, _v, _r, _s);
+        return _sellSPOLSingle(_amount, _validator, _user);
+    }
+
+    function _sellSPOLSingle(uint256 _amount, uint16 _validator, address _user) internal returns (uint256) {
+        ValidatorInfo storage validator = validators[_validator];
+        require(validator.status == ValidatorStatus.ACTIVE, ValidatorNotActive(_validator));
+        uint256 maxRedeem = _maxRedeem(validator);
+        require(_amount <= maxRedeem, ValidatorUnderfunded(_amount, maxRedeem));
+
+        uint256 dPOLAmount = convertSPOLtoPOL(_amount);
+        _takeSPOL(_amount, _user);
+
+        uint256 userNonce = _sellSharesFromValidator(validator, dPOLAmount);
+
+        uint256 nonce = _addUserWithdrawNonceDetails(_user, _validator, uint128(dPOLAmount), uint96(userNonce));
+
+        emit sPOLBurned(_user, _amount, dPOLAmount, nonce);
+        _emitExchangeRateUpdate();
+        return nonce;
+    }
+
+    function _sellSPOLMulti(uint256 _amount, address _user) internal returns (uint256[] memory) {
+        uint256 dPOLAmount = convertSPOLtoPOL(_amount);
+        (uint16[] memory validator, uint256[] memory amount) = _selectValidators(dPOLAmount, false);
+        uint256[] memory nonces = new uint256[](validator.length);
+        for (uint256 i = 0; i < validator.length; i++) {
+            uint256 sPOLAmount = convertPOLtoSPOL(amount[i]);
+            uint256 userNonce = _sellSharesFromValidator(validators[validator[i]], amount[i]);
+            uint256 nonce = _addUserWithdrawNonceDetails(_user, validator[i], uint128(amount[i]), uint96(userNonce));
+            nonces[i] = nonce;
+            emit sPOLBurned(_user, sPOLAmount, amount[i], nonce);
         }
-        _adddPOLBalanceFee(amountRestaked);
-        validators[_validator.index].totalStaked += amountRestaked;
+        _takeSPOL(_amount, _user);
+        _emitExchangeRateUpdate();
+        return nonces;
+    }
 
-        require(_validator.validatorContract.buyVoucher(_amount, _amount) == _amount, "BUY_FAILED");
-        _adddPOLBalance(_amount);
-        validators[_validator.index].totalStaked += _amount;
+    function _sellSharesFromValidator(ValidatorInfo storage _validator, uint256 _amount) internal returns (uint256) {
+        uint256 liquidRewards = _validator.validatorContract.restakeAndUnstakePOL(_amount);
+        _adddPOLBalanceFee(liquidRewards);
+        _removedPOLBalance(_amount);
+        validators[_validator.index].totalStaked -= _amount;
+        validators[_validator.index].totalStaked += liquidRewards;
 
-        return _amount;
+        uint256 userNonce = _validator.validatorContract.unbondNonces(address(this));
+        return userNonce;
+    }
+
+    function withdrawPOL(uint256 _nonce) external whenNotPaused {
+        _withdrawPOL(msg.sender, _nonce);
+    }
+
+    function withdrawPOL(address _user, uint256 _nonce) external whenNotPaused {
+        _withdrawPOL(_user, _nonce);
+    }
+
+    function _withdrawPOL(address _user, uint256 _nonce) internal {
+        uint256[] storage nonces = userNonces[_user];
+        for (uint256 i = 0; i < nonces.length; i++) {
+            if (nonces[i] == _nonce) {
+                uint256 shares = _redeemNonceAtValidator(_nonce);
+                require(shares > 0, WithdrawNotReady(_nonce));
+
+                nonces[i] = nonces[nonces.length - 1];
+                nonces.pop();
+
+                polToken.transfer(_user, shares);
+                emit POLWithdrawn(_user, shares, _nonce);
+                return;
+            }
+        }
+        revert NonceNotFound(_user, _nonce);
+    }
+
+    function withdrawPOL() external whenNotPaused {
+        _withdrawPOL(msg.sender);
+    }
+
+    function withdrawPOL(address _user) external whenNotPaused {
+        _withdrawPOL(_user);
+    }
+
+    function _withdrawPOL(address _user) internal {
+        require(userNonces[_user].length > 0, NoOpenNonces(_user));
+
+        uint256 totalAmount;
+        //create a copy of the array in memory to avoid SStores
+        uint256[] memory memNonces = userNonces[_user];
+        for (uint256 i = 0; i < memNonces.length; i++) {
+            uint256 shares = _redeemNonceAtValidator(memNonces[i]);
+            if (shares == 0) {
+                continue;
+            }
+            totalAmount += shares;
+            emit POLWithdrawn(_user, shares, withdrawNonceDetails[memNonces[i]].validatorNonce);
+            memNonces[i] = 0;
+        }
+        // shrink the array in storage as needed
+        uint256 foundNonces;
+        for (uint256 i = 0; i < memNonces.length; i++) {
+            if (memNonces[i] == 0) {
+                userNonces[_user].pop();
+            } else {
+                userNonces[_user][foundNonces] = memNonces[i];
+                foundNonces++;
+            }
+        }
+        require(totalAmount > 0, NoNoncesReady(_user));
+        // bundle transfer to save gas, separate events inform about multi withdraws
+        polToken.transfer(_user, totalAmount);
+    }
+
+    // returns unstaked shares, or 0 if not ready
+    function _redeemNonceAtValidator(uint256 _nonce) internal returns (uint256) {
+        NonceDetails storage nonce = withdrawNonceDetails[_nonce];
+        ValidatorInfo storage validator = validators[nonce.validatorId];
+        (uint256 shares, uint256 withdrawEpoch) =
+            validator.validatorContract.unbonds_new(address(this), nonce.validatorNonce);
+
+        if (withdrawEpoch + stakeManager.withdrawalDelay() <= stakeManager.epoch()) {
+            validator.validatorContract.unstakeClaimTokens_newPOL(nonce.validatorNonce);
+            return shares;
+        }
+        return 0;
+    }
+
+    ////////////////////////////////
+    ///  Validator Selection     ///
+    ////////////////////////////////
+
+    function _validatorWithHighestTotalStakeDistance(bool _positive) internal view returns (uint16, uint256) {
+        uint16 selectedValidator = activeValidators[0];
+        uint256 maxDistance;
+        for (uint256 i = 0; i < activeValidators.length; i++) {
+            ValidatorInfo storage validator = validators[activeValidators[i]];
+            uint256 distance = _validatorMaxTotalStakeDistance(validator, _positive);
+
+            if (maxDistance < distance) {
+                maxDistance = distance;
+                selectedValidator = validator.index;
+            }
+        }
+        if (_positive && maxDistance == 0) {
+            maxDistance = type(uint256).max;
+        }
+        return (selectedValidator, maxDistance);
     }
 
     function _maxDeposit(ValidatorInfo storage _validator) internal view returns (uint256) {
@@ -384,11 +656,11 @@ contract sPOLController is Initializable {
         }
         uint256 theOtherShare = totaldPOLBalance - _validator.totalStaked;
         uint8 restShare = 100 - myBigShare;
-        uint256 myactualMaxSahre = (theOtherShare * myBigShare) / restShare;
-        if (myactualMaxSahre <= _validator.totalStaked) {
+        uint256 myactualMaxShare = (theOtherShare * myBigShare) / restShare;
+        if (myactualMaxShare <= _validator.totalStaked) {
             return 0;
         }
-        return myactualMaxSahre - _validator.totalStaked;
+        return myactualMaxShare - _validator.totalStaked;
     }
 
     function _maxRedeem(ValidatorInfo storage _validator) internal view returns (uint256) {
@@ -418,259 +690,6 @@ contract sPOLController is Initializable {
             return _maxRedeem(_validator);
         }
     }
-
-    // can't take storage array of full vals, so we take index to avoid costly copying
-    function _selectValidatorToBuy(uint256 _amount) internal view returns (uint16[] memory, uint256[] memory) {
-        return _selectValidators(_amount, true);
-    }
-
-    ///////////////////////////////
-    ///  sPOL -> POL Exchange   ///
-    ///////////////////////////////
-
-    function initSellSPOL(uint256 _amount) external returns (uint256[] memory) {
-        return _sellSPOLMulti(_amount, msg.sender);
-    }
-
-    function initSellSPOLPermit(uint256 _amount, address _user, uint256 _deadline, uint8 _v, bytes32 _r, bytes32 _s)
-        external
-        returns (uint256[] memory)
-    {
-        // consume permit resets allowance to 0 after use, as we don't want any leftover allowance
-        // allowance should have no negative downsides, we do this to be safe
-        uint256 nonceBefore = sPOLToken.nonces(_user);
-        sPOLToken.consumePermit(_user, address(this), _amount, _deadline, _v, _r, _s);
-        require(sPOLToken.nonces(_user) == nonceBefore + 1, "Invalid permit");
-        return _sellSPOLMulti(_amount, _user);
-    }
-
-    function sellSPOL(uint256 _amount, uint16 _validator) external returns (uint256) {
-        return _sellSPOLSingle(_amount, _validator, msg.sender);
-    }
-
-    function sellSPOLPermit(
-        uint256 _amount,
-        uint16 _validator,
-        address _user,
-        uint256 _deadline,
-        uint8 _v,
-        bytes32 _r,
-        bytes32 _s
-    ) external returns (uint256) {
-        // consume permit resets allowance to 0 after use, as we don't want any leftover allowance
-        // allowance should have no negative downsides, we do this to be safe
-        uint256 nonceBefore = sPOLToken.nonces(_user);
-        sPOLToken.consumePermit(_user, address(this), _amount, _deadline, _v, _r, _s);
-        require(sPOLToken.nonces(_user) == nonceBefore + 1, "Invalid permit");
-        return _sellSPOLSingle(_amount, _validator, _user);
-    }
-
-    function _sellSPOLSingle(uint256 _amount, uint16 _validator, address _user) internal returns (uint256) {
-        ValidatorInfo storage validator = validators[_validator];
-        require(validator.status == ValidatorStatus.ACTIVE, "VALIDATOR_NOT_ACTIVE");
-        require(_amount <= _maxRedeem(validator), "VALIDATOR_UNDERFUNDED");
-        _takeSPOL(_amount, _user);
-
-        uint256 dPOLAmount = convertSPOLtoPOL(_amount);
-        uint256 userNonce = _sellSharesFromValidator(validator, dPOLAmount);
-
-        globalWithdrawNonce++;
-        userNonces[_user].push(globalWithdrawNonce);
-
-        NonceDetails storage details = withdrawNonceDetails[globalWithdrawNonce];
-        details.amount = uint128(dPOLAmount);
-        details.validatorId = uint16(validator.index);
-        details.validatorNonce = uint96(userNonce);
-        emit sPOLBurned(_user, _amount, dPOLAmount, globalWithdrawNonce);
-
-        return globalWithdrawNonce;
-    }
-
-    // can't take storage array of full vals, so we take index to avoid costly copying
-    function _selectValidatorToSell(uint256 _amount) internal view returns (uint16[] memory, uint256[] memory) {
-        return _selectValidators(_amount, false);
-    }
-
-    function _takeSPOL(uint256 _amount, address _user) internal {
-        try sPOLToken.burn(_user, _amount) {}
-        catch {
-            revert("BURN_FAILED");
-        }
-    }
-
-    function _sellSPOLMulti(uint256 _amount, address _user) internal returns (uint256[] memory) {
-        _takeSPOL(_amount, _user);
-        uint256 dPOLAmount = convertSPOLtoPOL(_amount);
-        (uint16[] memory validator, uint256[] memory amount) = _selectValidatorToSell(dPOLAmount);
-        uint256[] memory nonces = new uint256[](validator.length);
-        for (uint256 i = 0; i < validator.length; i++) {
-            uint256 userNonce = _sellSharesFromValidator(validator[i], amount[i]);
-            globalWithdrawNonce++;
-            userNonces[_user].push(globalWithdrawNonce);
-
-            NonceDetails storage details = withdrawNonceDetails[globalWithdrawNonce];
-            details.amount = uint128(amount[i]);
-            details.validatorId = validator[i];
-            details.validatorNonce = uint96(userNonce);
-            emit sPOLBurned(_user, convertPOLtoSPOL(amount[i]), amount[i], globalWithdrawNonce);
-        }
-        return nonces;
-    }
-
-    function _sellSharesFromValidator(uint16 _validator, uint256 _amount) internal returns (uint256) {
-        return _sellSharesFromValidator(validators[_validator], _amount);
-    }
-
-    function _sellSharesFromValidator(ValidatorInfo storage _validator, uint256 _amount) internal returns (uint256) {
-        // use withdraw and sellVoucher in one
-        (uint256 amountRestaked, uint256 rewards) = _validator.validatorContract.restakePOL();
-        if (amountRestaked < rewards) {
-            // dropped some rewards
-        }
-
-        _validator.validatorContract.sellVoucher_newPOL(_amount, _amount);
-        uint256 userNonce = _validator.validatorContract.unbondNonces(address(this));
-
-        validators[_validator.index].totalStaked -= _amount;
-        validators[_validator.index].totalStaked += amountRestaked;
-        totaldPOLBalance -= _amount;
-
-        return userNonce;
-    }
-
-    function getMostOverfundedValidator() external view returns (uint16, uint256) {
-        uint16 selectedValidator = activeValidators[0];
-        uint256 maxFundsRedeemable = 0;
-        for (uint256 i = 0; i < activeValidators.length; i++) {
-            ValidatorInfo storage validator = validators[activeValidators[i]];
-            uint256 unstakeable = _validatorMaxTotalStakeDistance(validator, false);
-
-            if (maxFundsRedeemable < unstakeable) {
-                maxFundsRedeemable = unstakeable;
-                selectedValidator = validator.index;
-            }
-        }
-        return (selectedValidator, maxFundsRedeemable);
-    }
-
-    function withdrawPOL(uint256 _nonce) external {
-        _withdrawPOL(msg.sender, _nonce);
-    }
-
-    function withdrawPOL(address _user, uint256 _nonce) external {
-        _withdrawPOL(_user, _nonce);
-    }
-
-    function _withdrawPOL(address _user, uint256 _nonce) internal {
-        for (uint256 i = 0; i < userNonces[_user].length; i++) {
-            if (userNonces[_user][i] == _nonce) {
-                NonceDetails storage nonce = withdrawNonceDetails[_nonce];
-                ValidatorInfo storage validator = validators[nonce.validatorId];
-                (uint256 shares,) = validator.validatorContract.unbonds_new(address(this), nonce.validatorNonce);
-
-                try validator.validatorContract.unstakeClaimTokens_newPOL(nonce.validatorNonce) {}
-                catch Error(string memory errorMsg) {
-                    revert(errorMsg);
-                } catch {
-                    revert("UNSTAKE_CLAIM_FAILED");
-                }
-
-                if (userNonces[_user].length > 1) {
-                    userNonces[_user][i] = userNonces[_user][userNonces[_user].length - 1];
-                }
-                userNonces[_user].pop();
-
-                polToken.transfer(_user, shares);
-                emit POLWithdrawn(_user, shares, _nonce);
-                return;
-            }
-        }
-        revert("NONCE_NOT_FOUND");
-    }
-
-    function withdrawPOL() external {
-        _withdrawPOL(msg.sender);
-    }
-
-    function withdrawPOL(address _user) external {
-        _withdrawPOL(_user);
-    }
-
-    function _withdrawPOL(address _user) internal {
-        require(0 != userNonces[_user].length, "NO_OPEN_NONCES");
-
-        uint256 totalAmount;
-        //create a copy of the array in memory to avoid SStores
-        uint256[] memory memNonces = userNonces[_user];
-        for (uint256 i = 0; i < memNonces.length; i++) {
-            NonceDetails storage nonce = withdrawNonceDetails[memNonces[i]];
-            ValidatorInfo storage validator = validators[nonce.validatorId];
-            (uint256 shares, uint256 withdrawEpoch) =
-                validator.validatorContract.unbonds_new(address(this), nonce.validatorNonce);
-
-            if (withdrawEpoch + stakeManager.withdrawalDelay() <= stakeManager.epoch()) {
-                try validator.validatorContract.unstakeClaimTokens_newPOL(nonce.validatorNonce) {
-                    totalAmount += shares;
-                    memNonces[i] = 0;
-                    emit POLWithdrawn(_user, totalAmount, nonce.validatorNonce);
-                } catch {
-                    // Nonce wasn't ready for some reason, so we skip it
-                    // Consider reverting here, because in case this happens it's not the delay, but maybe something serious
-                    continue;
-                }
-            }
-        }
-        // shrink the array in storage as needed
-        uint256 foundNonces;
-        for (uint256 i = 0; i < memNonces.length; i++) {
-            if (memNonces[i] == 0) {
-                userNonces[_user].pop();
-            } else {
-                userNonces[_user][foundNonces] = memNonces[i];
-                foundNonces++;
-            }
-        }
-        // bundle transfer to save gas, separate events inform about multi withdraws
-        polToken.transfer(_user, totalAmount);
-    }
-
-    ///////////////////////////////
-    ///  Fee Management         ///
-    ///////////////////////////////
-
-    function changeFeeReceiver(address newFeeReceiver) external onlyAdmin {
-        require(newFeeReceiver != address(0), "ZERO_ADDRESS");
-        takeFee();
-        feeReceiver = newFeeReceiver;
-    }
-
-    function changeRewardFee(uint16 newFee) external onlyAdmin {
-        require(newFee <= MAX_FEE, "FEE_TOO_LARGE");
-        rewardFee = newFee;
-    }
-
-    function takeFee() public onlyAdmin {
-        if (feedPOLBalance == 0) {
-            return;
-        }
-        uint256 feeInsPOL = convertPOLtoSPOL(feedPOLBalance);
-        feedPOLBalance = 0;
-        sPOLToken.mint(feeReceiver, feeInsPOL);
-    }
-
-    function _adddPOLBalanceFee(uint256 _amount) internal {
-        uint256 feeTaken = (_amount * rewardFee) / 1000;
-        feedPOLBalance += feeTaken;
-        totaldPOLBalance += _amount;
-    }
-
-    function _adddPOLBalance(uint256 _amount) internal {
-        totaldPOLBalance += _amount;
-    }
-
-    ///////////////////////////////
-    ///  Other                  ///
-    ///////////////////////////////
 
     function _selectValidators(uint256 _amount, bool _buy) internal view returns (uint16[] memory, uint256[] memory) {
         uint16[] memory selectedValidators = new uint16[](activeValidators.length);
@@ -734,26 +753,200 @@ contract sPOLController is Initializable {
                 }
                 selectedValidators[i] = validators[activeValidators[i]].index;
             }
-            require(remaining == 0, "Not enough stake");
+            require(remaining == 0, NotEnoughStake(remaining));
         }
         return (selectedValidators, amounts);
     }
 
-    function cleanUpMaticPOL(uint16 _validator, address _receiver) external onlyAdmin {
-        require(validators[_validator].status == ValidatorStatus.ACTIVE, "VALIDATOR_NOT_ACTIVE");
+    ///////////////////////////////
+    ///  Fee Management         ///
+    ///////////////////////////////
+
+    function changeFeeReceiver(address _newFeeReceiver) external restricted {
+        require(_newFeeReceiver != address(0), ZeroAddress());
+        takeFee();
+        address oldReceiver = feeReceiver;
+        feeReceiver = _newFeeReceiver;
+        emit FeeReceiverChanged(oldReceiver, feeReceiver);
+    }
+
+    function changeRewardFee(uint16 _newFee) external restricted {
+        require(_newFee <= MAX_FEE, FeeTooLarge(_newFee, MAX_FEE));
+        uint16 oldFee = rewardFee;
+        rewardFee = _newFee;
+        emit RewardFeeChanged(oldFee, rewardFee);
+    }
+
+    function takeFee() public restricted {
+        if (feedPOLBalance == 0) {
+            return;
+        }
+        uint256 feeInsPOL = convertPOLtoSPOL(feedPOLBalance);
+        uint256 feePOLAmount = feedPOLBalance;
+        feedPOLBalance = 0;
+        sPOLToken.mint(feeReceiver, feeInsPOL);
+        emit FeeCollected(feeReceiver, feePOLAmount, feeInsPOL);
+        _emitExchangeRateUpdate();
+    }
+
+    ////////////////////////////////
+    ///  L2 interaction          ///
+    ////////////////////////////////
+
+    function completeMigration(uint256 _amountPOL, uint256 _amountSPOL) external nonReentrant {
+        require(msg.sender == sPOLMessenger, AddressUnauthorized(msg.sender));
+        uint256 expectedSPOL = convertPOLtoSPOL(_amountPOL);
+        require(
+            expectedSPOL >= _amountSPOL,
+            BadExchangeRate(_amountPOL, _amountSPOL, totaldPOLBalance - feedPOLBalance, totalsPOLBalance())
+        );
+        (uint16[] memory validator, uint256[] memory amount) = _selectValidators(_amountPOL, true);
+        _takePOL(_amountPOL, msg.sender);
+        uint256 totalShares;
+        for (uint256 i = 0; i < amount.length; i++) {
+            totalShares += _buySharesFromValidator(validators[validator[i]], amount[i]);
+        }
+        lastSuccessfulBuyValidator = validator[validator.length - 1];
+        require(totalShares == _amountPOL, BuySharesMismatch(_amountPOL, totalShares));
+        sPOLToken.mint(msg.sender, _amountSPOL);
+        emit sPOLMigrated(msg.sender, _amountPOL, _amountSPOL);
+        _emitExchangeRateUpdate();
+    }
+
+    function startBackfillSell(uint256 _amountPOL, uint256 _amountSPOL)
+        external
+        nonReentrant
+        returns (uint256[] memory)
+    {
+        require(msg.sender == sPOLMessenger, AddressUnauthorized(msg.sender));
+        uint256 expectedSPOL = convertPOLtoSPOL(_amountPOL);
+        require(
+            _amountSPOL >= expectedSPOL,
+            BadExchangeRate(_amountPOL, _amountSPOL, totaldPOLBalance - feedPOLBalance, totalsPOLBalance())
+        );
+        _takeSPOL(_amountSPOL, msg.sender);
+        (uint16[] memory validator, uint256[] memory amount) = _selectValidators(_amountPOL, false);
+        uint256[] memory nonces = new uint256[](validator.length);
+        for (uint256 i = 0; i < validator.length; i++) {
+            uint256 userNonce = _sellSharesFromValidator(validators[validator[i]], amount[i]);
+            uint256 nonce =
+                _addUserWithdrawNonceDetails(msg.sender, validator[i], uint128(amount[i]), uint96(userNonce));
+            nonces[i] = nonce;
+        }
+        emit sPOLBackfilled(msg.sender, _amountSPOL, _amountPOL);
+        _emitExchangeRateUpdate();
+        return nonces;
+    }
+
+    /////////////////////////////////
+    ///  Internal Helper          ///
+    /////////////////////////////////
+
+    function _takeSPOL(uint256 _amount, address _user) internal {
+        sPOLToken.burn(_user, _amount);
+    }
+
+    function _takePOL(uint256 _amount, address _user) internal {
+        polToken.transferFrom(_user, address(this), _amount);
+    }
+
+    function _mintSPOL(address _user, uint256 amountPOL, uint256 amountSPOL) internal {
+        sPOLToken.mint(_user, amountSPOL);
+        emit sPOLMinted(_user, amountPOL, amountSPOL);
+    }
+
+    function _applyPermit(
+        address _token,
+        uint256 _amount,
+        address _user,
+        uint256 _deadline,
+        uint8 _v,
+        bytes32 _r,
+        bytes32 _s
+    ) internal {
+        ERC20Permit token = ERC20Permit(_token);
+        uint256 nonceBefore = token.nonces(_user);
+        if (address(_token) == address(sPOLToken)) {
+            sPOLToken.consumePermit(_user, address(this), _amount, _deadline, _v, _r, _s);
+        } else {
+            polToken.permit(_user, address(this), _amount, _deadline, _v, _r, _s);
+        }
+        require(token.nonces(_user) == nonceBefore + 1, InvalidPermit());
+    }
+
+    function _adddPOLBalanceFee(uint256 _amount) internal {
+        uint256 feeTaken = (_amount * rewardFee) / 1000;
+        feedPOLBalance += feeTaken;
+        totaldPOLBalance += _amount;
+    }
+
+    function _adddPOLBalance(uint256 _amount) internal {
+        totaldPOLBalance += _amount;
+    }
+
+    function _removedPOLBalance(uint256 _amount) internal {
+        totaldPOLBalance -= _amount;
+    }
+
+    // side effect: increases globalWithdrawNonce
+    function _addUserWithdrawNonceDetails(address _user, uint16 _validatorId, uint128 _amount, uint96 _validatorNonce)
+        internal
+        returns (uint256)
+    {
+        uint256 nonce = globalWithdrawNonce++;
+        userNonces[_user].push(nonce);
+        NonceDetails storage details = withdrawNonceDetails[nonce];
+        details.amount = _amount;
+        details.validatorId = _validatorId;
+        details.validatorNonce = _validatorNonce;
+        return nonce;
+    }
+
+    function _emitExchangeRateUpdate() internal {
+        emit ExchangeRateSnapshot(totalsPOLBalance(), totaldPOLBalance - feedPOLBalance);
+    }
+
+    ///////////////////////////////
+    ///  Config                 ///
+    ///////////////////////////////
+
+    function changeMaxDivergence(uint8 _newDivergence) external restricted {
+        uint8 oldDivergence = maxDivergence;
+        maxDivergence = _newDivergence;
+        emit MaxDivergenceChanged(oldDivergence, maxDivergence);
+    }
+
+    function pauseUserFunctions() external restricted {
+        _pause();
+    }
+
+    function unpauseUserFunctions() external restricted {
+        _unpause();
+    }
+
+    ///////////////////////////////
+    ///  Other                  ///
+    ///////////////////////////////
+
+    function cleanUpMaticPOL(uint16 _validator, address _receiver) external restricted {
+        require(validators[_validator].status == ValidatorStatus.ACTIVE, ValidatorNotActive(_validator));
 
         uint256 maticBalance = maticToken.balanceOf(address(this));
         if (maticBalance > 0) {
             polygonMigration.migrate(maticBalance);
+            emit MaticTokensCleaned(maticBalance);
         }
         uint256 polBalance = polToken.balanceOf(address(this));
         if (polBalance > 0) {
             if (_receiver == address(0)) {
                 _buySharesFromValidator(validators[_validator], polBalance);
+                emit POLTokensCleaned(_validator, address(0), polBalance, 0);
             } else {
                 uint256 mintedSPOL = buySPOL(polBalance, _validator);
                 sPOLToken.transfer(_receiver, mintedSPOL);
+                emit POLTokensCleaned(_validator, _receiver, polBalance, mintedSPOL);
             }
         }
+        _emitExchangeRateUpdate();
     }
 }

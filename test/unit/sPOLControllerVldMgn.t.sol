@@ -2,6 +2,8 @@
 pragma solidity ^0.8.0;
 
 import "forge-std/Test.sol";
+import "../mocks/MockPOLToken.sol";
+import "../mocks/MockValidatorShare.sol";
 import "../../src/sPOLController.sol";
 import "../../script/Deploy.s.sol";
 import "../../src/interfaces/IStakeManager.sol";
@@ -11,12 +13,10 @@ contract sPOLControllerVldMgnTest is Test, Deploy {
     sPOLController controller;
 
     // Test addresses
-    address testAdmin = makeAddr("testAdmin");
-    address testFeeReceiver = makeAddr("testFeeReceiver");
+    address testAdmin;
     address nonAdmin = makeAddr("nonAdmin");
-    address testStakeManager = makeAddr("testStakeManager");
-    address testValidatorShare1 = makeAddr("testValidatorShare1");
-    address testValidatorShare2 = makeAddr("testValidatorShare2");
+    address testValidatorShare1 = address(new MockValidatorShare());
+    address testValidatorShare2 = address(new MockValidatorShare());
 
     // Test validator IDs
     uint16 constant VALIDATOR_1 = 35;
@@ -30,18 +30,16 @@ contract sPOLControllerVldMgnTest is Test, Deploy {
     event ValidatorTargetShareChanged(uint16 validatorId, uint8 newTargetShare);
 
     function setUp() public {
-        // Deploy using the existing deploy script but with custom config
-        setCustomConfig(
-            makeAddr("polToken"),
-            makeAddr("maticToken"),
-            makeAddr("polygonMigration"),
-            testStakeManager,
-            testAdmin,
-            testFeeReceiver,
-            100, // 10% fee
-            10 // 10% max divergence
-        );
-        _deploy(address(this));
+        // Set mock values
+        loadMockConfig();
+
+        polTokenL1 = address(new MockPOLToken("POL", "POL"));
+
+        // Deploy contracts
+        deployContractsL1(address(this));
+
+        // Get config values
+        testAdmin = admin;
 
         controller = sPOLController(address(sPOLControllerProxy));
 
@@ -52,20 +50,20 @@ contract sPOLControllerVldMgnTest is Test, Deploy {
     function _setupDefaultMocks() internal {
         // Mock stakeManager.isValidator() calls
         vm.mockCall(
-            testStakeManager, abi.encodeWithSelector(IStakeManager.isValidator.selector, VALIDATOR_1), abi.encode(true)
+            stakeManager, abi.encodeWithSelector(IStakeManager.isValidator.selector, VALIDATOR_1), abi.encode(true)
         );
         vm.mockCall(
-            testStakeManager, abi.encodeWithSelector(IStakeManager.isValidator.selector, VALIDATOR_2), abi.encode(true)
+            stakeManager, abi.encodeWithSelector(IStakeManager.isValidator.selector, VALIDATOR_2), abi.encode(true)
         );
 
         // Mock stakeManager.getValidatorContract() calls
         vm.mockCall(
-            testStakeManager,
+            stakeManager,
             abi.encodeWithSelector(IStakeManager.getValidatorContract.selector, VALIDATOR_1),
             abi.encode(testValidatorShare1)
         );
         vm.mockCall(
-            testStakeManager,
+            stakeManager,
             abi.encodeWithSelector(IStakeManager.getValidatorContract.selector, VALIDATOR_2),
             abi.encode(testValidatorShare2)
         );
@@ -121,31 +119,31 @@ contract sPOLControllerVldMgnTest is Test, Deploy {
 
     function test_AddValidator_RevertsForNonAdmin() public {
         vm.prank(nonAdmin);
-        vm.expectRevert("ONLY_ADMIN");
+        vm.expectRevert(abi.encodeWithSignature("AccessManagedUnauthorized(address)", nonAdmin));
         controller.addValidator(VALIDATOR_1);
     }
 
     function test_AddValidator_RevertsForInactiveValidator() public {
         // Mock the validator as inactive
         vm.mockCall(
-            testStakeManager, abi.encodeWithSelector(IStakeManager.isValidator.selector, VALIDATOR_1), abi.encode(false)
+            stakeManager, abi.encodeWithSelector(IStakeManager.isValidator.selector, VALIDATOR_1), abi.encode(false)
         );
 
         vm.prank(testAdmin);
-        vm.expectRevert("NOT_ACTIVE_VALIDATOR");
+        vm.expectRevert(abi.encodeWithSelector(sPOLController.ValidatorNotActive.selector, VALIDATOR_1));
         controller.addValidator(VALIDATOR_1);
     }
 
     function test_AddValidator_RevertsForZeroContract() public {
         // Mock validator contract as zero address
         vm.mockCall(
-            testStakeManager,
+            stakeManager,
             abi.encodeWithSelector(IStakeManager.getValidatorContract.selector, VALIDATOR_1),
             abi.encode(address(0))
         );
 
         vm.prank(testAdmin);
-        vm.expectRevert("NO_DELEGATION");
+        vm.expectRevert(abi.encodeWithSelector(sPOLController.ValidatorNotDelegating.selector, VALIDATOR_1));
         controller.addValidator(VALIDATOR_1);
     }
 
@@ -179,7 +177,7 @@ contract sPOLControllerVldMgnTest is Test, Deploy {
         controller.addValidator(VALIDATOR_1);
 
         vm.prank(nonAdmin);
-        vm.expectRevert("ONLY_ADMIN");
+        vm.expectRevert(abi.encodeWithSignature("AccessManagedUnauthorized(address)", nonAdmin));
         controller.removeValidator(VALIDATOR_1);
     }
 
@@ -195,7 +193,7 @@ contract sPOLControllerVldMgnTest is Test, Deploy {
         );
 
         vm.prank(testAdmin);
-        vm.expectRevert("SHARES_PENDING");
+        vm.expectRevert(abi.encodeWithSelector(sPOLController.ValidatorSharesPending.selector, VALIDATOR_1, 100));
         controller.removeValidator(VALIDATOR_1);
     }
 
@@ -211,7 +209,26 @@ contract sPOLControllerVldMgnTest is Test, Deploy {
         );
 
         vm.prank(testAdmin);
-        vm.expectRevert("REWARDS_PENDING");
+        vm.expectRevert(abi.encodeWithSelector(sPOLController.ValidatorRewardsPending.selector, VALIDATOR_1, 50));
+        controller.removeValidator(VALIDATOR_1);
+    }
+
+    function test_RemoveValidator_RevertsWhenStillFunded() public {
+        vm.prank(testAdmin);
+        controller.addValidator(VALIDATOR_1);
+
+        // Mock validator share balance as non-zero
+        vm.mockCall(
+            testValidatorShare1,
+            abi.encodeWithSelector(IValidatorShare.balanceOf.selector, address(controller)),
+            abi.encode(100)
+        );
+
+        MockPOLToken(polTokenL1).approve(address(controller), 1);
+        controller.buySPOL(1);
+
+        vm.prank(testAdmin);
+        vm.expectRevert(abi.encodeWithSelector(sPOLController.ValidatorStillFunded.selector, VALIDATOR_1, 1));
         controller.removeValidator(VALIDATOR_1);
     }
 
@@ -239,7 +256,7 @@ contract sPOLControllerVldMgnTest is Test, Deploy {
         controller.addValidator(VALIDATOR_1);
 
         vm.prank(nonAdmin);
-        vm.expectRevert("ONLY_ADMIN");
+        vm.expectRevert(abi.encodeWithSignature("AccessManagedUnauthorized(address)", nonAdmin));
         controller.freezeValidator(VALIDATOR_1);
     }
 
@@ -258,7 +275,7 @@ contract sPOLControllerVldMgnTest is Test, Deploy {
 
         // Now try to freeze - should revert because share is not zero
         vm.prank(testAdmin);
-        vm.expectRevert("SHARE_NOT_ZERO");
+        vm.expectRevert(abi.encodeWithSelector(sPOLController.ValidatorDepositShareNotZero.selector, VALIDATOR_1, 100));
         controller.freezeValidator(VALIDATOR_1);
     }
 
@@ -293,7 +310,7 @@ contract sPOLControllerVldMgnTest is Test, Deploy {
         controller.freezeValidator(VALIDATOR_1);
 
         vm.prank(nonAdmin);
-        vm.expectRevert("ONLY_ADMIN");
+        vm.expectRevert(abi.encodeWithSignature("AccessManagedUnauthorized(address)", nonAdmin));
         controller.unfreezeValidator(VALIDATOR_1);
     }
 
@@ -354,7 +371,7 @@ contract sPOLControllerVldMgnTest is Test, Deploy {
         targetShares[0] = 100;
 
         vm.prank(nonAdmin);
-        vm.expectRevert("ONLY_ADMIN");
+        vm.expectRevert(abi.encodeWithSignature("AccessManagedUnauthorized(address)", nonAdmin));
         controller.updateValidatorTargetShare(validatorIds, targetShares);
     }
 
@@ -372,7 +389,7 @@ contract sPOLControllerVldMgnTest is Test, Deploy {
         targetShares[1] = 30; // Total = 90, not 100
 
         vm.prank(testAdmin);
-        vm.expectRevert("TOTAL_NOT_100");
+        vm.expectRevert(abi.encodeWithSelector(sPOLController.DepositSharesTotalNotOneHundred.selector, 90));
         controller.updateValidatorTargetShare(validatorIds, targetShares);
     }
 
@@ -391,7 +408,7 @@ contract sPOLControllerVldMgnTest is Test, Deploy {
 
     function test_ChangeMaxDivergence_RevertsForNonAdmin() public {
         vm.prank(nonAdmin);
-        vm.expectRevert("ONLY_ADMIN");
+        vm.expectRevert(abi.encodeWithSignature("AccessManagedUnauthorized(address)", nonAdmin));
         controller.changeMaxDivergence(25);
     }
 }

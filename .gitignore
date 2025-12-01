@@ -13,6 +13,8 @@ docs/
 # Dotenv file
 .env
 
+# Coverage
+lcov.info
 
 # Soldeer
 /dependencies

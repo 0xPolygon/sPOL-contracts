@@ -11,22 +11,18 @@ contract sPOLControllerConversionTest is Test, Deploy {
     sPOL token;
 
     // Test addresses
-    address testAdmin = makeAddr("testAdmin");
-    address testFeeReceiver = makeAddr("testFeeReceiver");
+    address testAdmin;
 
     function setUp() public {
-        // Deploy with minimal config just for conversion tests
-        setCustomConfig(
-            makeAddr("polToken"),
-            makeAddr("maticToken"),
-            makeAddr("polygonMigration"),
-            makeAddr("stakeManager"),
-            testAdmin,
-            testFeeReceiver,
-            100, // 10% fee
-            10 // 10% max divergence
-        );
-        _deploy(address(this));
+        // Set mock values
+        loadMockConfig();
+        // Custom config
+
+        // Deploy contracts
+        deployContractsL1(address(this));
+
+        // Get config values
+        testAdmin = admin;
 
         controller = sPOLController(address(sPOLControllerProxy));
         token = sPOL(address(sPOLProxy));
@@ -333,7 +329,7 @@ contract sPOLControllerConversionTest is Test, Deploy {
 
     function _setTotaldPOLBalance(uint256 amount) internal {
         // Set totaldPOLBalance storage slot 5
-        vm.store(address(controller), bytes32(uint256(5)), bytes32(amount));
+        vm.store(address(controller), bytes32(uint256(4)), bytes32(amount));
     }
 
     function _setsPOLTotalSupply(uint256 amount) internal {
@@ -343,6 +339,6 @@ contract sPOLControllerConversionTest is Test, Deploy {
 
     function _setFeedPOLBalance(uint256 amount) internal {
         // Set feedPOLBalance storage slot 7
-        vm.store(address(controller), bytes32(uint256(7)), bytes32(amount));
+        vm.store(address(controller), bytes32(uint256(6)), bytes32(amount));
     }
 }

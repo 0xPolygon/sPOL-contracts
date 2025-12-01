@@ -3,7 +3,8 @@ src = "src"
 out = "out"
 libs = ["lib", "dependencies"]
 optimizer = true
-fs_permissions = [{ access = "read", path = "script"}]
+fs_permissions = [{ access = "read-write", path = "script"},{ access = "read", path = "test"}]
+always_use_create_2_factory = true
 
 
 [lint]
@@ -11,7 +12,7 @@ lint_on_build= false
 
 
 [dependencies]
-forge-std = "1.10.0"
-"@openzeppelin-contracts" = "5.5.0-rc.0"
-"@openzeppelin-contracts-upgradeable" = "5.5.0-rc.0"
+forge-std = "1.11.0"
+"@openzeppelin-contracts" = "5.5.0"
+"@openzeppelin-contracts-upgradeable" = "5.5.0"
 

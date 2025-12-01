@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: UNLICENSED
-pragma solidity ^0.8.4;
+pragma solidity ^0.8.30;
 
 interface ValidatorShare {
     event Approval(address indexed owner, address indexed spender, uint256 value);
@@ -78,4 +78,7 @@ interface ValidatorShare {
     function withdrawRewards() external;
     function withdrawRewardsPOL() external;
     function withdrawShares() external view returns (uint256);
+    function restakeAndStakePOL(uint256 _amount) external returns (uint256, uint256);
+    function restakeAndUnstakePOL(uint256 _amount) external returns (uint256);
+    function restakeAndTransferFrom(address from, address to, uint256 value) external returns (bool, uint256);
 }

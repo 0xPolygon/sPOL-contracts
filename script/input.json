@@ -1,38 +1,50 @@
 {
-    "networks": {
-        "1": {
-            "name": "ethereum-mainnet",
-            "polToken": "0x455E53cb5e7c0EA88f72C2FA798dA996A0492a89",
-            "maticToken": "0x7D1AfA7B718fb893dB30A3aBc0Cfc608AaCfeBB0",
-            "polygonMigration": "0x29e7DF7b6A1B2b07b731457f499E1696c60E2C4e",
-            "stakeManager": "0x5e3Ef299fDDf15eAa0432E6e66473ace8c13D908",
-            "admin": "0x0000000000000000000000000000000000000001",
-            "feeReceiver": "0x0000000000000000000000000000000000000001",
-            "rewardFee": 100,
-            "maxDivergence": 10
-        },
-        "11155111": {
-            "name": "sepolia-testnet",
-            "polToken": "0x1234567890123456789012345678901234567890",
-            "maticToken": "0x2345678901234567890123456789012345678901",
-            "polygonMigration": "0x3456789012345678901234567890123456789012",
-            "stakeManager": "0x4567890123456789012345678901234567890123",
-            "admin": "0x0000000000000000000000000000000000000001",
-            "feeReceiver": "0x0000000000000000000000000000000000000001",
-            "rewardFee": 100,
-            "maxDivergence": 10
-        },
-        "31337": {
-            "name": "localhost-anvil",
-            "polToken": "0x1111111111111111111111111111111111111111",
-            "maticToken": "0x2222222222222222222222222222222222222222",
-            "polygonMigration": "0x3333333333333333333333333333333333333333",
-            "stakeManager": "0x4444444444444444444444444444444444444444",
-            "admin": "0x5555555555555555555555555555555555555555",
-            "feeReceiver": "0x6666666666666666666666666666666666666666",
-            "rewardFee": 100,
-            "maxDivergence": 10
-        }
+    "sepolia-amoy": {
+        "scenarioName": "sepolia-amoy",
+        "chainIdL1": 11155111,
+        "chainIdL2": 80002,
+        "polTokenL1": "0x44499312f493F62f2DFd3C6435Ca3603EbFCeeBa",
+        "polTokenL2": "0x0000000000000000000000000000000000001010",
+        "maticTokenL1": "0x3fd0A53F4Bf853985a95F4Eb3F9C9FDE1F8e2b53",
+        "polygonMigration": "0x3A3B750E7d4d389Bc1d0be20E5D09530F82B9911",
+        "stakeManager": "0x4AE8f648B1Ec892B6cc68C89cc088583964d08bE",
+        "admin": "0xE5676E2B1a0189F00A24bC18785bDcBFf1F21d9d",
+        "feeReceiver": "0xE5676E2B1a0189F00A24bC18785bDcBFf1F21d9d",
+        "rewardFee": 100,
+        "maxDivergence": 10,
+        "childTargetQuickRedeemReserve": "1000000000000000000000000",
+        "withdrawManager": "0x822db7e79096E7247d9273E5782ecAec464Eb96C",
+        "erc20predicate": "0x15EA6c538cF4b4A4f51999F433557285D5639820",
+        "childChainManager": "0xb991E39a401136348Dee93C75143B159FabF483f",
+        "rootChainManager": "0x34F5A25B627f50Bb3f5cAb72807c4D4F405a9232",
+        "rcmERC20Predicate": "0x4258C75b752c812B7Fa586bdeb259f2d4bd17f4F",
+        "depositManager": "0x44Ad17990F9128C6d823Ee10dB7F0A5d40a731A4",
+        "stateSenderL1": "0x49E307Fa5a58ff1834E0F8a60eB2a9609E6A5F50",
+        "stateSyncerL2": "0x0000000000000000000000000000000000001001",
+        "checkpointManager": "0xbd07D7E1E93c8d4b2a261327F3C28a8EA7167209"
     },
-    "defaultNetwork": "31337"
+    "ethereum-polygon": {
+        "scenarioName": "ethereum-polygon",
+        "chainIdL1": 1,
+        "chainIdL2": 137,
+        "polTokenL1": "0x455e53CBB86018Ac2B8092FdCd39d8444aFFC3F6",
+        "polTokenL2": "0x0000000000000000000000000000000000001010",
+        "maticTokenL1": "0x7D1AfA7B718fb893dB30A3aBc0Cfc608AaCfeBB0",
+        "polygonMigration": "0x29e7DF7b6A1B2b07b731457f499E1696c60E2C4e",
+        "stakeManager": "0x5e3Ef299fDDf15eAa0432E6e66473ace8c13D908",
+        "admin": "0xE5676E2B1a0189F00A24bC18785bDcBFf1F21d9d",
+        "feeReceiver": "0xE5676E2B1a0189F00A24bC18785bDcBFf1F21d9d",
+        "rewardFee": 100,
+        "maxDivergence": 10,
+        "childTargetQuickRedeemReserve": "1000000000000000000000000",
+        "withdrawManager": "0x2A88696e0fFA76bAA1338F2C74497cC013495922",
+        "erc20predicate": "0x626fb210bf50e201ED62cA2705c16DE2a53DC966",
+        "childChainManager": "0xA6FA4fB5f76172d178d61B04b0ecd319C5d1C0aa",
+        "rootChainManager": "0xA0c68C638235ee32657e8f720a23ceC1bFc77C77",
+        "rcmERC20Predicate": "0x40ec5B33f54e0E8A33A975908C5BA1c14e5BbbDf",
+        "depositManager": "0x401F6c983eA34274ec46f84D70b31C151321188b",
+        "stateSenderL1": "0x28e4F3a7f651294B9564800b2D01f35189A5bFbE",
+        "stateSyncerL2": "0x0000000000000000000000000000000000001001",
+        "checkpointManager": "0x86E4Dc95c7FBdBf52e33D563BbDB00823894C287"
+    }
 }

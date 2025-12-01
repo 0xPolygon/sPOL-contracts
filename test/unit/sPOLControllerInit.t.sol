@@ -21,17 +21,21 @@ contract sPOLControllerInitTest is Test {
     address testPolygonMigration = makeAddr("testPolygonMigration");
     address testStakeManager = makeAddr("testStakeManager");
     address testSPOLToken = makeAddr("testSPOLToken");
+    address testMessenger = makeAddr("testMessenger");
     uint8 testMaxDivergence = 20;
 
     function setUp() public {
-        controllerImpl =
-            new sPOLController(testPolToken, testMaticToken, testPolygonMigration, testSPOLToken, testStakeManager);
+        vm.etch(testPolToken, type(DummyImpl).runtimeCode);
+        controllerImpl = new sPOLController(
+            testPolToken, testMaticToken, testPolygonMigration, testSPOLToken, testStakeManager, testMessenger
+        );
     }
 
     function test_Constructor_SetsImmutableVariables() public {
         // Deploy a new implementation to test constructor directly
-        sPOLController testController =
-            new sPOLController(testPolToken, testMaticToken, testPolygonMigration, testSPOLToken, testStakeManager);
+        sPOLController testController = new sPOLController(
+            testPolToken, testMaticToken, testPolygonMigration, testSPOLToken, testStakeManager, testMessenger
+        );
 
         // Verify immutable variables are set correctly
         assertEq(address(testController.polToken()), testPolToken, "POL token not set correctly");
@@ -55,7 +59,7 @@ contract sPOLControllerInitTest is Test {
         assertEq(controller.rewardFee(), testRewardFee, "Reward fee not set correctly");
         assertEq(controller.feeReceiver(), testFeeReceiver, "Fee receiver not set correctly");
         assertEq(controller.maxDivergence(), testMaxDivergence, "Max divergence not set correctly");
-        assertEq(controller.admin(), testAdmin, "Admin not set correctly");
+        assertEq(controller.authority(), testAdmin, "Admin not set correctly");
     }
 
     function test_Initialize_WithZeroFee() public {
@@ -76,7 +80,7 @@ contract sPOLControllerInitTest is Test {
             sPOLController.initialize.selector, 1001, testFeeReceiver, testMaxDivergence, testAdmin
         );
 
-        vm.expectRevert("FEE_TOO_LARGE");
+        vm.expectRevert(abi.encodeWithSelector(sPOLController.FeeTooLarge.selector, 1001, 1000));
         controller =
             sPOLController(address(new TransparentUpgradeableProxy(address(controllerImpl), address(this), data)));
     }
