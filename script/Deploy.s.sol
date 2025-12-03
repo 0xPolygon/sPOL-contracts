@@ -81,33 +81,36 @@ contract Deploy is Script, ConfigLoader {
     }
 
     function deployContractsL1(address _deployer) public {
-        address dummyImplL1 = address(new DummyImpl{salt: "dummy-impl"}());
+        dummyImplL1 = address(new DummyImpl{salt: getSalt("dummy-impl")}());
 
-        accessManagerL1 = new AccessManager{salt: "polygon-access-manager"}(_deployer);
+        accessManagerL1 = new AccessManager{salt: getSalt("polygon-access-manager")}(_deployer);
 
-        polBridger = new PolBridger{salt: "pol-bridger"}(
+        polBridger = new PolBridger{salt: getSalt("pol-bridger")}(
             polTokenL1, polTokenL2, chainIdL1, chainIdL2, erc20predicate, withdrawManager, address(accessManagerL1)
         );
 
-        sPOLControllerProxy =
-            new TransparentUpgradeableProxy{salt: "spol-controller-proxy"}(dummyImplL1, address(accessManagerL1), "");
+        sPOLControllerProxy = new TransparentUpgradeableProxy{salt: getSalt("spol-controller-proxy")}(
+            dummyImplL1, address(accessManagerL1), ""
+        );
         sPOLControllerproxyAdmin = getProxyAdmin(sPOLControllerProxy);
 
-        sPOLProxy = new TransparentUpgradeableProxy{salt: "spol-proxy"}(dummyImplL1, address(accessManagerL1), "");
+        sPOLProxy =
+            new TransparentUpgradeableProxy{salt: getSalt("spol-proxy")}(dummyImplL1, address(accessManagerL1), "");
         sPOLproxyAdmin = getProxyAdmin(sPOLProxy);
 
-        sPOLMessengerProxy =
-            new TransparentUpgradeableProxy{salt: "spol-messenger-proxy"}(dummyImplL1, address(accessManagerL1), "");
+        sPOLMessengerProxy = new TransparentUpgradeableProxy{salt: getSalt("spol-messenger-proxy")}(
+            dummyImplL1, address(accessManagerL1), ""
+        );
         sPOLMessengerproxyAdmin = getProxyAdmin(sPOLMessengerProxy);
 
-        sPOLControllerImpl = new sPOLController{salt: "spol-controller-impl"}(
+        sPOLControllerImpl = new sPOLController{salt: getSalt("spol-controller-impl")}(
             polTokenL1, maticTokenL1, polygonMigration, address(sPOLProxy), stakeManager, address(sPOLMessengerProxy)
         );
 
-        sPOLImpl = new sPOL{salt: "spol-impl"}(address(sPOLControllerProxy));
+        sPOLImpl = new sPOL{salt: getSalt("spol-impl")}(address(sPOLControllerProxy));
 
         precalcedsPOLChildProxyAddress = precalcsPOLChildProxyAddress();
-        sPOLMessengerImpl = new sPOLMessenger{salt: "Testnet-spol-messenger-impl"}(
+        sPOLMessengerImpl = new sPOLMessenger{salt: getSalt("spol-messenger-impl")}(
             polTokenL1,
             address(sPOLProxy),
             address(sPOLControllerProxy),
@@ -123,16 +126,17 @@ contract Deploy is Script, ConfigLoader {
     }
 
     function deployContractsL2(address _deployer) public {
-        address dummyImplL2 = address(new DummyImpl{salt: "dummy-impl"}());
+        dummyImplL2 = address(new DummyImpl{salt: getSalt("dummy-impl")}());
 
-        accessManagerL2 = new AccessManager{salt: "polygon-access-manager"}(_deployer);
+        accessManagerL2 = new AccessManager{salt: getSalt("polygon-access-manager")}(_deployer);
 
-        polBridger = new PolBridger{salt: "pol-bridger"}(
+        polBridger = new PolBridger{salt: getSalt("pol-bridger")}(
             polTokenL1, polTokenL2, chainIdL1, chainIdL2, erc20predicate, withdrawManager, address(accessManagerL2)
         );
-        sPOLChildImpl = new sPOLChild{salt: "spol-child-impl"}(stateSyncerL2);
-        sPOLChildProxy =
-            new TransparentUpgradeableProxy{salt: "spol-child-proxy"}(dummyImplL2, address(accessManagerL2), "");
+        sPOLChildImpl = new sPOLChild{salt: getSalt("spol-child-impl")}(stateSyncerL2);
+        sPOLChildProxy = new TransparentUpgradeableProxy{salt: getSalt("spol-child-proxy")}(
+            dummyImplL2, address(accessManagerL2), ""
+        );
         sPOLChildproxyAdmin = getProxyAdmin(sPOLChildProxy);
 
         _configureDeploymentL2(_deployer);
@@ -311,7 +315,7 @@ contract Deploy is Script, ConfigLoader {
             revert("Access manager not deployed");
         }
         return vm.computeCreate2Address(
-            "Testnet-spol-child-proxy",
+            getSalt("spol-child-proxy"),
             keccak256(
                 abi.encodePacked(
                     type(TransparentUpgradeableProxy).creationCode,
@@ -319,5 +323,9 @@ contract Deploy is Script, ConfigLoader {
                 )
             )
         );
+    }
+
+    function getSalt(string memory _name) public view returns (bytes32) {
+        return bytes32(bytes(string.concat(string(saltPrefix), _name)));
     }
 }

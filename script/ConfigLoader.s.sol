@@ -7,6 +7,7 @@ import {DummyImpl} from "./DummyImpl.sol";
 contract ConfigLoader is Script {
     // Network configuration variables
     string public scenarioName;
+    string public saltPrefix;
     uint256 public chainIdL1;
     uint256 public chainIdL2;
     address public polTokenL1;
@@ -31,6 +32,7 @@ contract ConfigLoader is Script {
 
     function loadMockConfig() public {
         scenarioName = "mock-scenario";
+        saltPrefix = "Mock-";
         polTokenL1 = makeAddr("polTokenL1");
         vm.etch(polTokenL1, type(DummyImpl).runtimeCode);
         //deployCodeTo("out/ERC20Permit.sol/ERC20Permit.json", abi.encode("POL Token L1", "POL L1", 18, 0), polTokenL1);
@@ -76,6 +78,7 @@ contract ConfigLoader is Script {
         polTokenL2 = vm.parseJsonAddress(json, string.concat(scenarioName, ".polTokenL2"));
         chainIdL1 = vm.parseJsonUint(json, string.concat(scenarioName, ".chainIdL1"));
         chainIdL2 = vm.parseJsonUint(json, string.concat(scenarioName, ".chainIdL2"));
+        saltPrefix = vm.parseJsonString(json, string.concat(scenarioName, ".saltPrefix"));
 
         maticTokenL1 = vm.parseJsonAddress(json, string.concat(scenarioName, ".maticTokenL1"));
         polygonMigration = vm.parseJsonAddress(json, string.concat(scenarioName, ".polygonMigration"));
@@ -102,6 +105,7 @@ contract ConfigLoader is Script {
 
     function validateConfig() public view {
         require(bytes(scenarioName).length != 0, "Scenario name is empty");
+        require(bytes(saltPrefix).length != 0, "Salt prefix is empty");
         require(polTokenL1 != address(0), "POL Token L1 address is zero");
         require(polTokenL2 != address(0), "POL Token L2 address is zero");
         require(maticTokenL1 != address(0), "MATIC Token address is zero");
