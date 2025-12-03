@@ -40,6 +40,8 @@ contract Deploy is Script, ConfigLoader {
     PolBridger public polBridger;
 
     address precalcedsPOLChildProxyAddress;
+    address dummyImplL1;
+    address dummyImplL2;
 
     function run(string memory _scenarioName) public {
         uint256 pk = vm.envUint("DEPLOYER_PRIVATE_KEY");
@@ -104,16 +106,8 @@ contract Deploy is Script, ConfigLoader {
 
         sPOLImpl = new sPOL{salt: "spol-impl"}(address(sPOLControllerProxy));
 
-        precalcedsPOLChildProxyAddress = vm.computeCreate2Address(
-            "spol-child-proxy",
-            keccak256(
-                abi.encodePacked(
-                    type(TransparentUpgradeableProxy).creationCode,
-                    abi.encode(dummyImplL1, address(accessManagerL1), "")
-                )
-            )
-        );
-        sPOLMessengerImpl = new sPOLMessenger{salt: "spol-messenger-impl"}(
+        precalcedsPOLChildProxyAddress = precalcsPOLChildProxyAddress();
+        sPOLMessengerImpl = new sPOLMessenger{salt: "Testnet-spol-messenger-impl"}(
             polTokenL1,
             address(sPOLProxy),
             address(sPOLControllerProxy),
@@ -271,6 +265,7 @@ contract Deploy is Script, ConfigLoader {
         sPOLChild child = sPOLChild(address(sPOLChildProxy));
 
         // Verify sPOLChild
+        require(address(child) == precalcsPOLChildProxyAddress(), "sPOLChild proxy address incorrect");
         require(child.stateSyncer() == stateSyncerL2, "sPOLChild state syncer incorrect");
         require(address(child.bridgeHelper()) == address(polBridger), "sPOLChild bridger incorrect");
         require(child.authority() == address(accessManagerL2), "sPOLChild admin incorrect");
@@ -282,6 +277,11 @@ contract Deploy is Script, ConfigLoader {
             "sPOLChild implementation address incorrect"
         );
         require(getProxyAdmin(sPOLChildProxy).owner() == address(accessManagerL2), "sPOLChild ProxyAdmin wrong owner");
+        // If L1 was deployed then addresses should match
+        if (address(accessManagerL1) != address(0)) {
+            require(address(accessManagerL1) == address(accessManagerL2), "Access managers should be same");
+            require(address(dummyImplL1) == address(dummyImplL2), "Access managers should be same");
+        }
         console.log("All verifications passed for L2!");
     }
 
@@ -292,6 +292,30 @@ contract Deploy is Script, ConfigLoader {
                     uint256(
                         vm.load(address(proxy), hex"b53127684a568b3173ae13b9f8a6016e243e63b6e8ee1178d6a717850b5d6103")
                     )
+                )
+            )
+        );
+    }
+
+    function precalcsPOLChildProxyAddress() public view returns (address) {
+        address accessManagerAddress;
+        address dummyImplAddress;
+        // in this case L1 was deployed
+        if (address(accessManagerL1) != address(0)) {
+            accessManagerAddress = address(accessManagerL1);
+            dummyImplAddress = address(dummyImplL1);
+        } else if (address(accessManagerL2) != address(0)) {
+            accessManagerAddress = address(accessManagerL2);
+            dummyImplAddress = address(dummyImplL2);
+        } else {
+            revert("Access manager not deployed");
+        }
+        return vm.computeCreate2Address(
+            "Testnet-spol-child-proxy",
+            keccak256(
+                abi.encodePacked(
+                    type(TransparentUpgradeableProxy).creationCode,
+                    abi.encode(dummyImplAddress, address(accessManagerAddress), "")
                 )
             )
         );
