@@ -4,6 +4,7 @@ contract MockValidatorShare {
     constructor() {}
 
     mapping(address => uint256) public unbondNonces;
+    uint256 reward;
 
     function buyVoucher(
         uint256 a,
@@ -16,16 +17,22 @@ contract MockValidatorShare {
         return a;
     }
 
-    function restakePOL() public pure returns (uint256, uint256) {
-        return (0, 0);
+    function restakePOL() public returns (uint256, uint256) {
+        uint256 currentReward = reward;
+        reward = 0;
+        return (currentReward, currentReward);
     }
 
-    function restakeAndStakePOL(uint256 a) public pure returns (uint256, uint256) {
-        return (a, 0);
+    function restakeAndStakePOL(uint256 a) public returns (uint256, uint256) {
+        uint256 currentReward = reward;
+        reward = 0;
+        return (a + currentReward, currentReward);
     }
 
-    function restakeAndUnstakePOL(uint256 a) public pure returns (uint256) {
-        return (0);
+    function restakeAndUnstakePOL(uint256 a) public returns (uint256) {
+        uint256 currentReward = reward;
+        reward = 0;
+        return (currentReward);
     }
 
     function sellVoucher_newPOL(
@@ -36,6 +43,10 @@ contract MockValidatorShare {
         public
     {
         unbondNonces[msg.sender]++;
+    }
+
+    function addReward(uint256 _reward) public {
+        reward += _reward;
     }
 }
 

@@ -455,11 +455,12 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
 
     function _buySharesFromValidator(ValidatorInfo storage _validator, uint256 _amount) internal returns (uint256) {
         (uint256 amountDeposited, uint256 liquidReward) = _validator.validatorContract.restakeAndStakePOL(_amount);
-        require(amountDeposited == _amount, IncorrectValidatorShareExchangeRate(_amount, amountDeposited));
+        uint256 userDeposit = amountDeposited - liquidReward;
+        require(userDeposit == _amount, IncorrectValidatorShareExchangeRate(_amount, userDeposit));
         _adddPOLBalanceFee(liquidReward);
-        _adddPOLBalance(amountDeposited);
-        validators[_validator.index].totalStaked += amountDeposited + liquidReward;
-        return amountDeposited;
+        _adddPOLBalance(userDeposit);
+        validators[_validator.index].totalStaked += amountDeposited;
+        return userDeposit;
     }
 
     ///////////////////////////////

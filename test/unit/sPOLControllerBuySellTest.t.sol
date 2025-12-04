@@ -250,5 +250,42 @@ contract sPOLControllerBuySellTest is Test, Deploy {
         assertEq(controller.totaldPOLBalance(), 0, "Total dPOL balance should be 0");
         assertEq(controller.totalsPOLBalance(), 0, "Total sPOL balance should be 0");
     }
+
+    function test_buySharesFromValidatorBug_LiquidRewardsIncludedInAmountDeposited() public {
+        uint256 stakeAmount = 2 ether;
+        uint256 liquidRewards = 0.01 ether;
+
+        controller.buySPOL(50 ether);
+
+        MockValidatorShare(testValidatorShare1).addReward(liquidRewards);
+
+        uint256 dPOLBalanceBefore = controller.totaldPOLBalance();
+        uint256 feedPOLBalanceBefore = controller.feedPOLBalance();
+
+        controller.buySPOL(stakeAmount);
+
+        assertEq(controller.totaldPOLBalance(), dPOLBalanceBefore + stakeAmount + liquidRewards);
+        assertEq(controller.feedPOLBalance(), (feedPOLBalanceBefore + (liquidRewards * controller.rewardFee() / 1000)));
+    }
+
+    function test_buySharesFromValidatorBug_LiquidRewardsIncludedInAmountDeposited_twoVal() public {
+        uint256 stakeAmount = 500 ether;
+        uint256 liquidRewards = 0.01 ether;
+
+        controller.buySPOL(50 ether);
+
+        MockValidatorShare(testValidatorShare1).addReward(liquidRewards);
+        MockValidatorShare(testValidatorShare2).addReward(liquidRewards);
+
+        uint256 dPOLBalanceBefore = controller.totaldPOLBalance();
+        uint256 feedPOLBalanceBefore = controller.feedPOLBalance();
+
+        controller.buySPOL(stakeAmount);
+
+        assertEq(controller.totaldPOLBalance(), dPOLBalanceBefore + stakeAmount + 2 * liquidRewards);
+        assertEq(
+            controller.feedPOLBalance(), (feedPOLBalanceBefore + (liquidRewards * 2 * controller.rewardFee() / 1000))
+        );
+    }
 }
 
