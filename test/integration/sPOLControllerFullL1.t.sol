@@ -629,4 +629,65 @@ contract sPOLControllerFullL1Test is Test, Deploy {
             "controller should have increased dPOL balance from rewards"
         );
     }
+
+    function test_multipleWithdrawNonces_ArrayManipulation() public {
+        vm.selectFork(networkL1);
+        deal(polTokenL1, user1, 10000 ether);
+        vm.prank(user1);
+        IERC20(polTokenL1).approve(address(controller), type(uint256).max);
+
+        vm.prank(testAdmin);
+        controller.addValidator(validator1ID);
+        uint16[] memory validatorIDs = new uint16[](1);
+        validatorIDs[0] = validator1ID;
+        uint8[] memory shares = new uint8[](1);
+        shares[0] = 100;
+        vm.prank(testAdmin);
+        controller.updateValidatorTargetShare(validatorIDs, shares);
+
+        vm.prank(user1);
+        controller.buySPOL(4000 ether);
+
+        // Create 2 early withdrawal nonces
+        vm.prank(user1);
+        uint256 nonce0 = controller.sellSPOL(500 ether, validator1ID);
+        vm.prank(user1);
+        uint256 nonce1 = controller.sellSPOL(500 ether, validator1ID);
+
+        // advance epoch
+        vm.startPrank(IStakeManager(stakeManager).governance());
+        IStakeManager(stakeManager).setCurrentEpoch(IStakeManager(stakeManager).currentEpoch() + 40);
+        vm.stopPrank();
+
+        // 2 more later withdrawal nonces
+        vm.prank(user1);
+        uint256 nonce2 = controller.sellSPOL(500 ether, validator1ID);
+        vm.prank(user1);
+        uint256 nonce3 = controller.sellSPOL(500 ether, validator1ID);
+
+        assertEq(nonce0, controller.userNonces(user1, 0), "nonce0 mismatch");
+        assertEq(nonce1, controller.userNonces(user1, 1), "nonce1 mismatch");
+        assertEq(nonce2, controller.userNonces(user1, 2), "nonce2 mismatch");
+        assertEq(nonce3, controller.userNonces(user1, 3), "nonce3 mismatch");
+
+        // advance epoch so two are ready
+        vm.startPrank(IStakeManager(stakeManager).governance());
+        IStakeManager(stakeManager).setCurrentEpoch(IStakeManager(stakeManager).currentEpoch() + 60);
+        vm.stopPrank();
+
+        // Call withdrawPOL, this will process the ready nonces (0,1)
+        vm.prank(user1);
+        controller.withdrawPOL();
+
+        // remaining nonces
+        uint256 rnonce0 = controller.userNonces(user1, 0);
+        uint256 rnonce1 = controller.userNonces(user1, 1);
+
+        // no third nonce remaining
+        vm.expectRevert();
+        controller.userNonces(user1, 2);
+
+        assertEq(rnonce0, nonce2, "remaining nonce not the expected nonce2");
+        assertEq(rnonce1, nonce3, "remaining nonce not the expected nonce3");
+    }
 }
