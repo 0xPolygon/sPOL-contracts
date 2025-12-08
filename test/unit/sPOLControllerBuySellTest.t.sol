@@ -131,7 +131,6 @@ contract sPOLControllerBuySellTest is Test, Deploy {
         controller.buySPOL(1e18);
         controller.buySPOL(1, VALIDATOR_1);
 
-        assertEq(controller.lastSuccessfulBuyValidator(), VALIDATOR_1, "lastSuccessfulBuyValidator should be 1");
         assertEq(controller.totaldPOLBalance(), 1e18 + 1, "Total dPOL balance should be 1");
         assertEq(controller.totalsPOLBalance(), 1e18 + 1, "Total POL balance should be 1");
         assertEq(sPOLToken.balanceOf(address(this)), 1e18 + 1, "Balance should be 1");
@@ -142,7 +141,6 @@ contract sPOLControllerBuySellTest is Test, Deploy {
 
         assertEq(sPOLToken.balanceOf(address(this)), 1e18, "Balance should be 1");
         // should have selected #2. Both have 0 balance, but as it was addded last
-        assertEq(controller.lastSuccessfulBuyValidator(), VALIDATOR_2, "Last successful buy validator should be 2");
         assertEq(controller.totaldPOLBalance(), 1e18, "Total dPOL balance should be 1");
         assertEq(controller.totalsPOLBalance(), 1e18, "Total POL balance should be 1");
     }
@@ -153,7 +151,6 @@ contract sPOLControllerBuySellTest is Test, Deploy {
 
         assertEq(controller.feedPOLBalance(), 0, "Feed POL balance should be 0");
 
-        assertEq(controller.lastSuccessfulBuyValidator(), VALIDATOR_2, "Last successful buy validator should be 2");
         assertEq(controller.totaldPOLBalance(), 2e18, "Total dPOL balance should be 2");
         assertEq(controller.totalsPOLBalance(), 2e18, "Total POL balance should be 2");
         assertEq(sPOLToken.balanceOf(address(this)), 2e18, "Balance should be 2");

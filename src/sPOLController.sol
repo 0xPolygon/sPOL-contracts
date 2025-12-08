@@ -42,8 +42,8 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     mapping(uint16 => ValidatorInfo) public validators;
     uint16[] public validatorList;
     uint16[] public activeValidators;
-    uint16 public lastSuccessfulBuyValidator;
-    uint16 public lastSuccessfulSellValidator;
+
+    uint32 spacer; //formerly lastSuccessfulBuyValidator and lastSuccessfulSellValidator
     // in percentage points
     uint8 public maxDivergence;
 
@@ -213,12 +213,6 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
             if (activeValidators[i] == _validator) {
                 activeValidators[i] = activeValidators[activeValidators.length - 1];
                 activeValidators.pop();
-                if (lastSuccessfulBuyValidator >= i) {
-                    lastSuccessfulBuyValidator = 0;
-                }
-                if (lastSuccessfulSellValidator >= i) {
-                    lastSuccessfulSellValidator = 0;
-                }
                 break;
             }
         }
@@ -405,7 +399,6 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
 
         uint256 actualShares = _buySharesFromValidator(validator, _amount);
         require(actualShares == _amount, BuySharesMismatch(_amount, actualShares));
-        lastSuccessfulBuyValidator = _validator;
         _mintSPOL(_user, _amount, toMint);
         _emitExchangeRateUpdate();
         return toMint;
@@ -419,7 +412,6 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         for (uint256 i = 0; i < amount.length; i++) {
             totalShares += _buySharesFromValidator(validators[validator[i]], amount[i]);
         }
-        lastSuccessfulBuyValidator = validator[validator.length - 1];
         require(totalShares == _amount, BuySharesMismatch(_amount, totalShares));
         _mintSPOL(_user, _amount, toMint);
         _emitExchangeRateUpdate();
@@ -447,7 +439,6 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
             }
             _migrateValidator(_validatorOfDPOL, validator[i], amount[i], false);
         }
-        lastSuccessfulBuyValidator = validator[validator.length - 1];
         _mintSPOL(_user, _amount, sPOLToMint);
         _emitExchangeRateUpdate();
         return sPOLToMint;
@@ -698,8 +689,7 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         uint256 remainingAmount = _amount;
 
         for (uint256 i = 0; i < activeValidators.length; i++) {
-            ValidatorInfo storage validator =
-                validators[activeValidators[(lastSuccessfulBuyValidator + i) % activeValidators.length]];
+            ValidatorInfo storage validator = validators[activeValidators[i]];
 
             uint256 maxAmount = _validatorMaxTotalStakeDistance(validator, _buy);
             if (_amount <= maxAmount) {
@@ -807,7 +797,6 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         for (uint256 i = 0; i < amount.length; i++) {
             totalShares += _buySharesFromValidator(validators[validator[i]], amount[i]);
         }
-        lastSuccessfulBuyValidator = validator[validator.length - 1];
         require(totalShares == _amountPOL, BuySharesMismatch(_amountPOL, totalShares));
         sPOLToken.mint(msg.sender, _amountSPOL);
         emit sPOLMigrated(msg.sender, _amountPOL, _amountSPOL);
