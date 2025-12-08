@@ -858,10 +858,10 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     ) internal {
         ERC20Permit token = ERC20Permit(_token);
         uint256 nonceBefore = token.nonces(_user);
-        if (address(_token) == address(sPOLToken)) {
+        if (_token == address(sPOLToken)) {
             sPOLToken.consumePermit(_user, address(this), _amount, _deadline, _v, _r, _s);
         } else {
-            polToken.permit(_user, address(this), _amount, _deadline, _v, _r, _s);
+            ERC20Permit(_token).permit(_user, address(this), _amount, _deadline, _v, _r, _s);
         }
         require(token.nonces(_user) == nonceBefore + 1, InvalidPermit());
     }

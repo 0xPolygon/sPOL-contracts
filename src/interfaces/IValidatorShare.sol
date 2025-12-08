@@ -81,4 +81,5 @@ interface ValidatorShare {
     function restakeAndStakePOL(uint256 _amount) external returns (uint256, uint256);
     function restakeAndUnstakePOL(uint256 _amount) external returns (uint256);
     function restakeAndTransferFrom(address from, address to, uint256 value) external returns (bool, uint256);
+    function _cacheDomainSeparatorV4() external;
 }
