@@ -924,6 +924,7 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
 
         uint256 maticBalance = maticToken.balanceOf(address(this));
         if (maticBalance > 0) {
+            maticToken.approve(address(polygonMigration), maticBalance);
             polygonMigration.migrate(maticBalance);
             emit MaticTokensCleaned(maticBalance);
         }
