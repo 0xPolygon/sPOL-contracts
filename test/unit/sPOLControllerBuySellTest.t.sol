@@ -248,6 +248,28 @@ contract sPOLControllerBuySellTest is Test, Deploy {
         assertEq(controller.totalsPOLBalance(), 0, "Total sPOL balance should be 0");
     }
 
+    function test_sellSPOL_withdrawNonce_no_zero() public {
+        assertEq(controller.globalWithdrawNonce(), 1, "Global withdraw nonce should be 0");
+        uint256 amount = 1e18;
+        controller.buySPOL(amount);
+        assertEq(controller.totalsPOLBalance(), amount, "Total sPOL balance should be amount");
+
+        controller.sellSPOL(amount);
+        assertEq(1, controller.userNonces(address(this), 0), "First nonce should be 1");
+    }
+
+    function test_sellSPOL_withdrawNonce_increases() public {
+        assertEq(controller.globalWithdrawNonce(), 1, "Global withdraw nonce should be 0");
+        uint256 amount = 1e18;
+        controller.buySPOL(amount * 2);
+        assertEq(controller.totalsPOLBalance(), amount * 2, "Total sPOL balance should be amount");
+
+        controller.sellSPOL(amount);
+        assertEq(1, controller.userNonces(address(this), 0), "First nonce should be 1");
+        controller.sellSPOL(amount);
+        assertEq(2, controller.userNonces(address(this), 1), "Second nonce should be 2");
+    }
+
     function test_buySharesFromValidatorBug_LiquidRewardsIncludedInAmountDeposited() public {
         uint256 stakeAmount = 2 ether;
         uint256 liquidRewards = 0.01 ether;
