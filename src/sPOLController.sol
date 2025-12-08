@@ -91,10 +91,11 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     event MaxDivergenceChanged(uint8 oldDivergence, uint8 newDivergence);
     // Cleanup events
     event MaticTokensCleaned(uint256 maticAmount);
-    event POLTokensCleaned(uint16 validatorId, address receiver, uint256 polAmount, uint256 sPOLMinted);
+    event POLTokensCleaned(uint16 validatorId, uint256 polAmount);
 
     error AddressUnauthorized(address caller);
     error AmountTooLarge(uint256 amount, uint256 maxAmount);
+    error AmountZero();
     error ArrayLengthMismatch(uint256 validatorLength, uint256 shareLength);
     error BadExchangeRate(uint256 polProvided, uint256 sPOLProvided, uint256 polCurrent, uint256 sPOLCurrent);
     error BuySharesMismatch(uint256 expected, uint256 actual);
@@ -919,8 +920,10 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     ///  Other                  ///
     ///////////////////////////////
 
-    function cleanUpMaticPOL(uint16 _validator, address _receiver) external restricted {
-        require(validators[_validator].status == ValidatorStatus.ACTIVE, ValidatorNotActive(_validator));
+    /// Use responsibly, don't overfund vals except when needed, don't use when clean amount is large, but dPOL stake small
+    function cleanUpMaticPOL(uint16 _validator) external restricted {
+        ValidatorInfo storage validator = validators[_validator];
+        require(validator.status == ValidatorStatus.ACTIVE, ValidatorNotActive(_validator));
 
         uint256 maticBalance = maticToken.balanceOf(address(this));
         if (maticBalance > 0) {
@@ -929,16 +932,15 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
             emit MaticTokensCleaned(maticBalance);
         }
         uint256 polBalance = polToken.balanceOf(address(this));
-        if (polBalance > 0) {
-            if (_receiver == address(0)) {
-                _buySharesFromValidator(validators[_validator], polBalance);
-                emit POLTokensCleaned(_validator, address(0), polBalance, 0);
-            } else {
-                uint256 mintedSPOL = buySPOL(polBalance, _validator);
-                sPOLToken.transfer(_receiver, mintedSPOL);
-                emit POLTokensCleaned(_validator, _receiver, polBalance, mintedSPOL);
-            }
-        }
+        require(polBalance > 0, AmountZero());
+
+        uint256 actualShares = _buySharesFromValidator(validator, polBalance);
+        // Apply fee fully
+        _removedPOLBalance(actualShares);
+        _adddPOLBalanceFee(actualShares);
+
+        emit POLTokensCleaned(_validator, polBalance);
+
         _emitExchangeRateUpdate();
     }
 }
