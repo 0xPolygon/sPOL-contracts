@@ -422,21 +422,24 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
 
     function _buySPOLWithDPOLMulti(uint256 _amount, uint16 _validatorOfDPOL, address _user) internal returns (uint256) {
         uint256 sPOLToMint = convertPOLtoSPOL(_amount);
-        uint256 restakedAmount;
-        bool success;
         ValidatorInfo storage incomingValidator = validators[_validatorOfDPOL];
-        bool incomingIsActive = incomingValidator.status == ValidatorStatus.ACTIVE;
 
-        if (incomingIsActive && _amount <= _maxDeposit(incomingValidator)) {
-            (success, restakedAmount) =
+        if (incomingValidator.status == ValidatorStatus.ACTIVE && _amount <= _maxDeposit(incomingValidator)) {
+            (bool success, uint256 restakedAmount) =
                 incomingValidator.validatorContract.restakeAndTransferFrom(_user, address(this), _amount);
             require(success, DPOLRestakeTransferFromFailed());
-            validators[_validatorOfDPOL].totalStaked += restakedAmount + _amount;
+
+            _adddPOLBalanceFee(restakedAmount);
+            incomingValidator.totalStaked += restakedAmount + _amount;
         } else {
             (uint16[] memory selectedValidators, uint256[] memory selectedAmounts) = _selectValidators(_amount, true);
-            IValidatorShare validatorOfDPOL = IValidatorShare(stakeManager.getValidatorContract(_validatorOfDPOL));
-            (success, restakedAmount) = validatorOfDPOL.restakeAndTransferFrom(_user, address(this), _amount);
+
+            (bool success, uint256 restakedAmount) = IValidatorShare(
+                    stakeManager.getValidatorContract(_validatorOfDPOL)
+                ).restakeAndTransferFrom(_user, address(this), _amount);
             require(success, DPOLRestakeTransferFromFailed());
+
+            _adddPOLBalanceFee(restakedAmount);
             for (uint256 i = 0; i < selectedAmounts.length; i++) {
                 if (validators[selectedValidators[i]].index != _validatorOfDPOL) {
                     restakeValidator(selectedValidators[i]);
@@ -445,7 +448,6 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
                 validators[selectedValidators[i]].totalStaked += selectedAmounts[i];
             }
         }
-        _adddPOLBalanceFee(restakedAmount);
         _adddPOLBalance(_amount);
         _mintSPOL(_user, _amount, sPOLToMint);
         _emitExchangeRateUpdate();
