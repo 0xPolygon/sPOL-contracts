@@ -662,6 +662,14 @@ contract sPOLControllerFullL1Test is Test, Deploy {
             knownValidator.balanceOf(address(controller)),
             "controller should have gotten permit dPOL"
         );
+        assertEq(
+            controller.totaldPOLBalance(), controllerDPOLBalance4 + mediumAmount, "total dPOL balance should update"
+        );
+
+        (,,,, uint256 dPOLval1TotalStaked) = controller.validators(validator1ID);
+        assertEq(
+            dPOLval1TotalStaked, knownValidator.balanceOf(address(controller)), "validator dPOL balance should update"
+        );
         // Verify user4 received the expected sPOL tokens
         uint256 user4FinalSPOLBalance = sPOLToken.balanceOf(user4);
         assertEq(
