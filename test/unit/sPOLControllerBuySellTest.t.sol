@@ -6,6 +6,7 @@ import "../../src/sPOLController.sol";
 import "../../src/sPOL.sol";
 import "../../script/Deploy.s.sol";
 import "../mocks/MockValidatorShare.sol";
+import "../mocks/MockStakeManager.sol";
 import "../mocks/MockPOLToken.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Permit.sol";
@@ -38,15 +39,13 @@ contract sPOLControllerBuySellTest is Test, Deploy {
         loadMockConfig();
 
         polTokenL1 = address(new MockPOLToken("POL", "POL"));
+        stakeManager = _setUpMockStakeManager();
 
         deployContractsL1(address(this));
         testAdmin = admin;
 
         controller = sPOLController(address(sPOLControllerProxy));
         sPOLToken = IERC20(address(sPOLProxy));
-
-        // set up default mocks
-        _setupDefaultMocks();
 
         vm.prank(testAdmin);
         controller.addValidator(VALIDATOR_1);
@@ -68,34 +67,12 @@ contract sPOLControllerBuySellTest is Test, Deploy {
         controller.updateValidatorTargetShare(validators, depositShares);
     }
 
-    function _setupDefaultMocks() internal {
-        // Mock stakeManager.isValidator() calls
-        vm.mockCall(
-            stakeManager, abi.encodeWithSelector(IStakeManager.isValidator.selector, VALIDATOR_1), abi.encode(true)
-        );
-        vm.mockCall(
-            stakeManager, abi.encodeWithSelector(IStakeManager.isValidator.selector, VALIDATOR_2), abi.encode(true)
-        );
-        vm.mockCall(
-            stakeManager, abi.encodeWithSelector(IStakeManager.isValidator.selector, VALIDATOR_3), abi.encode(true)
-        );
-
-        // Mock stakeManager.getValidatorContract() calls
-        vm.mockCall(
-            stakeManager,
-            abi.encodeWithSelector(IStakeManager.getValidatorContract.selector, VALIDATOR_1),
-            abi.encode(testValidatorShare1)
-        );
-        vm.mockCall(
-            stakeManager,
-            abi.encodeWithSelector(IStakeManager.getValidatorContract.selector, VALIDATOR_2),
-            abi.encode(testValidatorShare2)
-        );
-        vm.mockCall(
-            stakeManager,
-            abi.encodeWithSelector(IStakeManager.getValidatorContract.selector, VALIDATOR_3),
-            abi.encode(testValidatorShare3)
-        );
+    function _setUpMockStakeManager() internal returns (address) {
+        MockStakeManager mockStakeManager = new MockStakeManager();
+        mockStakeManager.setValidatorContract(VALIDATOR_1, testValidatorShare1);
+        mockStakeManager.setValidatorContract(VALIDATOR_2, testValidatorShare2);
+        mockStakeManager.setValidatorContract(VALIDATOR_3, testValidatorShare3);
+        return address(mockStakeManager);
     }
 
     ////////////////////////////////////////
@@ -326,21 +303,19 @@ contract sPOLControllerBuySellTest is Test, Deploy {
         assertEq(
             MockValidatorShare(testValidatorShare3).balanceOf(address(this)),
             amount / 2,
-            "Validator 3 balance should be half amount"
+            "Validator 3 user balance should be half amount"
         );
-        // fails because migration doesn't work
-
-        // assertEq(
-        //     MockValidatorShare(testValidatorShare1).balanceOf(address(controller)),
-        //     amount + amount / 2,
-        //     "Validator 1 controller balance should be half amount plus amount"
-        // );
-        // balance remains in val3
         assertEq(
             MockValidatorShare(testValidatorShare3).balanceOf(address(controller)),
-            amount / 2,
-            "Validator 3 balance should be half amount"
+            0,
+            "Validator 1 controller balance should be 0"
         );
+        assertEq(
+            MockValidatorShare(testValidatorShare1).balanceOf(address(controller)),
+            amount + amount / 2,
+            "Validator 1 controller balance should be half amount plus amount"
+        );
+
         assertEq(
             MockValidatorShare(testValidatorShare2).balanceOf(address(controller)),
             amount,
@@ -385,17 +360,13 @@ contract sPOLControllerBuySellTest is Test, Deploy {
             "val2 dPOL total stake should be first stake plus half dPOL stake"
         );
         assertEq(MockValidatorShare(testValidatorShare3).balanceOf(address(this)), 0, "Validator 3 balance should be 0");
-        // fails because migration doesn't work
-        // assertEq(
-        //     MockValidatorShare(testValidatorShare1).balanceOf(address(controller)),
-        //     amount + largeAmount / 2,
-        //     "Validator 1 controller balance should be half largeAmount plus amount"
-        // );
-        // balance remains in val3
         assertEq(
-            MockValidatorShare(testValidatorShare3).balanceOf(address(controller)),
-            largeAmount,
-            "Validator 3 balance should be largeAmount"
+            MockValidatorShare(testValidatorShare1).balanceOf(address(controller)),
+            amount + largeAmount / 2,
+            "Validator 1 controller balance should be half largeAmount plus amount"
+        );
+        assertEq(
+            MockValidatorShare(testValidatorShare3).balanceOf(address(controller)), 0, "Validator 3 balance should be 0"
         );
         assertEq(
             MockValidatorShare(testValidatorShare2).balanceOf(address(controller)),
@@ -486,31 +457,16 @@ contract sPOLControllerBuySellTest is Test, Deploy {
         console.log(MockValidatorShare(testValidatorShare1).balanceOf(address(controller)));
         console.log(MockValidatorShare(testValidatorShare2).balanceOf(address(controller)));
 
-        // balances don't update because migration doesn't work
-        // assertEq(
-        //     MockValidatorShare(testValidatorShare1).balanceOf(address(controller)),
-        //     amount + largeAmount / 2,
-        //     "Validator 1 controller balance should be half largeAmount plus amount"
-        // );
-
-        // // balances don't update because migration doesn't work
-        // assertEq(
-        //     MockValidatorShare(testValidatorShare2).balanceOf(address(controller)),
-        //     amount + largeAmount / 2,
-        //     "Validator 2 controller balance should be amount"
-        // );
 
         assertEq(
             MockValidatorShare(testValidatorShare1).balanceOf(address(controller)),
-            amount,
+            amount + largeAmount / 2,
             "Validator 1 controller balance should be half largeAmount plus amount"
         );
-
-        // balances don't update because migration doesn't work
         assertEq(
             MockValidatorShare(testValidatorShare2).balanceOf(address(controller)),
-            amount + largeAmount,
-            "Validator 2 controller balance should be amount"
+            amount + largeAmount / 2,
+            "Validator 2 controller balance should be half largeAmount plus amount"
         );
     }
 }

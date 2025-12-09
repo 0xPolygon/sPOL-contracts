@@ -438,7 +438,7 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
             (success, restakedAmount) = validatorOfDPOL.restakeAndTransferFrom(_user, address(this), _amount);
             require(success, DPOLRestakeTransferFromFailed());
             for (uint256 i = 0; i < selectedAmounts.length; i++) {
-                if (!incomingIsActive) {
+                if (validators[selectedValidators[i]].index != _validatorOfDPOL) {
                     restakeValidator(selectedValidators[i]);
                     stakeManager.migrateDelegation(_validatorOfDPOL, selectedValidators[i], selectedAmounts[i]);
                 }

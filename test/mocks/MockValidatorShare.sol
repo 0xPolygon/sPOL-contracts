@@ -53,5 +53,14 @@ contract MockValidatorShare {
     function addReward(uint256 _reward) public {
         reward += _reward;
     }
+
+    function migrateIn(address _user, uint256 _amount) public {
+        balanceOf[_user] += _amount;
+    }
+
+    function migrateOut(address _user, uint256 _amount) public {
+        require(balanceOf[_user] >= _amount, "Insufficient balance");
+        balanceOf[_user] -= _amount;
+    }
 }
 
