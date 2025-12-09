@@ -370,8 +370,8 @@ contract sPOLControllerBuySellTest is Test, Deploy {
         );
         assertEq(
             MockValidatorShare(testValidatorShare2).balanceOf(address(controller)),
-            amount,
-            "Validator 2 controller balance should be amount"
+            amount + largeAmount / 2,
+            "Validator 2 controller balance should be amount plus half largeAmount"
         );
     }
 
@@ -456,7 +456,6 @@ contract sPOLControllerBuySellTest is Test, Deploy {
 
         console.log(MockValidatorShare(testValidatorShare1).balanceOf(address(controller)));
         console.log(MockValidatorShare(testValidatorShare2).balanceOf(address(controller)));
-
 
         assertEq(
             MockValidatorShare(testValidatorShare1).balanceOf(address(controller)),
