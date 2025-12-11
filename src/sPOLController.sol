@@ -243,7 +243,6 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     function restakeValidator(uint16 _validator) external whenNotPaused {
         _restakeValidator(_validator);
     }
-   
 
     function restakeAllActiveValidators() external whenNotPaused {
         for (uint256 i = 0; i < activeValidators.length; i++) {
@@ -251,8 +250,8 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         }
         _emitExchangeRateUpdate();
     }
-    
-     function _restakeValidator(uint16 _validator) internal  {
+
+    function _restakeValidator(uint16 _validator) internal {
         (uint256 amountRestaked,) = validators[_validator].validatorContract.restakePOL();
         _adddPOLBalanceFee(amountRestaked);
         validators[_validator].totalStaked += amountRestaked;
@@ -497,14 +496,13 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     function _sellSPOLSingle(uint256 _amount, uint16 _validator, address _user) internal returns (uint256) {
         ValidatorInfo storage validator = validators[_validator];
         require(validator.status == ValidatorStatus.ACTIVE, ValidatorNotActive(_validator));
-        uint256 maxRedeem = _maxRedeem(validator);
-        require(_amount <= maxRedeem, ValidatorUnderfunded(_amount, maxRedeem));
 
+        uint256 maxRedeem = _maxRedeem(validator);
         uint256 dPOLAmount = convertSPOLtoPOL(_amount);
+        require(dPOLAmount <= maxRedeem, ValidatorUnderfunded(dPOLAmount, maxRedeem));
         _takeSPOL(_amount, _user);
 
         uint256 userNonce = _sellSharesFromValidator(validator, dPOLAmount);
-
         uint256 nonce = _addUserWithdrawNonceDetails(_user, _validator, uint128(dPOLAmount), uint96(userNonce));
 
         emit sPOLBurned(_user, _amount, dPOLAmount, nonce);
