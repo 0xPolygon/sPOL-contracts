@@ -240,45 +240,33 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         require(totalPercent == 100, DepositSharesTotalNotOneHundred(totalPercent));
     }
 
-    function migrateValidator(uint16 _oldValidator, uint16 _newValidator) external restricted {
-        uint256 amount = validators[_oldValidator].totalStaked;
-        amount += validators[_oldValidator].validatorContract.getLiquidRewards(address(this));
-        _migrateValidator(_oldValidator, _newValidator, amount, true);
+    function restakeValidator(uint16 _validator) external whenNotPaused {
+        _restakeValidator(_validator);
     }
+   
 
-    function migrateValidator(uint16 _oldValidator, uint16 _newValidator, uint256 _amount) external restricted {
-        require(
-            _amount <= validators[_oldValidator].totalStaked,
-            AmountTooLarge(_amount, validators[_oldValidator].totalStaked)
-        );
-        _migrateValidator(_oldValidator, _newValidator, _amount, true);
-    }
-
-    function _migrateValidator(uint16 _oldValidator, uint16 _newValidator, uint256 _amount, bool _restake) internal {
-        if (_restake) {
-            restakeValidator(_oldValidator);
-            restakeValidator(_newValidator);
+    function restakeAllActiveValidators() external whenNotPaused {
+        for (uint256 i = 0; i < activeValidators.length; i++) {
+            _restakeValidator(activeValidators[i]);
         }
-        stakeManager.migrateDelegation(_oldValidator, _newValidator, _amount);
-        if (validators[_oldValidator].status != ValidatorStatus.INACTIVE) {
-            validators[_oldValidator].totalStaked -= _amount;
-        }
-        validators[_newValidator].totalStaked += _amount;
-        emit ValidatorMigrated(_oldValidator, _newValidator, _amount);
+        _emitExchangeRateUpdate();
     }
-
-    function restakeValidator(uint16 _validator) public whenNotPaused {
+    
+     function _restakeValidator(uint16 _validator) internal  {
         (uint256 amountRestaked,) = validators[_validator].validatorContract.restakePOL();
         _adddPOLBalanceFee(amountRestaked);
         validators[_validator].totalStaked += amountRestaked;
         _emitExchangeRateUpdate();
     }
 
-    function restakeAllActiveValidators() external whenNotPaused {
-        for (uint256 i = 0; i < activeValidators.length; i++) {
-            restakeValidator(activeValidators[i]);
-        }
-        _emitExchangeRateUpdate();
+    function migrateValidator(uint16 _oldValidator, uint16 _newValidator, uint256 _amount) external restricted {
+        _restakeValidator(_oldValidator);
+        _restakeValidator(_newValidator);
+
+        stakeManager.migrateDelegation(_oldValidator, _newValidator, _amount);
+        validators[_oldValidator].totalStaked -= _amount;
+        validators[_newValidator].totalStaked += _amount;
+        emit ValidatorMigrated(_oldValidator, _newValidator, _amount);
     }
 
     function reloadAllActiveValidatorInfo() external restricted {
@@ -442,7 +430,7 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
             _adddPOLBalanceFee(restakedAmount);
             for (uint256 i = 0; i < selectedAmounts.length; i++) {
                 if (validators[selectedValidators[i]].index != _validatorOfDPOL) {
-                    restakeValidator(selectedValidators[i]);
+                    _restakeValidator(selectedValidators[i]);
                     stakeManager.migrateDelegation(_validatorOfDPOL, selectedValidators[i], selectedAmounts[i]);
                 }
                 validators[selectedValidators[i]].totalStaked += selectedAmounts[i];
