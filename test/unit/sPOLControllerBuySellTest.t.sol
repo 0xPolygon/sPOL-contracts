@@ -124,16 +124,41 @@ contract sPOLControllerBuySellTest is Test, Deploy {
 
         assertEq(controller.totaldPOLBalance(), 1e18 + 1, "Total dPOL balance should be 1");
         assertEq(controller.totalsPOLBalance(), 1e18 + 1, "Total POL balance should be 1");
+        assertEq(
+            MockValidatorShare(testValidatorShare1).balanceOf(address(controller)),
+            1e18 / 2 + 1,
+            "Validator 1 balance should be half plus 1"
+        );
+        assertEq(
+            MockValidatorShare(testValidatorShare2).balanceOf(address(controller)),
+            1e18 / 2,
+            "Validator 2 balance should be half"
+        );
+        assertEq(controller.feedPOLBalance(), 0, "Feed POL balance should be 0");
         assertEq(sPOLToken.balanceOf(address(this)), 1e18 + 1, "Balance should be 1");
+        matchBalanceWithTotalStake(1e18 + 1);
     }
 
     function test_buySPOLMulti() public {
-        controller.buySPOL(1e18);
+        uint256 amount = 1e18;
+        controller.buySPOL(amount);
 
-        assertEq(sPOLToken.balanceOf(address(this)), 1e18, "Balance should be 1");
-        // should have selected #2. Both have 0 balance, but as it was addded last
+        assertEq(sPOLToken.balanceOf(address(this)), amount, "Balance should be 1");
+        assertEq(controller.feedPOLBalance(), 0, "Feed POL balance should be 0");
+        assertEq(
+            MockValidatorShare(testValidatorShare1).balanceOf(address(controller)),
+            amount / 2,
+            "Validator 1 balance should be half"
+        );
+        assertEq(
+            MockValidatorShare(testValidatorShare2).balanceOf(address(controller)),
+            amount / 2,
+            "Validator 2 balance should be half"
+        );
+
         assertEq(controller.totaldPOLBalance(), 1e18, "Total dPOL balance should be 1");
         assertEq(controller.totalsPOLBalance(), 1e18, "Total POL balance should be 1");
+        matchBalanceWithTotalStake(1e18);
     }
 
     function test_buySPOLMulti_Consecutive() public {
@@ -141,10 +166,20 @@ contract sPOLControllerBuySellTest is Test, Deploy {
         controller.buySPOL(1e18);
 
         assertEq(controller.feedPOLBalance(), 0, "Feed POL balance should be 0");
-
+        assertEq(
+            MockValidatorShare(testValidatorShare1).balanceOf(address(controller)),
+            2e18 / 2,
+            "Validator 1 balance should be half"
+        );
+        assertEq(
+            MockValidatorShare(testValidatorShare2).balanceOf(address(controller)),
+            2e18 / 2,
+            "Validator 2 balance should be half"
+        );
         assertEq(controller.totaldPOLBalance(), 2e18, "Total dPOL balance should be 2");
         assertEq(controller.totalsPOLBalance(), 2e18, "Total POL balance should be 2");
         assertEq(sPOLToken.balanceOf(address(this)), 2e18, "Balance should be 2");
+        matchBalanceWithTotalStake(2e18);
     }
 
     function test_buySPOLPermit() public {
@@ -178,7 +213,7 @@ contract sPOLControllerBuySellTest is Test, Deploy {
     }
 
     ////////////////////////////////////////
-    ///  Buy Tests                       ///
+    ///  Sell Tests                      ///
     ////////////////////////////////////////
 
     function test_sellSPOLSingle_underfunded() public {
@@ -246,6 +281,56 @@ contract sPOLControllerBuySellTest is Test, Deploy {
 
         assertEq(controller.totaldPOLBalance(), 0, "Total dPOL balance should be 0");
         assertEq(controller.totalsPOLBalance(), 0, "Total sPOL balance should be 0");
+        assertEq(sPOLToken.balanceOf(address(this)), 0, "Balance should be 0");
+        matchBalanceWithTotalStake(0);
+    }
+
+    function test_sellSPOLMulti_consecutive() public {
+        uint256 amount = 1e18;
+        controller.buySPOL(amount * 3);
+        assertEq(controller.totalsPOLBalance(), amount * 3, "Total sPOL balance should be 3 * amount");
+
+        controller.sellSPOL(amount);
+        controller.sellSPOL(amount * 2);
+
+        assertEq(controller.totaldPOLBalance(), 0, "Total dPOL balance should be 0");
+        assertEq(controller.totalsPOLBalance(), 0, "Total sPOL balance should be 0");
+        assertEq(sPOLToken.balanceOf(address(this)), 0, "Balance should be 0");
+        matchBalanceWithTotalStake(0);
+    }
+
+    function test_sellSPOLMulti_consecutive_remain() public {
+        uint256 amount = 1e18;
+        controller.buySPOL(amount * 6);
+        assertEq(controller.totalsPOLBalance(), amount * 6, "Total sPOL balance should be 6 * amount");
+
+        controller.sellSPOL(amount);
+        assertEq(
+            MockValidatorShare(testValidatorShare1).balanceOf(address(controller)),
+            2 * amount,
+            "Validator 1 balance should be half total minus amount"
+        );
+        assertEq(
+            MockValidatorShare(testValidatorShare2).balanceOf(address(controller)),
+            3 * amount,
+            "Validator 2 balance should be 3 * amount"
+        );
+        controller.sellSPOL(amount * 2);
+
+        assertEq(controller.totaldPOLBalance(), amount * 3, "Total dPOL balance should be 3 * amount");
+        assertEq(controller.totalsPOLBalance(), amount * 3, "Total sPOL balance should be 3 * amount");
+        assertEq(sPOLToken.balanceOf(address(this)), amount * 3, "Balance should be 3 * amount");
+
+        // can't split, so it starts taking everything from first validator
+        assertEq(
+            MockValidatorShare(testValidatorShare1).balanceOf(address(controller)), 0, "Validator 1 balance should be 0"
+        );
+        assertEq(
+            MockValidatorShare(testValidatorShare2).balanceOf(address(controller)),
+            3 * amount,
+            "Validator 2 balance should be 3 * amount"
+        );
+        matchBalanceWithTotalStake(amount * 3);
     }
 
     function test_sellSPOLPermit() public {
@@ -276,7 +361,7 @@ contract sPOLControllerBuySellTest is Test, Deploy {
     }
 
     function test_sellSPOL_withdrawNonce_no_zero() public {
-        assertEq(controller.globalWithdrawNonce(), 1, "Global withdraw nonce should be 0");
+        assertEq(controller.globalWithdrawNonce(), 1, "Global withdraw nonce should be 1");
         uint256 amount = 1e18;
         controller.buySPOL(amount);
         assertEq(controller.totalsPOLBalance(), amount, "Total sPOL balance should be amount");
@@ -286,7 +371,7 @@ contract sPOLControllerBuySellTest is Test, Deploy {
     }
 
     function test_sellSPOL_withdrawNonce_increases() public {
-        assertEq(controller.globalWithdrawNonce(), 1, "Global withdraw nonce should be 0");
+        assertEq(controller.globalWithdrawNonce(), 1, "Global withdraw nonce should be 1");
         uint256 amount = 1e18;
         controller.buySPOL(amount * 2);
         assertEq(controller.totalsPOLBalance(), amount * 2, "Total sPOL balance should be amount");
@@ -295,6 +380,7 @@ contract sPOLControllerBuySellTest is Test, Deploy {
         assertEq(1, controller.userNonces(address(this), 0), "First nonce should be 1");
         controller.sellSPOL(amount);
         assertEq(2, controller.userNonces(address(this), 1), "Second nonce should be 2");
+        assertEq(3, controller.globalWithdrawNonce(), "Global withdraw nonce should be 3");
     }
 
     function test_buySharesFromValidatorBug_LiquidRewardsIncludedInAmountDeposited() public {
@@ -333,6 +419,10 @@ contract sPOLControllerBuySellTest is Test, Deploy {
             controller.feedPOLBalance(), (feedPOLBalanceBefore + (liquidRewards * 2 * controller.rewardFee() / 1000))
         );
     }
+
+    ////////////////////////////////////////
+    ///  Buy with dPOL Tests             ///
+    ////////////////////////////////////////
 
     function test_buySPOLWithDPOL_externalVal_totalstake_no_split() public {
         uint256 amount = 50e18;
@@ -510,9 +600,6 @@ contract sPOLControllerBuySellTest is Test, Deploy {
             "val2 dPOL total stake should be first stake plus half dPOL stake"
         );
         assertEq(MockValidatorShare(testValidatorShare2).balanceOf(address(this)), 0, "Validator 2 balance should be 0");
-
-        console.log(MockValidatorShare(testValidatorShare1).balanceOf(address(controller)));
-        console.log(MockValidatorShare(testValidatorShare2).balanceOf(address(controller)));
 
         assertEq(
             MockValidatorShare(testValidatorShare1).balanceOf(address(controller)),
