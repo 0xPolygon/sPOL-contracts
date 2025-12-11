@@ -333,6 +333,42 @@ contract sPOLControllerBuySellTest is Test, Deploy {
         matchBalanceWithTotalStake(amount * 3);
     }
 
+    function test_sellSPOLPermit_single() public {
+        uint256 amount = 1e18;
+        uint256 deadline = block.timestamp + 100;
+        controller.buySPOL(amount * 10);
+        assertEq(controller.totalsPOLBalance(), 10 * amount, "Total sPOL balance should be 10 * amount");
+
+        // Transfer sPOL to user
+        sPOLToken.transfer(user, amount);
+
+        (uint8 v, bytes32 r, bytes32 s) = _createPermitSignature(
+            ERC20Permit(address(sPOLToken)), user, address(controller), amount / 4, deadline, privateKey
+        );
+
+        controller.sellSPOLPermit(amount / 4, VALIDATOR_2, user, deadline, v, r, s);
+
+        assertEq(
+            controller.totaldPOLBalance(),
+            9 * amount + amount * 3 / 4,
+            "Total dPOL balance should be 9 * amount + amount * 3 / 4"
+        );
+        assertEq(
+            controller.totalsPOLBalance(),
+            9 * amount + amount * 3 / 4,
+            "Total sPOL balance should be 9 * amount + amount * 3 / 4"
+        );
+
+        (v, r, s) = _createPermitSignature(
+            ERC20Permit(address(sPOLToken)), user, address(controller), amount * 3 / 4, deadline, privateKey
+        );
+        controller.sellSPOLPermit(amount * 3 / 4, VALIDATOR_1, user, deadline, v, r, s);
+
+        assertEq(controller.totaldPOLBalance(), 9 * amount, "Total dPOL balance should be 9 * amount");
+        assertEq(controller.totalsPOLBalance(), 9 * amount, "Total sPOL balance should be 9 * amount");
+        matchBalanceWithTotalStake(9 * amount);
+    }
+
     function test_sellSPOLPermit() public {
         uint256 amount = 1e18;
         uint256 deadline = block.timestamp + 100;
@@ -358,6 +394,7 @@ contract sPOLControllerBuySellTest is Test, Deploy {
 
         assertEq(controller.totaldPOLBalance(), 0, "Total dPOL balance should be 0");
         assertEq(controller.totalsPOLBalance(), 0, "Total sPOL balance should be 0");
+        matchBalanceWithTotalStake(0);
     }
 
     function test_sellSPOL_withdrawNonce_no_zero() public {
