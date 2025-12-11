@@ -28,8 +28,9 @@ contract MockValidatorShare {
         return (a + currentReward, currentReward);
     }
 
-    function restakeAndUnstakePOL(uint256) public returns (uint256) {
+    function restakeAndUnstakePOL(uint256 a) public returns (uint256) {
         uint256 currentReward = reward;
+        balanceOf[msg.sender] -= a;
         balanceOf[msg.sender] += currentReward;
         reward = 0;
         return (currentReward);
