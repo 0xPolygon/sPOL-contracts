@@ -96,6 +96,27 @@ contract sPOLControllerBuySellTest is Test, Deploy {
         controller.buySPOL(1 ether, VALIDATOR_1);
     }
 
+    function test_buySPOLSingle_VS_failure() public {
+        uint256 amount = 1e18;
+        controller.buySPOL(amount * 10);
+
+        vm.mockCallRevert(
+            testValidatorShare1, abi.encodeWithSelector(MockValidatorShare.restakeAndStakePOL.selector), "failure"
+        );
+        vm.expectRevert("failure");
+        controller.buySPOL(amount, VALIDATOR_1);
+    }
+
+    function test_buySPOLMulti_VS_failure() public {
+        uint256 amount = 1e18;
+
+        vm.mockCallRevert(
+            testValidatorShare1, abi.encodeWithSelector(MockValidatorShare.restakeAndStakePOL.selector), "failure"
+        );
+        vm.expectRevert("failure");
+        controller.buySPOL(amount);
+    }
+
     function test_buySPOLSingle_() public {
         // buying a whole POL fill up both validators. This prevents triggering the Overfunded error
         controller.buySPOL(1e18);
@@ -156,29 +177,65 @@ contract sPOLControllerBuySellTest is Test, Deploy {
         assertEq(controller.totalsPOLBalance(), amount + 1, "Total POL balance should be 2");
     }
 
-    function _createPermitSignature(
-        ERC20Permit token,
-        address owner,
-        address spender,
-        uint256 value,
-        uint256 deadline,
-        uint256 pk
-    ) internal view returns (uint8 v, bytes32 r, bytes32 s) {
-        bytes32 PERMIT_TYPEHASH = keccak256(
-            "Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)"
-        );
-
-        bytes32 structHash =
-            keccak256(abi.encode(PERMIT_TYPEHASH, owner, spender, value, token.nonces(owner), deadline));
-
-        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", token.DOMAIN_SEPARATOR(), structHash));
-
-        return vm.sign(pk, digest);
-    }
-
     ////////////////////////////////////////
     ///  Buy Tests                       ///
     ////////////////////////////////////////
+
+    function test_sellSPOLSingle_underfunded() public {
+        uint256 amount = 1e18;
+        controller.buySPOL(amount);
+
+        assertEq(controller.totalsPOLBalance(), amount, "Total sPOL balance should be 2 * amount");
+        (, uint256 maxUnstake) = controller.getMostOverfundedValidator();
+        vm.expectRevert(abi.encodeWithSelector(sPOLController.ValidatorUnderfunded.selector, amount, maxUnstake));
+        controller.sellSPOL(amount, VALIDATOR_1);
+    }
+
+    function test_sellSPOLSingle_VS_failure() public {
+        uint256 amount = 1e18;
+        controller.buySPOL(amount * 100);
+
+        vm.mockCallRevert(
+            testValidatorShare1, abi.encodeWithSelector(MockValidatorShare.restakeAndUnstakePOL.selector), "failure"
+        );
+        vm.expectRevert("failure");
+        controller.sellSPOL(amount, VALIDATOR_1);
+    }
+
+    function test_sellSPOLMulti_VS_failure() public {
+        uint256 amount = 1e18;
+        controller.buySPOL(amount);
+
+        vm.mockCallRevert(
+            testValidatorShare1, abi.encodeWithSelector(MockValidatorShare.restakeAndUnstakePOL.selector), "failure"
+        );
+        vm.expectRevert("failure");
+        controller.sellSPOL(amount);
+    }
+
+    function test_sellSPOLSingle() public {
+        uint256 amount = 1e18;
+        controller.buySPOL(amount * 10);
+        assertEq(controller.totalsPOLBalance(), amount * 10, "Total sPOL balance should be 10 * amount");
+
+        controller.sellSPOL(amount, VALIDATOR_2);
+
+        assertEq(controller.totaldPOLBalance(), amount * 9, "Total dPOL balance should be 9 * amount");
+        assertEq(controller.totalsPOLBalance(), amount * 9, "Total sPOL balance should be 9 * amount");
+        assertEq(sPOLToken.balanceOf(address(this)), amount * 9, "Balance should be 9 * amount");
+
+        assertEq(
+            MockValidatorShare(testValidatorShare1).balanceOf(address(controller)),
+            5 * amount,
+            "Validator 1 balance should be 5 * amount"
+        );
+        assertEq(
+            MockValidatorShare(testValidatorShare2).balanceOf(address(controller)),
+            4 * amount,
+            "Validator 2 balance should be 4 * amount"
+        );
+        matchBalanceWithTotalStake(amount * 9);
+    }
 
     function test_sellSPOLMulti() public {
         uint256 amount = 1e18;
@@ -467,6 +524,60 @@ contract sPOLControllerBuySellTest is Test, Deploy {
             amount + largeAmount / 2,
             "Validator 2 controller balance should be half largeAmount plus amount"
         );
+    }
+
+    ////////////////////////////////////////////
+    ///  Generic Test Functions              ///
+    ////////////////////////////////////////////
+
+    function matchBalanceWithTotalStake(uint256 _totalExpectedStake) internal view {
+        (,,,, uint256 dPOLTotalStakeVal1) = controller.validators(VALIDATOR_1);
+        (,,,, uint256 dPOLTotalStakeVal2) = controller.validators(VALIDATOR_2);
+
+        assertEq(
+            dPOLTotalStakeVal1,
+            MockValidatorShare(testValidatorShare1).balanceOf(address(controller)),
+            "dPOL total stake should be balance of val1"
+        );
+        assertEq(
+            dPOLTotalStakeVal2,
+            MockValidatorShare(testValidatorShare2).balanceOf(address(controller)),
+            "dPOL total stake should be balance of val2"
+        );
+        assertEq(
+            dPOLTotalStakeVal1 + dPOLTotalStakeVal2,
+            controller.totaldPOLBalance(),
+            "dPOL total stake val1 + val2 should be total dPOL balance"
+        );
+        assertEq(
+            dPOLTotalStakeVal1 + dPOLTotalStakeVal2,
+            _totalExpectedStake,
+            "dPOL total stake val1 + val2 should be expected total stake"
+        );
+    }
+
+    ////////////////////////////////////////
+    ///  Helper Functions                ///
+    ////////////////////////////////////////
+
+    function _createPermitSignature(
+        ERC20Permit token,
+        address owner,
+        address spender,
+        uint256 value,
+        uint256 deadline,
+        uint256 pk
+    ) internal view returns (uint8 v, bytes32 r, bytes32 s) {
+        bytes32 PERMIT_TYPEHASH = keccak256(
+            "Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)"
+        );
+
+        bytes32 structHash =
+            keccak256(abi.encode(PERMIT_TYPEHASH, owner, spender, value, token.nonces(owner), deadline));
+
+        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", token.DOMAIN_SEPARATOR(), structHash));
+
+        return vm.sign(pk, digest);
     }
 }
 
