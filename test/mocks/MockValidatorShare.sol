@@ -5,7 +5,7 @@ contract MockValidatorShare {
     constructor() {}
 
     mapping(address => uint256) public unbondNonces;
-    uint256 reward;
+    uint256 public reward;
     mapping(address => uint256) public balanceOf;
     //mapping(address => mapping(address => uint256)) public allowance;
 
