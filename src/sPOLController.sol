@@ -110,6 +110,7 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     error NotEnoughStake(uint256 remaining);
     error ValidatorDepositShareNotZero(uint16 validatorId, uint8 depositShare);
     error ValidatorNotActive(uint16 validatorId);
+    error ValidatorNotInactive(uint16 validatorId);
     error ValidatorNotDelegating(uint16 validatorId);
     error ValidatorNotFrozen(uint16 validatorId);
     error ValidatorOverfunded(uint256 amount, uint256 maxAmount);
@@ -169,6 +170,7 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
 
     function addValidator(uint16 _validatorID) external restricted {
         require(stakeManager.isValidator(_validatorID), ValidatorNotActive(_validatorID));
+        require(validators[_validatorID].status == ValidatorStatus.INACTIVE, ValidatorNotInactive(_validatorID));
 
         IValidatorShare validatorContract = IValidatorShare(stakeManager.getValidatorContract(_validatorID));
         require(address(validatorContract) != address(0), ValidatorNotDelegating(_validatorID));
