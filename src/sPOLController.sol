@@ -272,9 +272,11 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         _emitExchangeRateUpdate();
     }
 
-    function migrateValidator(uint16 _oldValidator, uint16 _newValidator, uint256 _amount) external restricted {
-        _restakeValidator(_oldValidator);
-        _restakeValidator(_newValidator);
+    function migrateValidator(uint16 _oldValidator, uint16 _newValidator, uint256 _amount, bool _restake) external restricted {
+        if (_restake) {
+            _restakeValidator(_oldValidator);
+            _restakeValidator(_newValidator);
+        }
 
         stakeManager.migrateDelegation(_oldValidator, _newValidator, _amount);
         validators[_oldValidator].totalStaked -= _amount;
