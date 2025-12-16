@@ -26,7 +26,6 @@ contract sPOLMessenger is
 {
     IERC20 public immutable polToken;
     IERC20 public immutable sPOLToken;
-    address public child;
 
     IRootChainManager public immutable rootChainManager;
     IDepositManager public immutable depositManager;
@@ -119,7 +118,7 @@ contract sPOLMessenger is
         }
         uint256 balanceAfter = polToken.balanceOf(address(this));
         uint256 totalWithdraw = balanceAfter - balanceBefore;
-        depositManager.depositERC20ForUser(address(polToken), child, totalWithdraw);
+        depositManager.depositERC20ForUser(address(polToken), childTunnel, totalWithdraw);
         _sendMessageToChild(
             abi.encode(MsgType.L1_BACKFILL_RESPONSE, _encodeL1BackfillResponseMessage(totalWithdraw, _backFillCycle))
         );
