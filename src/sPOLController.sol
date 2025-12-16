@@ -763,7 +763,7 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
 
     function changeFeeReceiver(address _newFeeReceiver) external restricted {
         require(_newFeeReceiver != address(0), ZeroAddress());
-        takeFee();
+        _takeFee();
         address oldReceiver = feeReceiver;
         feeReceiver = _newFeeReceiver;
         emit FeeReceiverChanged(oldReceiver, feeReceiver);
@@ -776,7 +776,11 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         emit RewardFeeChanged(oldFee, rewardFee);
     }
 
-    function takeFee() public restricted {
+    function takeFee() external restricted {
+        _takeFee();
+    }
+
+    function _takeFee() internal {
         if (feedPOLBalance == 0) {
             return;
         }
