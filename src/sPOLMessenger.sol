@@ -44,6 +44,7 @@ contract sPOLMessenger is
     error NotEnoughPOLInMessenger(uint256 required, uint256 available);
     error NotEnoughSPOLInMessenger(uint256 required, uint256 available);
     error BackfillAlreadyCompleted(uint256 backfillCycle);
+    error ZeroAddress();
 
     constructor(
         address _polToken,
@@ -56,18 +57,33 @@ contract sPOLMessenger is
         address _childTunnel,
         address _polBridger
     ) BaseRootTunnel(_stateSender, _checkpointManager, _childTunnel) {
+        require(_polToken != address(0), ZeroAddress());
+        require(_sPOLToken != address(0), ZeroAddress());
+        require(_sPOLController != address(0), ZeroAddress());
+        require(_rootChainManager != address(0), ZeroAddress());
+        require(_depositManager != address(0), ZeroAddress());
+        require(_stateSender != address(0), ZeroAddress());
+        require(_checkpointManager != address(0), ZeroAddress());
+        require(_childTunnel != address(0), ZeroAddress());
+        require(_polBridger != address(0), ZeroAddress());
+
         polToken = IERC20(_polToken);
         sPOLToken = IERC20(_sPOLToken);
         sPOLController = IsPOLController(_sPOLController);
         rootChainManager = IRootChainManager(_rootChainManager);
         depositManager = IDepositManager(_depositManager);
         polBridger = PolBridger(_polBridger);
+
         _disableInitializers();
     }
 
     function initialize(address _authority, address _rcmERC20Predicate) external initializer {
+        require(_authority != address(0), ZeroAddress());
+        require(_rcmERC20Predicate != address(0), ZeroAddress());
+
         __Pausable_init();
         __AccessManaged_init(_authority);
+
         polToken.approve(address(sPOLController), type(uint256).max);
         polToken.approve(address(depositManager), type(uint256).max);
         sPOLToken.approve(_rcmERC20Predicate, type(uint256).max);

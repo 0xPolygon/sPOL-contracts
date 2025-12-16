@@ -109,6 +109,7 @@ contract sPOLChild is
     error NothingToMigrate();
     error POLAmountMustBeGreaterThanZero();
     error POLTransferFailed();
+    error ZeroAddress();
 
     modifier onlyChildChainManager() {
         require(msg.sender == childChainManager, AddressUnauthorized(msg.sender));
@@ -116,6 +117,8 @@ contract sPOLChild is
     }
 
     constructor(address _stateSyncer) BaseChildTunnel(_stateSyncer) {
+        require(_stateSyncer != address(0), ZeroAddress());
+
         _disableInitializers();
     }
 
@@ -123,10 +126,16 @@ contract sPOLChild is
         external
         initializer
     {
+        require(_authority != address(0), ZeroAddress());
+        require(_l1Messenger != address(0), ZeroAddress());
+        require(_bridgeHelper != address(0), ZeroAddress());
+        require(_childChainManager != address(0), ZeroAddress());
+
         __Pausable_init();
         __ERC20_init("Staked POL", "sPOL");
         __ERC20Permit_init("Staked POL");
         __AccessManaged_init(_authority);
+
         maxExchangeRateUpdateDelay = 30 days;
         // we get about 0,25% rewards in a month, so if we pause after a month of no update
         // 0,3% should be safe so sPOL doesn't become cheaper than L1

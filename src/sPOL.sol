@@ -10,6 +10,7 @@ contract sPOL is Initializable, ERC20PermitUpgradeable {
     address public immutable sPOLController;
 
     error AddressUnauthorized(address caller);
+    error ZeroAddress();
 
     modifier onlyController() {
         require(msg.sender == sPOLController, AddressUnauthorized(msg.sender));
@@ -17,7 +18,10 @@ contract sPOL is Initializable, ERC20PermitUpgradeable {
     }
 
     constructor(address _sPOLController) {
+        require(_sPOLController != address(0), ZeroAddress());
+
         sPOLController = _sPOLController;
+
         _disableInitializers();
     }
 

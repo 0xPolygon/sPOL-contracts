@@ -128,12 +128,20 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         address _stakeManager,
         address _sPOLMessenger
     ) {
+        require(_polToken != address(0), ZeroAddress());
+        require(_maticToken != address(0), ZeroAddress());
+        require(_polygonMigration != address(0), ZeroAddress());
+        require(_sPOLToken != address(0), ZeroAddress());
+        require(_stakeManager != address(0), ZeroAddress());
+        require(_sPOLMessenger != address(0), ZeroAddress());
+
         polToken = ERC20Permit(_polToken);
         maticToken = ERC20(_maticToken);
         polygonMigration = IPolygonMigration(_polygonMigration);
         sPOLToken = sPOL(_sPOLToken);
         stakeManager = IStakeManager(_stakeManager);
         sPOLMessenger = _sPOLMessenger;
+
         _disableInitializers();
     }
 
@@ -141,9 +149,13 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         external
         initializer
     {
+        require(_rewardFee <= MAX_FEE, FeeTooLarge(_rewardFee, MAX_FEE));
+        require(_feeReceiver != address(0), ZeroAddress());
+        require(_authority != address(0), ZeroAddress());
+
         __Pausable_init();
         __AccessManaged_init(_authority);
-        require(_rewardFee <= MAX_FEE, FeeTooLarge(_rewardFee, MAX_FEE));
+
         rewardFee = _rewardFee;
         feeReceiver = _feeReceiver;
         maxDivergence = _maxDivergence;
