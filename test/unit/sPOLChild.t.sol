@@ -32,6 +32,7 @@ contract sPOLChildTest is Test, Deploy {
         sPOLMessengerProxy = TransparentUpgradeableProxy(payable(makeAddr("sPOLMessengerProxy")));
         // Deploy contracts
         deployContractsL2(address(this));
+        vm.chainId(chainIdL2);
 
         // Get deployed contract instances
         sPOLChildToken = sPOLChild(address(sPOLChildProxy));
@@ -537,10 +538,13 @@ contract sPOLChildTest is Test, Deploy {
     }
 
     function test_sellSPOL_QuickSell_WithDifferentExchangeRates() public {
-        uint256 polAmount = 10e18; // Use larger amount to ensure sufficient quick redeem reserve
+        uint256 polAmount = 10e18;
         address user = makeAddr("user");
         vm.deal(user, polAmount);
+        vm.deal(admin, 100e18);
 
+        vm.prank(admin);
+        sPOLChildToken.setQuickRedeemBufferSize{value: 100e18}(100e18);
         vm.prank(user);
         sPOLChildToken.buySPOL{value: polAmount}(polAmount);
 
@@ -564,7 +568,9 @@ contract sPOLChildTest is Test, Deploy {
 
         // At better exchange rate, same sPOL amount should convert to more POL
         assertGt(expectedPOL2, expectedPOL1, "Should get more POL at better exchange rate");
-        assertEq(user.balance, userETHAfterFirst + expectedPOL2);
+        assertEq(
+            user.balance, userETHAfterFirst + expectedPOL2, "User should receive correct POL amount after second sell"
+        );
     }
 
     function test_sellSPOL_QuickSell_ZeroAmount() public {

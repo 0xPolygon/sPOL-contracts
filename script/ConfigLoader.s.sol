@@ -37,6 +37,7 @@ contract ConfigLoader is Script {
         vm.etch(polTokenL1, type(DummyImpl).runtimeCode);
         //deployCodeTo("out/ERC20Permit.sol/ERC20Permit.json", abi.encode("POL Token L1", "POL L1", 18, 0), polTokenL1);
         polTokenL2 = makeAddr("polTokenL2");
+        vm.etch(polTokenL2, type(DummyImpl).runtimeCode);
         chainIdL1 = 1;
         chainIdL2 = 2;
         maticTokenL1 = makeAddr("maticTokenL1");
