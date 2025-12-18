@@ -401,7 +401,7 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         uint256 toMint = convertPOLtoSPOL(_amount);
         ValidatorInfo storage validator = validators[_validator];
         require(validator.status == ValidatorStatus.ACTIVE, ValidatorNotActive(_validator));
-        uint256 maxAmount = _validatorMaxTotalStakeDistance(validator, true);
+        uint256 maxAmount = _maxDeposit(validator);
         require(_amount <= maxAmount, ValidatorOverfunded(_amount, maxAmount));
         _takePOL(_amount, _user);
 
