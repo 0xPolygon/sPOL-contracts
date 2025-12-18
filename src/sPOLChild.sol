@@ -233,7 +233,7 @@ contract sPOLChild is
             }
             if (completedBackfills[outstandings[i].backFillCycle]) {
                 reservedWithdrawPOLBalance -= outstandings[i].outstandingPOL;
-            }  else if (outstandings[i].outstandingPOL <= actualQuickRedeemReserve) {
+            } else if (outstandings[i].outstandingPOL <= actualQuickRedeemReserve) {
                 if (outstandings[i].backFillCycle == backFillCycle) {
                     pendingWithdrawPOLBalance -= outstandings[i].outstandingPOL;
                 } else {
@@ -298,7 +298,7 @@ contract sPOLChild is
     }
 
     function _handleExchangeRateUpdate(bytes memory _msg) internal {
-        balanceWithL1();
+        _balanceWithL1();
         (uint256 updatedl1SPOLBalance, uint256 updatedl1DPOLBalance) = _decodeExchangeUpdateMessage(_msg);
         uint256 currentConversion = convertSPOLToPOL(1e18);
         uint256 oldSPOLBalance = l1SPOLBalance;
@@ -333,21 +333,25 @@ contract sPOLChild is
         emit BackfillCompleted(_returnedPOL, _backFillCycle);
     }
 
-    function balanceWithL1() public restricted nonReentrant returns (bool){
+    function balanceWithL1() external restricted nonReentrant {
+        require(_balanceWithL1(), NothingToBalance());
+    }
+
+    function _balanceWithL1() internal returns (bool) {
         require(!onGoingMigration, MigrationAlreadyOngoing());
         require(!onGoingBackfill, BackfillAlreadyOngoing());
 
         if (locallyToBeBurnedSPOL > locallyMintedSPOL) {
-            requestBackfill();
+            _requestBackfill();
         } else if (locallyToBeBurnedSPOL < locallyMintedSPOL) {
-            requestMigration();
+            _requestMigration();
         } else {
             return false;
         }
         return true;
     }
 
-    function requestMigration() internal {
+    function _requestMigration() internal {
         require(targetQuickRedeemReserve < actualQuickRedeemReserve, NothingToMigrate());
         onGoingMigration = true;
 
@@ -367,7 +371,7 @@ contract sPOLChild is
         emit MigrationRequested(polToMigrate, backMigratingSPOL);
     }
 
-    function requestBackfill() internal {
+    function _requestBackfill() internal {
         require(actualQuickRedeemReserve < targetQuickRedeemReserve, NothingToBackfill());
         onGoingBackfill = true;
         backFillCycle += 1;
