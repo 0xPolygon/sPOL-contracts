@@ -32,18 +32,21 @@ contract sPOLMessenger is
     IsPOLController public immutable sPOLController;
     PolBridger public immutable polBridger;
 
-    mapping(uint256 => uint256[]) public backfillNonces;
     mapping(uint256 => bool) public completedBackfill;
+    mapping(uint256 => uint256) public backfillAmounts;
+    uint256 public currentActiveBackfillCycle;
 
-    event MigrationProcessed(uint256 polAmount, uint256 mintedSPOL);
-    event BackfillStarted(uint256 indexed backfillCycle, uint256 polAmount, uint256 sPOLAmount);
     event BackfillCompleted(uint256 indexed backfillCycle, uint256 totalWithdraw);
+    event BackfillStarted(uint256 indexed backfillCycle, uint256 polAmount, uint256 sPOLAmount);
     event ExchangeRateUpdateSent(uint256 totalsPOLBalance, uint256 totaldPOLBalance);
+    event MigrationProcessed(uint256 polAmount, uint256 mintedSPOL);
 
+    error BackfillAlreadyCompleted(uint256 backfillCycle);
+    error BackfillAlreadyOngoing(uint256 backfillCycle);
+    error BackfillNotActive(uint256 backfillCycle);
     error InvalidMessageType(uint8 msgType);
     error NotEnoughPOLInMessenger(uint256 required, uint256 available);
     error NotEnoughSPOLInMessenger(uint256 required, uint256 available);
-    error BackfillAlreadyCompleted(uint256 backfillCycle);
     error ZeroAddress();
 
     constructor(
@@ -117,32 +120,44 @@ contract sPOLMessenger is
 
     function _handleBackfill(bytes memory _msg) internal {
         (uint256 _polAmount, uint256 _sPOLAmount, uint256 _backFillCycle) = _decodeL2BackfillRequestMessage(_msg);
+
+        require(currentActiveBackfillCycle == 0, BackfillAlreadyOngoing(currentActiveBackfillCycle));
+        require(!completedBackfill[_backFillCycle], BackfillAlreadyCompleted(_backFillCycle));
+        require(backfillAmounts[_backFillCycle] == 0, BackfillAlreadyOngoing(_backFillCycle));
         require(
             sPOLToken.balanceOf(address(this)) >= _sPOLAmount,
             NotEnoughSPOLInMessenger(_sPOLAmount, sPOLToken.balanceOf(address(this)))
         );
-        uint256[] memory nonces = sPOLController.startBackfillSell(_polAmount, _sPOLAmount);
-        backfillNonces[_backFillCycle] = nonces;
+        sPOLController.startBackfillSell(_polAmount, _sPOLAmount);
+        backfillAmounts[_backFillCycle] = _polAmount;
+        currentActiveBackfillCycle = _backFillCycle;
         emit BackfillStarted(_backFillCycle, _polAmount, _sPOLAmount);
     }
 
-    function completeBackfill(uint256 _backFillCycle) external restricted whenNotPaused nonReentrant {
-        require(!completedBackfill[_backFillCycle], BackfillAlreadyCompleted(_backFillCycle));
-        uint256 balanceBefore = polToken.balanceOf(address(this));
-        for (uint256 i = 0; i < backfillNonces[_backFillCycle].length; i++) {
-            sPOLController.withdrawPOL(backfillNonces[_backFillCycle][i]);
-        }
-        uint256 balanceAfter = polToken.balanceOf(address(this));
-        uint256 totalWithdraw = balanceAfter - balanceBefore;
+    function completeBackfill() external restricted nonReentrant {
+        require(currentActiveBackfillCycle != 0, BackfillNotActive(0));
+        require(!completedBackfill[currentActiveBackfillCycle], BackfillAlreadyCompleted(currentActiveBackfillCycle));
+        require(backfillAmounts[currentActiveBackfillCycle] > 0, BackfillNotActive(currentActiveBackfillCycle));
+
+        sPOLController.withdrawPOL();
+        uint256 totalWithdraw = backfillAmounts[currentActiveBackfillCycle];
+        require(
+            polToken.balanceOf(address(this)) >= totalWithdraw,
+            NotEnoughPOLInMessenger(totalWithdraw, polToken.balanceOf(address(this)))
+        );
         depositManager.depositERC20ForUser(address(polToken), childTunnel, totalWithdraw);
         _sendMessageToChild(
-            abi.encode(MsgType.L1_BACKFILL_RESPONSE, _encodeL1BackfillResponseMessage(totalWithdraw, _backFillCycle))
+            abi.encode(
+                MsgType.L1_BACKFILL_RESPONSE,
+                _encodeL1BackfillResponseMessage(totalWithdraw, currentActiveBackfillCycle)
+            )
         );
-        completedBackfill[_backFillCycle] = true;
-        emit BackfillCompleted(_backFillCycle, totalWithdraw);
+        completedBackfill[currentActiveBackfillCycle] = true;
+        currentActiveBackfillCycle = 0;
+        emit BackfillCompleted(currentActiveBackfillCycle, totalWithdraw);
     }
 
-    function updateL2ExchangeRate() external restricted whenNotPaused nonReentrant {
+    function updateL2ExchangeRate() external restricted nonReentrant {
         uint256 totalsPOLBalance = sPOLController.totalsPOLBalance();
         uint256 totaldPOLBalance = sPOLController.totaldPOLBalance() - sPOLController.feedPOLBalance();
 
