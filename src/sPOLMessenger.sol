@@ -10,20 +10,12 @@ import {sPOLController as IsPOLController} from "./sPOLController.sol";
 import {BaseRootTunnel} from "./msg/BaseRootTunnel.sol";
 import {MsgCoder} from "./MsgCoder.sol";
 import {Initializable} from "@openzeppelin-contracts-upgradeable/proxy/utils/Initializable.sol";
-import {PausableUpgradeable} from "@openzeppelin-contracts-upgradeable/utils/PausableUpgradeable.sol";
 import {
     AccessManagedUpgradeable
 } from "@openzeppelin-contracts-upgradeable/access/manager/AccessManagedUpgradeable.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 
-contract sPOLMessenger is
-    Initializable,
-    PausableUpgradeable,
-    AccessManagedUpgradeable,
-    ReentrancyGuardTransient,
-    BaseRootTunnel,
-    MsgCoder
-{
+contract sPOLMessenger is Initializable, AccessManagedUpgradeable, ReentrancyGuardTransient, BaseRootTunnel, MsgCoder {
     IERC20 public immutable polToken;
     IERC20 public immutable sPOLToken;
 
@@ -84,7 +76,6 @@ contract sPOLMessenger is
         require(_authority != address(0), ZeroAddress());
         require(_rcmERC20Predicate != address(0), ZeroAddress());
 
-        __Pausable_init();
         __AccessManaged_init(_authority);
 
         polToken.approve(address(sPOLController), type(uint256).max);
@@ -165,13 +156,5 @@ contract sPOLMessenger is
             abi.encode(MsgType.EXCHANGE_UPDATE, _encodeExchangeUpdateMessage(totalsPOLBalance, totaldPOLBalance))
         );
         emit ExchangeRateUpdateSent(totalsPOLBalance, totaldPOLBalance);
-    }
-
-    function pauseUserFunctions() external restricted {
-        _pause();
-    }
-
-    function unpauseUserFunctions() external restricted {
-        _unpause();
     }
 }
