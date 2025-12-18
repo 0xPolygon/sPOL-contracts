@@ -93,9 +93,9 @@ contract sPOLChild is
     event MaxExchangeRateDelayChanged(uint256 oldDelay, uint256 newDelay);
 
     // Migration and backfill events
-    event MigrationRequested(uint256 migratingPOLAmount, uint256 backMigratingSPOL);
+    event MigrationRequested(uint256 migratingPOLAmount, uint256 bridgeMissingSPOL);
     event MigrationCompleted(uint256 backMigratingSPOL);
-    event BackfillRequested(uint256 backfillPOLAmount, uint256 bridgeMissingSPOL, uint256 backfillCycle);
+    event BackfillRequested(uint256 backfillPOLAmount, uint256 toBeBurnedSPOL, uint256 backfillCycle);
     event BackfillCompleted(uint256 returnedPOL, uint256 backfillCycle);
 
     error AddressUnauthorized(address caller);
