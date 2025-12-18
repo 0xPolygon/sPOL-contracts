@@ -274,6 +274,7 @@ contract sPOLControllerFullL1Test is Test, Deploy {
 
         // after setup, send a valid exchange rate update to L2
         vm.recordLogs();
+        vm.prank(testAdmin);
         messenger.updateL2ExchangeRate();
         Vm.Log[] memory stateSyncLogs = vm.getRecordedLogs();
 
@@ -310,6 +311,7 @@ contract sPOLControllerFullL1Test is Test, Deploy {
         controller.restakeValidator(validator1ID);
         // send updated exchange rate to L2
         vm.recordLogs();
+        vm.prank(testAdmin);
         messenger.updateL2ExchangeRate();
         stateSyncLogs = vm.getRecordedLogs();
 
@@ -476,6 +478,7 @@ contract sPOLControllerFullL1Test is Test, Deploy {
         vm.recordLogs();
         vm.expectEmit(false, false, false, false, address(stateSenderL1));
         emit IStateSender.StateSynced(0, address(0), "");
+        vm.prank(testAdmin);
         messenger.completeBackfill(1);
         Vm.Log[] memory stateSyncLogs2 = vm.getRecordedLogs();
 

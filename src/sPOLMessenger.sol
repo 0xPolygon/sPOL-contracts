@@ -126,7 +126,7 @@ contract sPOLMessenger is
         emit BackfillStarted(_backFillCycle, _polAmount, _sPOLAmount);
     }
 
-    function completeBackfill(uint256 _backFillCycle) external whenNotPaused nonReentrant {
+    function completeBackfill(uint256 _backFillCycle) external restricted whenNotPaused nonReentrant {
         require(!completedBackfill[_backFillCycle], BackfillAlreadyCompleted(_backFillCycle));
         uint256 balanceBefore = polToken.balanceOf(address(this));
         for (uint256 i = 0; i < backfillNonces[_backFillCycle].length; i++) {
@@ -142,7 +142,7 @@ contract sPOLMessenger is
         emit BackfillCompleted(_backFillCycle, totalWithdraw);
     }
 
-    function updateL2ExchangeRate() external whenNotPaused nonReentrant {
+    function updateL2ExchangeRate() external restricted whenNotPaused nonReentrant {
         uint256 totalsPOLBalance = sPOLController.totalsPOLBalance();
         uint256 totaldPOLBalance = sPOLController.totaldPOLBalance() - sPOLController.feedPOLBalance();
 
