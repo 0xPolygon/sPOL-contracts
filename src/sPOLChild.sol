@@ -106,6 +106,8 @@ contract sPOLChild is
     error IncorrectPOLAmount(uint256 sent, uint256 expected);
     error InvalidMessageType();
     error MigrationAlreadyOngoing();
+    error NothingToBackfill();
+    error NothingToBalance();
     error NothingToMigrate();
     error POLAmountMustBeGreaterThanZero();
     error POLTransferFailed();
@@ -294,6 +296,7 @@ contract sPOLChild is
     }
 
     function _handleExchangeRateUpdate(bytes memory _msg) internal {
+        balanceWithL1();
         (uint256 updatedl1SPOLBalance, uint256 updatedl1DPOLBalance) = _decodeExchangeUpdateMessage(_msg);
         uint256 currentConversion = convertSPOLToPOL(1e18);
         uint256 oldSPOLBalance = l1SPOLBalance;
@@ -328,8 +331,21 @@ contract sPOLChild is
         emit BackfillCompleted(_returnedPOL, _backFillCycle);
     }
 
-    function requestMigration() external whenNotPaused nonReentrant {
+    function balanceWithL1() public restricted nonReentrant returns (bool){
         require(!onGoingMigration, MigrationAlreadyOngoing());
+        require(!onGoingBackfill, BackfillAlreadyOngoing());
+
+        if (locallyToBeBurnedSPOL > locallyMintedSPOL) {
+            requestBackfill();
+        } else if (locallyToBeBurnedSPOL < locallyMintedSPOL) {
+            requestMigration();
+        } else {
+            return false;
+        }
+        return true;
+    }
+
+    function requestMigration() internal {
         require(targetQuickRedeemReserve < actualQuickRedeemReserve, NothingToMigrate());
         onGoingMigration = true;
 
@@ -337,50 +353,42 @@ contract sPOLChild is
         actualQuickRedeemReserve -= polToMigrate;
         polBalance -= polToMigrate;
 
-        uint256 sPOLToAddToBridge;
-        // maybe do this on response
-        if (locallyMintedSPOL > locallyToBeBurnedSPOL) {
-            sPOLToAddToBridge = locallyMintedSPOL - locallyToBeBurnedSPOL;
-            locallyMintedSPOL -= locallyToBeBurnedSPOL;
-            locallyToBeBurnedSPOL = 0;
-        } else {
-            locallyToBeBurnedSPOL -= locallyMintedSPOL;
-            locallyMintedSPOL = 0;
-        }
-        backMigratingSPOL = sPOLToAddToBridge;
+        locallyMintedSPOL -= locallyToBeBurnedSPOL;
+        backMigratingSPOL = locallyMintedSPOL;
+        locallyToBeBurnedSPOL = 0;
+        locallyMintedSPOL = 0;
+
         _exitPOLforMessenger(polToMigrate);
         _sendMessageToRoot(
-            abi.encode(MsgType.L2_MIGRATION_REQUEST, _encodeL2MigrationRequestMessage(polToMigrate, sPOLToAddToBridge))
+            abi.encode(MsgType.L2_MIGRATION_REQUEST, _encodeL2MigrationRequestMessage(polToMigrate, backMigratingSPOL))
         );
-        emit MigrationRequested(polToMigrate, sPOLToAddToBridge);
+        emit MigrationRequested(polToMigrate, backMigratingSPOL);
     }
 
-    function requestBackfill() external whenNotPaused nonReentrant {
-        require(!onGoingBackfill, BackfillAlreadyOngoing());
+    function requestBackfill() internal {
+        require(actualQuickRedeemReserve < targetQuickRedeemReserve, NothingToBackfill());
         onGoingBackfill = true;
         backFillCycle += 1;
+
+        // Sold sPOL that wasn't instantly redeemable
         pendingWithdrawPOLBalance += missingWithdrawPOLBalance;
+        missingWithdrawPOLBalance = 0;
         uint256 backFillAmount = pendingWithdrawPOLBalance;
 
-        if (actualQuickRedeemReserve < targetQuickRedeemReserve) {
-            backFillAmount += targetQuickRedeemReserve - actualQuickRedeemReserve;
-        }
-        missingWithdrawPOLBalance = 0;
+        // Refill quick redeem reserve
+        backFillAmount += targetQuickRedeemReserve - actualQuickRedeemReserve;
 
-        uint256 bridgeMissingSPOL;
-        if (locallyMintedSPOL > locallyToBeBurnedSPOL) {
-            bridgeMissingSPOL = locallyMintedSPOL - locallyToBeBurnedSPOL;
-            _burnSPOLForMessenger(bridgeMissingSPOL);
-            locallyMintedSPOL -= locallyToBeBurnedSPOL;
-            locallyToBeBurnedSPOL = 0;
-        }
+        uint256 sPOLToSell = locallyToBeBurnedSPOL - locallyMintedSPOL;
+        _burnSPOLForMessenger(sPOLToSell);
+        locallyMintedSPOL = 0;
+        locallyToBeBurnedSPOL = 0;
+
         _sendMessageToRoot(
             abi.encode(
-                MsgType.L2_BACKFILL_REQUEST,
-                _encodeL2BackfillRequestMessage(backFillAmount, bridgeMissingSPOL, backFillCycle)
+                MsgType.L2_BACKFILL_REQUEST, _encodeL2BackfillRequestMessage(backFillAmount, sPOLToSell, backFillCycle)
             )
         );
-        emit BackfillRequested(backFillAmount, bridgeMissingSPOL, backFillCycle);
+        emit BackfillRequested(backFillAmount, sPOLToSell, backFillCycle);
     }
 
     ///////////////////////////////
