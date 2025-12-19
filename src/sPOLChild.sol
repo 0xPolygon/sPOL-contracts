@@ -352,10 +352,11 @@ contract sPOLChild is
     }
 
     function _requestMigration() internal {
-        require(targetQuickRedeemReserve < actualQuickRedeemReserve, NothingToMigrate());
         onGoingMigration = true;
 
         uint256 polToMigrate = actualQuickRedeemReserve - targetQuickRedeemReserve;
+        require(polToMigrate > 0, NothingToMigrate());
+
         actualQuickRedeemReserve -= polToMigrate;
         polBalance -= polToMigrate;
 
@@ -372,7 +373,6 @@ contract sPOLChild is
     }
 
     function _requestBackfill() internal {
-        require(actualQuickRedeemReserve < targetQuickRedeemReserve, NothingToBackfill());
         onGoingBackfill = true;
         backFillCycle += 1;
 
