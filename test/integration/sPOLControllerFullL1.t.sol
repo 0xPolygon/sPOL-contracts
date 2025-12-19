@@ -320,6 +320,8 @@ contract sPOLControllerFullL1Test is Test, Deploy {
         // prank statesync using emitted data
         assertEq(stateSyncLogs[0].topics[0], keccak256("StateSynced(uint256,address,bytes)"));
         assertEq(stateSyncLogs[0].topics[2], bytes32(uint256(uint160(address(child)))));
+
+        // This doesn't start a migration as no net sell/buy occured
         vm.prank(stateSyncerL2);
         child.onStateReceive(0, abi.decode(stateSyncLogs[0].data, (bytes)));
         // buy some sPOL on L2 with new exchange rate
@@ -329,8 +331,8 @@ contract sPOLControllerFullL1Test is Test, Deploy {
         assertEq(child.balanceOf(user1), expectedReturn2);
         assertLt(expectedReturn2, expectedReturn);
 
-        // snapshot before migration
-        uint256 beforeMigration = vm.snapshotState();
+        // snapshot before sell
+        uint256 beforeSell = vm.snapshotState();
         // sell into reserve
         uint256 userBalanceBeforeSell = user1.balance;
         uint256 expectedReturnSell = child.convertSPOLToPOL(8000 ether);
@@ -340,21 +342,28 @@ contract sPOLControllerFullL1Test is Test, Deploy {
         child.sellSPOL(8000 ether);
         assertEq(child.balanceOf(user1), expectedReturn2);
         assertEq(user1.balance, userBalanceBeforeSell + expectedReturnSell);
-
-        // attempt migration
-        vm.expectRevert(abi.encodeWithSelector(sPOLChild.NothingToMigrate.selector));
-        child.requestMigration();
-        vm.revertToState(beforeMigration);
+        //balancing should attempt to backfill
+        // vm.prank(admin);
+        // vm.expectEmit(true, true, true, true, address(child));
+        // emit sPOLChild.BackfillRequested(expectedReturnSell - largeAmount, expectedReturnSell - expectedReturn2, 1);
+        // child.balanceWithL1();
+        vm.revertToState(beforeSell);
 
         // start migration
         uint256 reserveOverhang = child.actualQuickRedeemReserve() - child.targetQuickRedeemReserve();
         bytes memory expectedData =
             abi.encode(MsgCoder.MsgType.L2_MIGRATION_REQUEST, abi.encode(reserveOverhang, expectedReturn2));
+
         vm.expectEmit(true, true, true, true, address(polTokenL2));
         emit IMRC20.Withdraw(maticTokenL1, address(polBridger), reserveOverhang, 0, 0);
         vm.expectEmit(true, true, true, true, address(child));
         emit BaseChildTunnel.MessageSent(expectedData);
-        child.requestMigration();
+        // balancing should attempt to migrate
+        vm.expectEmit(true, true, true, true, address(child));
+        // largeAmount from secondBuy, largeAmount-expectedReturn is the safetyFee we got from first buy/sell
+        emit sPOLChild.MigrationRequested(largeAmount + largeAmount - expectedReturn, expectedReturn2);
+        vm.prank(admin);
+        child.balanceWithL1();
         assertEq(child.onGoingMigration(), true);
         assertEq(child.backMigratingSPOL(), expectedReturn2);
 
@@ -444,30 +453,30 @@ contract sPOLControllerFullL1Test is Test, Deploy {
         // backfill some POL to child contract
         uint256 reserveMissing =
             child.missingWithdrawPOLBalance() + child.targetQuickRedeemReserve() - child.actualQuickRedeemReserve();
-
-        uint256 l2mintedSPOL = child.locallyMintedSPOL() - child.locallyToBeBurnedSPOL();
+        uint256 l2burnedSPOL = child.locallyToBeBurnedSPOL() - child.locallyMintedSPOL();
         bytes memory expectedDataBackfill =
-            abi.encode(MsgCoder.MsgType.L2_BACKFILL_REQUEST, abi.encode(reserveMissing, l2mintedSPOL, 1));
+            abi.encode(MsgCoder.MsgType.L2_BACKFILL_REQUEST, abi.encode(reserveMissing, l2burnedSPOL, 1));
 
         vm.expectEmit(true, true, true, true, address(child));
-        emit IERC20.Transfer(address(child), address(messenger), l2mintedSPOL);
+        emit IERC20.Transfer(address(child), address(messenger), l2burnedSPOL);
         vm.expectEmit(true, true, true, true, address(child));
-        emit IERC20.Transfer(address(messenger), address(0), l2mintedSPOL);
+        emit IERC20.Transfer(address(messenger), address(0), l2burnedSPOL);
         vm.expectEmit(true, true, true, true, address(child));
         emit BaseChildTunnel.MessageSent(expectedDataBackfill);
-        child.requestBackfill();
+        vm.prank(admin);
+        child.balanceWithL1();
 
         assertEq(child.missingWithdrawPOLBalance(), 0);
-        assertEq(child.locallyMintedSPOL() - l2mintedSPOL, 0);
+        assertEq(child.locallyMintedSPOL(), 0);
         assertEq(child.locallyToBeBurnedSPOL(), 0);
 
         // complete backfill on L1
         vm.selectFork(networkL1);
         // mint/burn sPOL, instead of using proof
         vm.prank(address(controller));
-        sPOLToken.mint(address(messenger), l2mintedSPOL);
+        sPOLToken.mint(address(messenger), l2burnedSPOL);
         vm.prank(address(controller));
-        sPOLToken.burn(address(erc20predicatePortal), l2mintedSPOL);
+        sPOLToken.burn(address(erc20predicatePortal), l2burnedSPOL);
 
         MocksPOLMessenger(address(messenger)).expose_processMessageFromChild(expectedDataBackfill);
 
@@ -479,7 +488,7 @@ contract sPOLControllerFullL1Test is Test, Deploy {
         vm.expectEmit(false, false, false, false, address(stateSenderL1));
         emit IStateSender.StateSynced(0, address(0), "");
         vm.prank(testAdmin);
-        messenger.completeBackfill(1);
+        messenger.completeBackfill();
         Vm.Log[] memory stateSyncLogs2 = vm.getRecordedLogs();
 
         // finish backfill on L2
