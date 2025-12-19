@@ -382,7 +382,10 @@ contract sPOLChild is
         uint256 backFillAmount = pendingWithdrawPOLBalance;
 
         // Refill quick redeem reserve
-        backFillAmount += targetQuickRedeemReserve - actualQuickRedeemReserve;
+        if (targetQuickRedeemReserve > actualQuickRedeemReserve) {
+            backFillAmount += targetQuickRedeemReserve - actualQuickRedeemReserve;
+        }
+        require(backFillAmount > 0, NothingToBackfill());
 
         uint256 sPOLToSell = locallyToBeBurnedSPOL - locallyMintedSPOL;
         _burnSPOLForMessenger(sPOLToSell);
