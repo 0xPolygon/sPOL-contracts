@@ -130,7 +130,8 @@ contract sPOLMessenger is Initializable, AccessManagedUpgradeable, ReentrancyGua
         require(!completedBackfill[currentActiveBackfillCycle], BackfillAlreadyCompleted(currentActiveBackfillCycle));
         require(backfillAmounts[currentActiveBackfillCycle] > 0, BackfillNotActive(currentActiveBackfillCycle));
 
-        sPOLController.withdrawPOL();
+        try sPOLController.withdrawPOL() {} catch {}
+
         uint256 totalWithdraw = backfillAmounts[currentActiveBackfillCycle];
         require(
             polToken.balanceOf(address(this)) >= totalWithdraw,
