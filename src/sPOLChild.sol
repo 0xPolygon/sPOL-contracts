@@ -334,70 +334,112 @@ contract sPOLChild is
     }
 
     function balanceWithL1() external restricted nonReentrant {
-        require(_balanceWithL1(), NothingToBalance());
+        _balanceWithL1();
     }
 
-    function _balanceWithL1() internal returns (bool) {
+    function _balanceWithL1() internal {
         require(!onGoingMigration, MigrationAlreadyOngoing());
         require(!onGoingBackfill, BackfillAlreadyOngoing());
 
-        if (locallyToBeBurnedSPOL > locallyMintedSPOL) {
-            _requestBackfill();
-        } else if (locallyToBeBurnedSPOL < locallyMintedSPOL) {
-            _requestMigration();
-        } else {
-            return false;
-        }
-        return true;
-    }
+        // options:
+        // b > m q0
+        // b > m q+
+        // b > m q-
+        // b < m q0
+        // b < m q+
+        // b < m q- not possible? below code assumes this
+        // b = m q0
+        // b = m q+ migrate? small amounts so no
+        // b = m q- not possible?
 
-    function _requestMigration() internal {
-        onGoingMigration = true;
-
-        uint256 polToMigrate = actualQuickRedeemReserve - targetQuickRedeemReserve;
-        require(polToMigrate > 0, NothingToMigrate());
-
-        actualQuickRedeemReserve -= polToMigrate;
-        polBalance -= polToMigrate;
-
-        locallyMintedSPOL -= locallyToBeBurnedSPOL;
-        backMigratingSPOL = locallyMintedSPOL;
-        locallyToBeBurnedSPOL = 0;
-        locallyMintedSPOL = 0;
-
-        _exitPOLforMessenger(polToMigrate);
-        _sendMessageToRoot(
-            abi.encode(MsgType.L2_MIGRATION_REQUEST, _encodeL2MigrationRequestMessage(polToMigrate, backMigratingSPOL))
-        );
-        emit MigrationRequested(polToMigrate, backMigratingSPOL);
-    }
-
-    function _requestBackfill() internal {
-        onGoingBackfill = true;
-        backFillCycle += 1;
-
-        // Sold sPOL that wasn't instantly redeemable
-        pendingWithdrawPOLBalance += missingWithdrawPOLBalance;
-        missingWithdrawPOLBalance = 0;
-        uint256 backFillAmount = pendingWithdrawPOLBalance;
-
-        // Refill quick redeem reserve
+        uint256 pendingQuickRedeemRefillPOL;
+        // recalculate local balances
+        // we have to little pol for reserve
         if (targetQuickRedeemReserve > actualQuickRedeemReserve) {
-            backFillAmount += targetQuickRedeemReserve - actualQuickRedeemReserve;
+            pendingQuickRedeemRefillPOL += targetQuickRedeemReserve
+                - (pendingQuickRedeemRefillPOL + actualQuickRedeemReserve);
+            // we have surplus pol in reserve
+        } else if (targetQuickRedeemReserve < actualQuickRedeemReserve) {
+            uint256 surplusPOL = actualQuickRedeemReserve - targetQuickRedeemReserve;
+
+            // absorbing surplusPOL technically starts a backfill
+            if (missingWithdrawPOLBalance > 0) {
+                _initBackfill();
+                // surplus can fully cover missing withdraw balance, this immediately completes the backfill
+                if (surplusPOL >= missingWithdrawPOLBalance) {
+                    actualQuickRedeemReserve -= missingWithdrawPOLBalance;
+                    reservedWithdrawPOLBalance += missingWithdrawPOLBalance;
+                    missingWithdrawPOLBalance = 0;
+
+                    completedBackfills[backFillCycle] = true;
+                    onGoingBackfill = false;
+                    emit BackfillCompleted(0, backFillCycle);
+                } else {
+                    // only partially covered, backfill not completed yet, this should force a backfill in the next step
+                    actualQuickRedeemReserve -= surplusPOL;
+                    reservedWithdrawPOLBalance += surplusPOL;
+                    missingWithdrawPOLBalance -= surplusPOL;
+                }
+            }
+        } else {
+            // equal, nothing changed
         }
-        require(backFillAmount > 0, NothingToBackfill());
 
-        uint256 sPOLToSell = locallyToBeBurnedSPOL - locallyMintedSPOL;
-        _burnSPOLForMessenger(sPOLToSell);
-        locallyMintedSPOL = 0;
-        locallyToBeBurnedSPOL = 0;
+        // calculate net migration/backfill amounts
+        if (locallyToBeBurnedSPOL > locallyMintedSPOL) {
+            pendingWithdrawPOLBalance += missingWithdrawPOLBalance;
+            missingWithdrawPOLBalance = 0;
+            uint256 polToReturn = pendingWithdrawPOLBalance + pendingQuickRedeemRefillPOL;
+            uint256 sPOLToBurn = locallyToBeBurnedSPOL - locallyMintedSPOL;
 
+            locallyToBeBurnedSPOL = 0;
+            locallyMintedSPOL = 0;
+            _requestBackfill(polToReturn, sPOLToBurn);
+        } else if (locallyToBeBurnedSPOL < locallyMintedSPOL) {
+            uint256 polToMigrate = actualQuickRedeemReserve - targetQuickRedeemReserve;
+            actualQuickRedeemReserve -= polToMigrate;
+            polBalance -= polToMigrate;
+            uint256 sPOLToMint = locallyMintedSPOL - locallyToBeBurnedSPOL;
+
+            locallyToBeBurnedSPOL = 0;
+            locallyMintedSPOL = 0;
+            _requestMigration(polToMigrate, sPOLToMint);
+        } else {
+            // equal
+            // there can be surplus pol, but likely very little , we can just leave it for next migration/backfill
+            locallyToBeBurnedSPOL = 0;
+            locallyMintedSPOL = 0;
+        }
+    }
+
+    function _requestMigration(uint256 _polToMigrate, uint256 _spolToMint) internal {
+        onGoingMigration = true;
+        backMigratingSPOL = _spolToMint;
+
+        _exitPOLforMessenger(_polToMigrate);
+        _sendMessageToRoot(
+            abi.encode(MsgType.L2_MIGRATION_REQUEST, _encodeL2MigrationRequestMessage(_polToMigrate, _spolToMint))
+        );
+        emit MigrationRequested(_polToMigrate, _spolToMint);
+    }
+
+    function _requestBackfill(uint256 _polToBackfill, uint256 _spolToSell) internal {
+        if (onGoingBackfill == false) {
+            _initBackfill();
+        }
+
+        _burnSPOLForMessenger(_spolToSell);
         _sendMessageToRoot(
             abi.encode(
-                MsgType.L2_BACKFILL_REQUEST, _encodeL2BackfillRequestMessage(backFillAmount, sPOLToSell, backFillCycle)
+                MsgType.L2_BACKFILL_REQUEST, _encodeL2BackfillRequestMessage(_polToBackfill, _spolToSell, backFillCycle)
             )
         );
-        emit BackfillRequested(backFillAmount, sPOLToSell, backFillCycle);
+        emit BackfillRequested(_polToBackfill, _spolToSell, backFillCycle);
+    }
+
+    function _initBackfill() internal {
+        onGoingBackfill = true;
+        backFillCycle += 1;
     }
 
     ///////////////////////////////
