@@ -36,15 +36,23 @@ contract MockValidatorShare {
         return (currentReward);
     }
 
-    function restakeAndTransferFrom(address _from, address _to, uint256 _amount) public returns (bool, uint256) {
+    function restakeAndTransferFrom(address _from, uint256 _amount) public returns (bool, uint256) {
         require(balanceOf[_from] >= _amount, "Insufficient balance");
 
         uint256 currentReward = reward;
         balanceOf[_from] -= _amount;
         balanceOf[_from] += currentReward;
-        balanceOf[_to] += _amount;
+        balanceOf[msg.sender] += _amount;
         reward = 0;
         return (true, currentReward);
+    }
+
+    function transferFrom(address _from, address _to, uint256 _amount) public returns (bool) {
+        require(balanceOf[_from] >= _amount, "Insufficient balance");
+
+        balanceOf[_from] -= _amount;
+        balanceOf[_to] += _amount;
+        return true;
     }
 
     function sellVoucher_newPOL(uint256, uint256) public {

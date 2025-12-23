@@ -432,7 +432,7 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
 
         if (incomingValidator.status == ValidatorStatus.ACTIVE && _amount <= _maxDeposit(incomingValidator)) {
             (bool success, uint256 restakedAmount) =
-                incomingValidator.validatorContract.restakeAndTransferFrom(_user, address(this), _amount);
+                incomingValidator.validatorContract.restakeAndTransferFrom(_user, _amount);
             require(success, DPOLRestakeTransferFromFailed());
 
             _adddPOLBalanceFee(restakedAmount);
@@ -440,15 +440,14 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         } else {
             (uint16[] memory selectedValidators, uint256[] memory selectedAmounts) = _selectValidators(_amount, true);
 
-            (bool success, uint256 restakedAmount) = IValidatorShare(
-                    stakeManager.getValidatorContract(_validatorOfDPOL)
-                ).restakeAndTransferFrom(_user, address(this), _amount);
+            // here we use transferFrom, without restake as we don't want to change state of inactive validators
+            bool success = IValidatorShare(stakeManager.getValidatorContract(_validatorOfDPOL))
+                .transferFrom(_user, address(this), _amount);
             require(success, DPOLRestakeTransferFromFailed());
 
-            _adddPOLBalanceFee(restakedAmount);
             for (uint256 i = 0; i < selectedAmounts.length; i++) {
+                _restakeValidator(selectedValidators[i]);
                 if (validators[selectedValidators[i]].index != _validatorOfDPOL) {
-                    _restakeValidator(selectedValidators[i]);
                     stakeManager.migrateDelegation(_validatorOfDPOL, selectedValidators[i], selectedAmounts[i]);
                 }
                 validators[selectedValidators[i]].totalStaked += selectedAmounts[i];
