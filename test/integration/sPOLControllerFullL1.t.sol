@@ -343,10 +343,33 @@ contract sPOLControllerFullL1Test is Test, Deploy {
         assertEq(child.balanceOf(user1), expectedReturn2);
         assertEq(user1.balance, userBalanceBeforeSell + expectedReturnSell);
         //balancing should attempt to backfill
-        // vm.prank(admin);
-        // vm.expectEmit(true, true, true, true, address(child));
-        // emit sPOLChild.BackfillRequested(expectedReturnSell - largeAmount, expectedReturnSell - expectedReturn2, 1);
-        // child.balanceWithL1();
+        vm.prank(admin);
+        vm.expectEmit(true, true, true, true, address(child));
+        // POL amount requested is the return of the most recent 8k sell,minus the largeAmount just bought, minus the safety buffer from the first buy/sell
+        emit sPOLChild.BackfillRequested(
+            expectedReturnSell - largeAmount - (largeAmount - expectedReturn), 8000 ether - expectedReturn2, 1
+        );
+        child.balanceWithL1();
+        vm.revertToState(beforeSell);
+
+        // sell without reserve
+        vm.prank(admin);
+        child.setQuickRedeemBufferSize{value: 0}(0);
+        uint256 userSPOLBefore = child.balanceOf(user1);
+        vm.prank(childChainManager);
+        child.deposit(user1, abi.encode(8000 ether));
+        vm.prank(user1);
+        child.sellSPOL(8000 ether);
+        assertEq(child.balanceOf(user1), userSPOLBefore);
+        assertEq(user1.balance, userBalanceBeforeSell);
+        //balancing should attempt to backfill
+        vm.prank(admin);
+        vm.expectEmit(true, true, true, true, address(child));
+        // POL amount requested is the return of the most recent 8k sell minus earlier buy and safety fee from first buy/sell
+        emit sPOLChild.BackfillRequested(
+            expectedReturnSell - largeAmount - (largeAmount - expectedReturn), 8000 ether - expectedReturn2, 1
+        );
+        child.balanceWithL1();
         vm.revertToState(beforeSell);
 
         // start migration
@@ -641,11 +664,17 @@ contract sPOLControllerFullL1Test is Test, Deploy {
             user3liquidRewards + user3POLBalance,
             "user3 should have received their liquid rewards in POL"
         );
+        assertEq(knownValidator.getLiquidRewards(user3), 0, "user3 should have no liquid rewards");
         // Verify that the controller's dPOL balance has increased due to liquid rewards being claimed
         assertEq(
             knownValidator.balanceOf(address(controller)),
             controllerDPOLBalance + controllerliquidRewards + mediumAmount,
             "controller should have increased dPOL balance from rewards"
+        );
+        assertEq(
+            knownValidator.getLiquidRewards(address(controller)),
+            0,
+            "controller should have no liquid rewards from known validator"
         );
 
         // user4 buys using permit
@@ -659,6 +688,11 @@ contract sPOLControllerFullL1Test is Test, Deploy {
 
         uint256 expectedSPOLFromuser4DPOL = controller.convertPOLtoSPOL(mediumAmount);
         uint256 controllerDPOLBalance4 = knownValidator.balanceOf(address(controller));
+        assertEq(
+            knownValidator.getLiquidRewards(address(controller)),
+            0,
+            "controller should have no liquid rewards from known validator"
+        );
 
         // user4 attempts to convert dPOL to sPOL using permit
         externalValidator._cacheDomainSeparatorV4();
@@ -674,6 +708,7 @@ contract sPOLControllerFullL1Test is Test, Deploy {
             knownValidator.balanceOf(address(controller)),
             "controller should have gotten permit dPOL"
         );
+        assertEq(0, externalValidator.balanceOf(address(controller)), "controller should not get external dPOL");
         assertEq(
             controller.totaldPOLBalance(), controllerDPOLBalance4 + mediumAmount, "total dPOL balance should update"
         );
