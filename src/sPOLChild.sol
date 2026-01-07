@@ -233,12 +233,6 @@ contract sPOLChild is
             }
             if (completedBackfills[outstandings[i].backFillCycle]) {
                 reservedWithdrawPOLBalance -= outstandings[i].outstandingPOL;
-            } else if (outstandings[i].outstandingPOL <= actualQuickRedeemReserve) {
-                if (outstandings[i].backFillCycle == backFillCycle) {
-                    pendingWithdrawPOLBalance -= outstandings[i].outstandingPOL;
-                } else {
-                    missingWithdrawPOLBalance -= outstandings[i].outstandingPOL;
-                }
                 actualQuickRedeemReserve -= outstandings[i].outstandingPOL;
             } else {
                 continue;
