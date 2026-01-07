@@ -307,9 +307,7 @@ contract sPOLChild is
             if (missingWithdrawPOLBalance > 0) {
                 _startBackfill(missingWithdrawPOLBalance);
                 surplusPOL -= missingWithdrawPOLBalance;
-                reservedWithdrawPOLBalance += missingWithdrawPOLBalance;
                 _localBackfill(missingWithdrawPOLBalance);
-                missingWithdrawPOLBalance = 0;
                 _completeBackfill(0, backFillCycle);
             }
             if (surplusPOL > 0) {
@@ -322,11 +320,8 @@ contract sPOLChild is
             // not enough surplus, so request backfill
             _startBackfill(missingWithdrawPOLBalance);
             if (surplusPOL > 0) {
-                missingWithdrawPOLBalance -= surplusPOL;
-                reservedWithdrawPOLBalance += surplusPOL;
                 _localBackfill(surplusPOL);
             }
-            requestedWithdrawPOLBalance += missingWithdrawPOLBalance;
             uint256 sPOLToBeBurned = locallyToBeBurnedSPOL - locallyMintedSPOL;
             locallyToBeBurnedSPOL = 0;
             locallyMintedSPOL = 0;
@@ -349,15 +344,18 @@ contract sPOLChild is
     function _startBackfill(uint256 _polToBackfill) internal {
         onGoingBackfill = true;
         backFillCycle += 1;
-
         emit BackfillStarted(_polToBackfill, backFillCycle);
     }
 
     function _localBackfill(uint256 _polBackfilled) internal {
+        missingWithdrawPOLBalance -= _polBackfilled;
+        reservedWithdrawPOLBalance += _polBackfilled;
         emit BackfillLocalCompleted(_polBackfilled, backFillCycle);
     }
 
     function _requestBackfill(uint256 _polToBackfill, uint256 _spolToSell) internal {
+        requestedWithdrawPOLBalance += missingWithdrawPOLBalance;
+
         _burnSPOLForMessenger(_spolToSell);
         _sendMessageToRoot(
             abi.encode(
