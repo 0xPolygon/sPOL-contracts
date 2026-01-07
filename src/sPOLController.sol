@@ -266,6 +266,7 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     }
 
     function _restakeValidator(uint16 _validator) internal {
+        require(validators[_validator].status == ValidatorStatus.ACTIVE, ValidatorNotActive(_validator));
         (uint256 amountRestaked,) = validators[_validator].validatorContract.restakePOL();
         _adddPOLBalanceFee(amountRestaked);
         validators[_validator].totalStaked += amountRestaked;
