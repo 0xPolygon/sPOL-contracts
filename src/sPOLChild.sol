@@ -309,8 +309,8 @@ contract sPOLChild is
                 surplusPOL -= missingWithdrawPOLBalance;
                 reservedWithdrawPOLBalance += missingWithdrawPOLBalance;
                 _localBackfill(missingWithdrawPOLBalance);
-                _completeBackfill(missingWithdrawPOLBalance, backFillCycle);
                 missingWithdrawPOLBalance = 0;
+                _completeBackfill(0, backFillCycle);
             }
             if (surplusPOL > 0) {
                 uint256 sPOLToBeMinted = locallyMintedSPOL - locallyToBeBurnedSPOL;
