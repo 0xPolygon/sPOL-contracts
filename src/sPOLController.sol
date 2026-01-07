@@ -482,8 +482,6 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         whenNotPaused
         returns (uint256[] memory)
     {
-        // consume permit resets allowance to 0 after use, as we don't want any leftover allowance
-        // allowance should have no negative downsides, we do this to be safe
         _applyPermit(address(sPOLToken), _amount, _user, _deadline, _v, _r, _s);
         return _sellSPOLMulti(_amount, _user);
     }
@@ -505,8 +503,6 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         bytes32 _r,
         bytes32 _s
     ) external whenNotPaused returns (uint256) {
-        // consume permit resets allowance to 0 after use, as we don't want any leftover allowance
-        // allowance should have no negative downsides, we do this to be safe
         _applyPermit(address(sPOLToken), _amount, _user, _deadline, _v, _r, _s);
         return _sellSPOLSingle(_amount, _validator, _user);
     }
@@ -593,7 +589,6 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         require(userNonces[_user].length > 0, NoOpenNonces(_user));
 
         uint256 totalAmount;
-        //create a copy of the array in memory to avoid SStores
         uint256[] memory memNonces = userNonces[_user];
         for (uint256 i = 0; i < memNonces.length; i++) {
             uint256 shares = _redeemNonceAtValidator(memNonces[i]);
@@ -875,6 +870,8 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         ERC20Permit token = ERC20Permit(_token);
         uint256 nonceBefore = token.nonces(_user);
         if (_token == address(sPOLToken)) {
+            // consume permit resets allowance to 0 after use, as we don't want any leftover allowance
+            // allowance should have no negative downsides, we do this to be safe
             sPOLToken.consumePermit(_user, address(this), _amount, _deadline, _v, _r, _s);
         } else {
             ERC20Permit(_token).permit(_user, address(this), _amount, _deadline, _v, _r, _s);
