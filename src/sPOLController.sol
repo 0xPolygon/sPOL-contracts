@@ -804,8 +804,9 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
             expectedSPOL >= _amountSPOL,
             BadExchangeRate(_amountPOL, _amountSPOL, totaldPOLBalance - feedPOLBalance, totalsPOLBalance())
         );
-        (uint16[] memory validator, uint256[] memory amount) = _selectValidators(_amountPOL, true);
         _takePOL(_amountPOL, msg.sender);
+
+        (uint16[] memory validator, uint256[] memory amount) = _selectValidators(_amountPOL, true);
         uint256 totalShares;
         for (uint256 i = 0; i < amount.length; i++) {
             totalShares += _buySharesFromValidator(validators[validator[i]], amount[i]);
@@ -816,11 +817,7 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         _emitExchangeRateUpdate();
     }
 
-    function startBackfillSell(uint256 _amountPOL, uint256 _amountSPOL)
-        external
-        nonReentrant
-        returns (uint256[] memory)
-    {
+    function startBackfillSell(uint256 _amountPOL, uint256 _amountSPOL) external nonReentrant {
         require(msg.sender == sPOLMessenger, AddressUnauthorized(msg.sender));
         uint256 expectedSPOL = convertPOLtoSPOL(_amountPOL);
         require(
@@ -828,17 +825,14 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
             BadExchangeRate(_amountPOL, _amountSPOL, totaldPOLBalance - feedPOLBalance, totalsPOLBalance())
         );
         _takeSPOL(_amountSPOL, msg.sender);
+
         (uint16[] memory validator, uint256[] memory amount) = _selectValidators(_amountPOL, false);
-        uint256[] memory nonces = new uint256[](validator.length);
         for (uint256 i = 0; i < validator.length; i++) {
             uint256 userNonce = _sellSharesFromValidator(validators[validator[i]], amount[i]);
-            uint256 nonce =
-                _addUserWithdrawNonceDetails(msg.sender, validator[i], uint128(amount[i]), uint96(userNonce));
-            nonces[i] = nonce;
+            _addUserWithdrawNonceDetails(msg.sender, validator[i], uint128(amount[i]), uint96(userNonce));
         }
         emit sPOLBackfilled(msg.sender, _amountSPOL, _amountPOL);
         _emitExchangeRateUpdate();
-        return nonces;
     }
 
     /////////////////////////////////
