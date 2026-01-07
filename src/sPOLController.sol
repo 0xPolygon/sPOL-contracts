@@ -406,8 +406,7 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         require(_amount <= maxAmount, ValidatorOverfunded(_amount, maxAmount));
         _takePOL(_amount, _user);
 
-        uint256 actualShares = _buySharesFromValidator(validator, _amount);
-        require(actualShares == _amount, BuySharesMismatch(_amount, actualShares));
+        _buySharesFromValidator(validator, _amount);
         _mintSPOL(_user, _amount, toMint);
         _emitExchangeRateUpdate();
         return toMint;
