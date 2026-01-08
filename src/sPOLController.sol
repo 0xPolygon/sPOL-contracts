@@ -13,8 +13,11 @@ import {
     AccessManagedUpgradeable
 } from "@openzeppelin-contracts-upgradeable/access/manager/AccessManagedUpgradeable.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
+import {DoubleEndedQueue} from "@openzeppelin/contracts/utils/structs/DoubleEndedQueue.sol";
 
 contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgradeable, ReentrancyGuardTransient {
+    using DoubleEndedQueue for DoubleEndedQueue.Bytes32Deque;
+
     struct ValidatorInfo {
         ValidatorStatus status;
         uint8 depositShare;
@@ -62,8 +65,15 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         uint96 validatorNonce;
     }
 
+    struct FullNonceDetails {
+        uint16 validatorId;
+        uint128 amount;
+        uint96 validatorNonce;
+        uint256 nonce;
+    }
+
     // User withdraw nonce management
-    mapping(address => uint256[]) public userNonces;
+    mapping(address => DoubleEndedQueue.Bytes32Deque) public userNonces;
     mapping(uint256 => NonceDetails) public withdrawNonceDetails;
     // Global user withdraw nonce counter
     uint256 public globalWithdrawNonce;
@@ -551,6 +561,23 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         return userNonce;
     }
 
+    function getUserOpenNonces(address _user) external view returns (FullNonceDetails[] memory) {
+        DoubleEndedQueue.Bytes32Deque storage outstandingNonces = userNonces[_user];
+        uint256 length = outstandingNonces.length();
+        FullNonceDetails[] memory fullDetails = new FullNonceDetails[](length);
+        for (uint256 i = 0; i < length; i++) {
+            uint256 nonce = uint256(outstandingNonces.at(i));
+            NonceDetails storage details = withdrawNonceDetails[nonce];
+            fullDetails[i] = FullNonceDetails({
+                validatorId: details.validatorId,
+                amount: details.amount,
+                validatorNonce: details.validatorNonce,
+                nonce: nonce
+            });
+        }
+        return fullDetails;
+    }
+
     function withdrawPOL() external whenNotPaused {
         _withdrawPOL(msg.sender);
     }
@@ -560,46 +587,27 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     }
 
     function _withdrawPOL(address _user) internal {
-        require(userNonces[_user].length > 0, NoOpenNonces(_user));
+        DoubleEndedQueue.Bytes32Deque storage outstandingNonces = userNonces[_user];
+        require(outstandingNonces.length() > 0, NoOpenNonces(_user));
 
-        uint256 totalAmount;
-        uint256[] memory memNonces = userNonces[_user];
-        for (uint256 i = 0; i < memNonces.length; i++) {
-            uint256 shares = _redeemNonceAtValidator(memNonces[i]);
-            if (shares == 0) {
-                continue;
+        uint256 totalToWithdraw;
+        while (!outstandingNonces.empty()) {
+            uint256 currentNonce = uint256(outstandingNonces.front());
+            NonceDetails storage currentDetails = withdrawNonceDetails[currentNonce];
+            ValidatorInfo storage validator = validators[currentDetails.validatorId];
+            (uint256 shares, uint256 withdrawEpoch) =
+                validator.validatorContract.unbonds_new(address(this), currentDetails.validatorNonce);
+            if (withdrawEpoch + stakeManager.withdrawalDelay() > stakeManager.epoch()) {
+                break;
             }
-            totalAmount += shares;
-            emit POLWithdrawn(_user, shares, memNonces[i]);
-            memNonces[i] = 0;
+            validator.validatorContract.unstakeClaimTokens_newPOL(currentDetails.validatorNonce);
+            totalToWithdraw += shares;
+            emit POLWithdrawn(_user, shares, currentNonce);
+            delete withdrawNonceDetails[currentNonce];
+            outstandingNonces.popFront();
         }
-        // shrink the array in storage as needed
-        uint256 foundNonces;
-        for (uint256 i = 0; i < memNonces.length; i++) {
-            if (memNonces[i] == 0) {
-                userNonces[_user].pop();
-            } else {
-                userNonces[_user][foundNonces] = memNonces[i];
-                foundNonces++;
-            }
-        }
-        require(totalAmount > 0, NoNoncesReady(_user));
-        // bundle transfer to save gas, separate events inform about multi withdraws
-        polToken.transfer(_user, totalAmount);
-    }
-
-    // returns unstaked shares, or 0 if not ready
-    function _redeemNonceAtValidator(uint256 _nonce) internal returns (uint256) {
-        NonceDetails storage nonce = withdrawNonceDetails[_nonce];
-        ValidatorInfo storage validator = validators[nonce.validatorId];
-        (uint256 shares, uint256 withdrawEpoch) =
-            validator.validatorContract.unbonds_new(address(this), nonce.validatorNonce);
-
-        if (withdrawEpoch + stakeManager.withdrawalDelay() <= stakeManager.epoch()) {
-            validator.validatorContract.unstakeClaimTokens_newPOL(nonce.validatorNonce);
-            return shares;
-        }
-        return 0;
+        require(totalToWithdraw > 0, NoNoncesReady(_user));
+        polToken.transfer(_user, totalToWithdraw);
     }
 
     ////////////////////////////////
@@ -867,7 +875,7 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         returns (uint256)
     {
         uint256 nonce = globalWithdrawNonce++;
-        userNonces[_user].push(nonce);
+        userNonces[_user].pushBack(bytes32(nonce));
         NonceDetails storage details = withdrawNonceDetails[nonce];
         details.amount = _amount;
         details.validatorId = _validatorId;
