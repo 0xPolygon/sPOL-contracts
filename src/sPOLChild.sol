@@ -15,6 +15,7 @@ import {
     ERC20PermitUpgradeable
 } from "@openzeppelin-contracts-upgradeable/token/ERC20/extensions/ERC20PermitUpgradeable.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
+import {DoubleEndedQueue} from "@openzeppelin/contracts/utils/structs/DoubleEndedQueue.sol";
 
 contract sPOLChild is
     Initializable,
@@ -25,6 +26,8 @@ contract sPOLChild is
     BaseChildTunnel,
     MsgCoder
 {
+    using DoubleEndedQueue for DoubleEndedQueue.Bytes32Deque;
+
     // exchange info
     uint256 public l1SPOLBalance;
     uint256 public l1DPOLBalance;
@@ -66,10 +69,12 @@ contract sPOLChild is
     struct UserOutstanding {
         uint256 outstandingPOL;
         uint256 backFillCycle;
-        uint256 nonce;
     }
 
-    mapping(address => UserOutstanding[]) public userOutstandingPOL;
+    // Nonce to Outstanding
+    mapping(uint256 => UserOutstanding) public userOutstandingWithdraw;
+    // User to nonces
+    mapping(address => DoubleEndedQueue.Bytes32Deque) public userOutstandingNonces;
     uint256 public globalWithdrawNonce;
 
     // Stake/unstake events
@@ -190,29 +195,27 @@ contract sPOLChild is
         locallyToBeBurnedSPOL += _sPOLAmount;
         uint256 polToReturn = convertSPOLToPOL(_sPOLAmount);
         missingWithdrawPOLBalance += polToReturn;
-        UserOutstanding memory userOutstanding = UserOutstanding({
-            outstandingPOL: polToReturn, backFillCycle: backFillCycle + 1, nonce: ++globalWithdrawNonce
-        });
-        userOutstandingPOL[msg.sender].push(userOutstanding);
+
+        UserOutstanding memory userOutstanding =
+            UserOutstanding({outstandingPOL: polToReturn, backFillCycle: backFillCycle + 1});
+        userOutstandingWithdraw[++globalWithdrawNonce] = userOutstanding;
+        userOutstandingNonces[msg.sender].pushBack(bytes32(globalWithdrawNonce));
         emit sPOLBurned(msg.sender, _sPOLAmount, polToReturn, globalWithdrawNonce);
     }
 
     function withdrawPOL() external whenNotPaused nonReentrant {
-        UserOutstanding[] storage outstandings = userOutstandingPOL[msg.sender];
+        DoubleEndedQueue.Bytes32Deque storage outstandingNonces = userOutstandingNonces[msg.sender];
         uint256 totalToWithdraw;
-        bool reordered;
-        for (uint256 i = 0; i < outstandings.length; i++) {
-            if (reordered) {
-                reordered = false;
-                i--;
-            }
-            if (completedBackfills[outstandings[i].backFillCycle]) {
-                totalToWithdraw += outstandings[i].outstandingPOL;
-                emit POLWithdrawn(msg.sender, outstandings[i].outstandingPOL, outstandings[i].nonce);
-
-                outstandings[i] = outstandings[outstandings.length - 1];
-                outstandings.pop();
-                reordered = true;
+        while (!outstandingNonces.empty()) {
+            uint256 currentNonce = uint256(outstandingNonces.front());
+            UserOutstanding storage currentOutstanding = userOutstandingWithdraw[currentNonce];
+            if (completedBackfills[currentOutstanding.backFillCycle]) {
+                totalToWithdraw += currentOutstanding.outstandingPOL;
+                emit POLWithdrawn(msg.sender, currentOutstanding.outstandingPOL, currentNonce);
+                delete userOutstandingWithdraw[currentNonce];
+                outstandingNonces.popFront();
+            } else {
+                break;
             }
         }
         require(totalToWithdraw > 0, POLAmountMustBeGreaterThanZero());
