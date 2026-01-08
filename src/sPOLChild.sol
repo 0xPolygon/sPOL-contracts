@@ -192,6 +192,7 @@ contract sPOLChild is
     }
 
     function sellSPOL(uint256 _sPOLAmount) external whenNotPaused nonReentrant {
+        require(_sPOLAmount > 0, POLAmountMustBeGreaterThanZero());
         _transfer(msg.sender, address(this), _sPOLAmount);
         locallyToBeBurnedSPOL += _sPOLAmount;
         uint256 polToReturn = convertSPOLToPOL(_sPOLAmount);
