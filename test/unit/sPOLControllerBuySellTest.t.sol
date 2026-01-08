@@ -653,7 +653,10 @@ contract sPOLControllerBuySellTest is Test, Deploy {
         assertEq(controller.totalsPOLBalance(), amount, "Total sPOL balance should be amount");
 
         controller.sellSPOL(amount);
-        assertEq(1, controller.userNonces(address(this), 0), "First nonce should be 1");
+        sPOLController.FullNonceDetails[] memory nonces = controller.getUserOpenNonces(address(this));
+        assertEq(nonces.length, 2, "Nonce queue length should be 2");
+        assertEq(nonces[0].nonce, 1, "First nonce should be 1");
+        assertEq(nonces[1].nonce, 2, "Second nonce should be 2");
     }
 
     function test_sellSPOL_withdrawNonce_increases() public {
@@ -663,9 +666,14 @@ contract sPOLControllerBuySellTest is Test, Deploy {
         assertEq(controller.totalsPOLBalance(), amount * 2, "Total sPOL balance should be amount");
 
         controller.sellSPOL(amount);
-        assertEq(1, controller.userNonces(address(this), 0), "First nonce should be 1");
+        sPOLController.FullNonceDetails[] memory nonces = controller.getUserOpenNonces(address(this));
+        assertEq(nonces[0].nonce, 1, "First nonce should be 1");
+        assertEq(nonces.length, 1, "Nonce queue length should be 1");
         controller.sellSPOL(amount);
-        assertEq(2, controller.userNonces(address(this), 1), "Second nonce should be 2");
+        nonces = controller.getUserOpenNonces(address(this));
+        assertEq(nonces[0].nonce, 1, "First nonce should be 1");
+        assertEq(nonces[1].nonce, 2, "Second nonce should be 2");
+        assertEq(nonces.length, 2, "Nonce queue length should be 2");
         assertEq(3, controller.globalWithdrawNonce(), "Global withdraw nonce should be 3");
     }
 
