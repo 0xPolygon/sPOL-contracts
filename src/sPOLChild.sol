@@ -71,6 +71,12 @@ contract sPOLChild is
         uint256 backFillCycle;
     }
 
+    struct UserOutstandingFull {
+        uint256 outstandingPOL;
+        uint256 backFillCycle;
+        uint256 nonce;
+    }
+
     // Nonce to Outstanding
     mapping(uint256 => UserOutstanding) public userOutstandingWithdraw;
     // User to nonces
@@ -203,6 +209,22 @@ contract sPOLChild is
         userOutstandingWithdraw[++globalWithdrawNonce] = userOutstanding;
         userOutstandingNonces[msg.sender].pushBack(bytes32(globalWithdrawNonce));
         emit sPOLBurned(msg.sender, _sPOLAmount, polToReturn, globalWithdrawNonce);
+    }
+
+    function getUserOutstandingNonces(address _user) external view returns (UserOutstandingFull[] memory) {
+        DoubleEndedQueue.Bytes32Deque storage outstandingNonces = userOutstandingNonces[_user];
+        uint256 length = outstandingNonces.length();
+        UserOutstandingFull[] memory userOutstandings = new UserOutstandingFull[](length);
+        for (uint256 i = 0; i < length; i++) {
+            uint256 nonce = uint256(outstandingNonces.at(i));
+            UserOutstanding storage currentOutstanding = userOutstandingWithdraw[nonce];
+            userOutstandings[i] = UserOutstandingFull({
+                outstandingPOL: currentOutstanding.outstandingPOL,
+                backFillCycle: currentOutstanding.backFillCycle,
+                nonce: nonce
+            });
+        }
+        return userOutstandings;
     }
 
     function withdrawPOL() external whenNotPaused nonReentrant {
