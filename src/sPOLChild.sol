@@ -90,12 +90,13 @@ contract sPOLChild is
     event MaxExchangeRateDelayChanged(uint256 oldDelay, uint256 newDelay);
 
     // Migration and backfill events
-    event MigrationCompleted(uint256 backMigratingSPOL);
-    event MigrationRequested(uint256 migratingPOLAmount, uint256 bridgeMissingSPOL);
     event BackfillCompleted(uint256 returnedPOL, uint256 backfillCycle);
     event BackfillLocalCompleted(uint256 reservedPOL, uint256 backfillCycle);
     event BackfillRequested(uint256 backfillPOLAmount, uint256 toBeBurnedSPOL, uint256 backfillCycle);
     event BackfillStarted(uint256 backfillPOLAmount, uint256 backfillCycle);
+    event BalancedOnlyLocally();
+    event MigrationCompleted(uint256 backMigratingSPOL);
+    event MigrationRequested(uint256 migratingPOLAmount, uint256 bridgeMissingSPOL);
 
     error AddressUnauthorized(address caller);
     error BackfillAlreadyOngoing();
@@ -318,6 +319,11 @@ contract sPOLChild is
                 locallyMintedSPOL = 0;
                 locallyToBeBurnedSPOL = 0;
                 _requestMigration(surplusPOL, sPOLToBeMinted);
+            } else {
+                // surplus matched exactly the missing withdraw balance, or both were zero
+                locallyMintedSPOL = 0;
+                locallyToBeBurnedSPOL = 0;
+                emit BalancedOnlyLocally();
             }
         } else {
             // not enough surplus, so request backfill
