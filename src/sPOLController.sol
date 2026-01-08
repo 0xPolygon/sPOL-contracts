@@ -551,32 +551,6 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         return userNonce;
     }
 
-    function withdrawPOL(uint256 _nonce) external whenNotPaused {
-        _withdrawPOL(msg.sender, _nonce);
-    }
-
-    function withdrawPOL(address _user, uint256 _nonce) external whenNotPaused {
-        _withdrawPOL(_user, _nonce);
-    }
-
-    function _withdrawPOL(address _user, uint256 _nonce) internal {
-        uint256[] storage nonces = userNonces[_user];
-        for (uint256 i = 0; i < nonces.length; i++) {
-            if (nonces[i] == _nonce) {
-                uint256 shares = _redeemNonceAtValidator(_nonce);
-                require(shares > 0, WithdrawNotReady(_nonce));
-
-                nonces[i] = nonces[nonces.length - 1];
-                nonces.pop();
-
-                polToken.transfer(_user, shares);
-                emit POLWithdrawn(_user, shares, _nonce);
-                return;
-            }
-        }
-        revert NonceNotFound(_user, _nonce);
-    }
-
     function withdrawPOL() external whenNotPaused {
         _withdrawPOL(msg.sender);
     }
