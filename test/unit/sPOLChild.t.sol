@@ -402,7 +402,7 @@ contract sPOLChildTest is Test, Deploy {
         assertGt(convertedBack, largePOLAmount * 995 / 1000, "Round-trip conversion should be reasonable");
     }
 
-    function test_sellSPOL() public {
+    function test_sellSPOL_after_deposit() public {
         address user = makeAddr("user");
         vm.prank(childChainManager);
         sPOLChildToken.deposit(user, abi.encode(10e18));
@@ -436,5 +436,152 @@ contract sPOLChildTest is Test, Deploy {
         assertEq(outstanding[0].outstandingPOL, expectedPOLRedeem);
         assertEq(outstanding[0].backFillCycle, 1);
         assertEq(outstanding[0].nonce, initialNonce + 1);
+    }
+
+    function test_sellSPOL_simple() public {
+        uint256 polAmount = 10e18;
+        address seller = makeAddr("seller");
+        vm.deal(seller, polAmount);
+
+        vm.prank(seller);
+        sPOLChildToken.buySPOL{value: polAmount}(polAmount);
+
+        uint256 sPOLBalance = sPOLChildToken.balanceOf(seller);
+        assertTrue(sPOLBalance > 0);
+
+        uint256 initialPOLBalance = seller.balance;
+        uint256 expectedPOLRedeem = sPOLChildToken.convertSPOLToPOL(sPOLBalance);
+        uint256 initialNonce = sPOLChildToken.globalWithdrawNonce();
+        uint256 initialLocallyToBeBurned = sPOLChildToken.locallyToBeBurnedSPOL();
+
+        vm.prank(seller);
+        sPOLChildToken.sellSPOL(sPOLBalance);
+
+        assertEq(sPOLChildToken.balanceOf(seller), 0, "Seller sPOL balance should be zero");
+        assertEq(seller.balance, initialPOLBalance, "Seller should not receive POL immediately");
+        assertEq(sPOLChildToken.globalWithdrawNonce(), initialNonce + 1, "Nonce should increment");
+        assertEq(
+            sPOLChildToken.locallyToBeBurnedSPOL(),
+            initialLocallyToBeBurned + sPOLBalance,
+            "locallyToBeBurnedSPOL should increase"
+        );
+
+        sPOLChild.UserOutstandingFull[] memory outstanding = sPOLChildToken.getUserOutstandingNonces(seller);
+        assertEq(outstanding.length, 1, "Should have one outstanding withdraw record");
+        assertEq(
+            outstanding[0].outstandingPOL, expectedPOLRedeem, "Outstanding POL should match expected redeem amount"
+        );
+        assertEq(outstanding[0].nonce, initialNonce + 1, "Outstanding nonce should match");
+    }
+
+    function test_sellSPOL_reverts_if_no_balance() public {
+        address user = makeAddr("userWithNoSPOL");
+        vm.prank(user);
+        vm.expectRevert(abi.encodeWithSelector(IERC20Errors.ERC20InsufficientBalance.selector, user, 0, 1e18));
+        sPOLChildToken.sellSPOL(1e18);
+    }
+
+    function test_sellSPOL_reverts_if_amount_is_zero() public {
+        address user = makeAddr("user");
+        vm.prank(user);
+        vm.expectRevert(sPOLChild.POLAmountMustBeGreaterThanZero.selector);
+        sPOLChildToken.sellSPOL(0);
+    }
+
+    function test_sellSPOL_reverts_if_paused() public {
+        uint256 polAmount = 10e18;
+        address seller = makeAddr("seller");
+        vm.deal(seller, polAmount);
+        vm.prank(seller);
+        sPOLChildToken.buySPOL{value: polAmount}(polAmount);
+        uint256 sPOLBalance = sPOLChildToken.balanceOf(seller);
+
+        vm.prank(admin);
+        sPOLChildToken.pauseUserFunctions();
+
+        vm.prank(seller);
+        vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
+        sPOLChildToken.sellSPOL(sPOLBalance);
+    }
+
+    function test_sellSPOL_multiple_sells() public {
+        uint256 polAmount = 20e18;
+        address seller = makeAddr("seller");
+        vm.deal(seller, polAmount);
+        vm.prank(seller);
+        sPOLChildToken.buySPOL{value: polAmount}(polAmount);
+
+        uint256 sPOLBalance = sPOLChildToken.balanceOf(seller);
+        uint256 sellAmount1 = sPOLBalance / 2;
+        uint256 sellAmount2 = sPOLBalance - sellAmount1;
+
+        uint256 initialNonce = sPOLChildToken.globalWithdrawNonce();
+        vm.prank(seller);
+        sPOLChildToken.sellSPOL(sellAmount1);
+
+        assertEq(sPOLChildToken.balanceOf(seller), sPOLBalance - sellAmount1);
+        assertEq(sPOLChildToken.globalWithdrawNonce(), initialNonce + 1);
+
+        vm.prank(seller);
+        sPOLChildToken.sellSPOL(sellAmount2);
+
+        assertEq(sPOLChildToken.balanceOf(seller), 0);
+        assertEq(sPOLChildToken.globalWithdrawNonce(), initialNonce + 2);
+
+        sPOLChild.UserOutstandingFull[] memory outstanding = sPOLChildToken.getUserOutstandingNonces(seller);
+        assertEq(outstanding.length, 2, "Should have two outstanding withdraw records");
+        assertEq(outstanding[0].nonce, initialNonce + 1);
+        assertEq(outstanding[1].nonce, initialNonce + 2);
+    }
+
+    function test_sellSPOL_updates_correct_balances() public {
+        uint256 polAmount = 10e18;
+        address seller = makeAddr("seller");
+        vm.deal(seller, polAmount);
+        vm.prank(seller);
+        sPOLChildToken.buySPOL{value: polAmount}(polAmount);
+
+        uint256 sPOLBalance = sPOLChildToken.balanceOf(seller);
+        uint256 sPOLBalanceToken = sPOLChildToken.balanceOf(address(sPOLChildToken));
+
+        uint256 initialLocallyToBeBurned = sPOLChildToken.locallyToBeBurnedSPOL();
+        uint256 initialContractSPOLBalance = sPOLChildToken.balanceOf(address(sPOLChildToken));
+
+        vm.prank(seller);
+        sPOLChildToken.sellSPOL(sPOLBalance);
+
+        assertEq(sPOLChildToken.balanceOf(seller), 0, "User sPOL balance should be zero");
+        assertEq(
+            sPOLChildToken.balanceOf(address(sPOLChildToken)),
+            initialContractSPOLBalance + sPOLBalance,
+            "Contract sPOL balance should increase by sold amount"
+        );
+        assertEq(
+            sPOLChildToken.locallyToBeBurnedSPOL(),
+            initialLocallyToBeBurned + sPOLBalance,
+            "locallyToBeBurnedSPOL should increase by sold amount"
+        );
+        assertEq(
+            sPOLChildToken.balanceOf(address(sPOLChildToken)),
+            initialContractSPOLBalance + sPOLBalance,
+            "Contract sPOL balance should increase"
+        );
+    }
+
+    function test_sellSPOL_emits_correct_event() public {
+        uint256 polAmount = 10e18;
+        address seller = makeAddr("seller");
+        vm.deal(seller, polAmount);
+        vm.prank(seller);
+        sPOLChildToken.buySPOL{value: polAmount}(polAmount);
+
+        uint256 sPOLBalance = sPOLChildToken.balanceOf(seller);
+        uint256 expectedPOLRedeem = sPOLChildToken.convertSPOLToPOL(sPOLBalance);
+        uint256 nonce = sPOLChildToken.globalWithdrawNonce() + 1;
+
+        vm.prank(seller);
+        vm.expectEmit(true, true, true, true, address(sPOLChildToken));
+        emit sPOLBurned(seller, sPOLBalance, expectedPOLRedeem, nonce);
+        sPOLChildToken.sellSPOL(sPOLBalance);
     }
 }
