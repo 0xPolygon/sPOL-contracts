@@ -584,4 +584,191 @@ contract sPOLChildTest is Test, Deploy {
         emit sPOLBurned(seller, sPOLBalance, expectedPOLRedeem, nonce);
         sPOLChildToken.sellSPOL(sPOLBalance);
     }
+
+    function _setupAndSell(address _seller, uint256 _polAmount) internal returns (uint256 sPOLAmount) {
+        vm.deal(_seller, _polAmount);
+        vm.prank(_seller);
+        sPOLChildToken.buySPOL{value: _polAmount}(_polAmount);
+        sPOLAmount = sPOLChildToken.balanceOf(_seller);
+        vm.prank(_seller);
+        sPOLChildToken.sellSPOL(sPOLAmount);
+    }
+
+    function test_withdrawPOL_single_claim() public {
+        address user = makeAddr("user");
+        uint256 polAmount = 10e18;
+        _setupAndSell(user, polAmount);
+
+        address buyer = makeAddr("buyer");
+        vm.deal(buyer, 100e18);
+        vm.prank(buyer);
+        sPOLChildToken.buySPOL{value: 100e18}(100e18);
+
+        vm.mockCall(
+            address(sPOLChildToken.bridgeHelper()),
+            abi.encodeWithSelector(sPOLChildToken.bridgeHelper().bridgePOLToL1.selector),
+            abi.encode(true)
+        );
+
+        vm.prank(admin);
+        sPOLChildToken.balanceWithL1();
+
+        uint256 initialPOLBalance = user.balance;
+        uint256 expectedPOL = sPOLChildToken.convertSPOLToPOL(sPOLChildToken.balanceOf(address(sPOLChildToken)));
+
+        vm.prank(user);
+        sPOLChildToken.withdrawPOL();
+
+        assertEq(user.balance, initialPOLBalance + expectedPOL, "User should receive the correct amount of POL");
+    }
+
+    function test_withdrawPOL_multiple_claims_same_user() public {
+        address user = makeAddr("user");
+        uint256 polAmount1 = 5e18;
+        uint256 polAmount2 = 8e18;
+
+        uint256 nonce1 = sPOLChildToken.globalWithdrawNonce() + 1;
+        uint256 sPOLAmount1 = _setupAndSell(user, polAmount1);
+        uint256 nonce2 = sPOLChildToken.globalWithdrawNonce() + 1;
+        uint256 sPOLAmount2 = _setupAndSell(user, polAmount2);
+
+        address buyer = makeAddr("buyer");
+        vm.deal(buyer, 100e18);
+        vm.prank(buyer);
+        sPOLChildToken.buySPOL{value: 100e18}(100e18);
+
+        vm.mockCall(
+            address(sPOLChildToken.bridgeHelper()),
+            abi.encodeWithSelector(sPOLChildToken.bridgeHelper().bridgePOLToL1.selector),
+            abi.encode(true)
+        );
+        vm.prank(admin);
+        sPOLChildToken.balanceWithL1();
+
+        uint256 initialPOLBalance = user.balance;
+        uint256 expectedPOL1 = sPOLChildToken.convertSPOLToPOL(sPOLAmount1);
+        uint256 expectedPOL2 = sPOLChildToken.convertSPOLToPOL(sPOLAmount2);
+        uint256 totalExpectedPOL = expectedPOL1 + expectedPOL2;
+
+        vm.prank(user);
+        vm.expectEmit(true, true, true, true, address(sPOLChildToken));
+        emit POLWithdrawn(user, expectedPOL1, nonce1);
+        vm.expectEmit(true, true, true, true, address(sPOLChildToken));
+        emit POLWithdrawn(user, expectedPOL2, nonce2);
+        sPOLChildToken.withdrawPOL();
+
+        assertEq(user.balance, initialPOLBalance + totalExpectedPOL, "User should receive POL from all claims");
+    }
+
+    function test_withdrawPOL_multiple_users() public {
+        address user1 = makeAddr("user1");
+        address user2 = makeAddr("user2");
+        uint256 polAmount1 = 6e18;
+        uint256 polAmount2 = 9e18;
+
+        uint256 nonce1 = sPOLChildToken.globalWithdrawNonce() + 1;
+        uint256 sPOLAmount1 = _setupAndSell(user1, polAmount1);
+        uint256 nonce2 = sPOLChildToken.globalWithdrawNonce() + 1;
+        uint256 sPOLAmount2 = _setupAndSell(user2, polAmount2);
+
+        address buyer = makeAddr("buyer");
+        vm.deal(buyer, 100e18);
+        vm.prank(buyer);
+        sPOLChildToken.buySPOL{value: 100e18}(100e18);
+
+        vm.mockCall(
+            address(sPOLChildToken.bridgeHelper()),
+            abi.encodeWithSelector(sPOLChildToken.bridgeHelper().bridgePOLToL1.selector),
+            abi.encode(true)
+        );
+        vm.prank(admin);
+        sPOLChildToken.balanceWithL1();
+
+        uint256 initialPOLBalance1 = user1.balance;
+        uint256 expectedPOL1 = sPOLChildToken.convertSPOLToPOL(sPOLAmount1);
+        vm.prank(user1);
+        vm.expectEmit(true, true, true, true, address(sPOLChildToken));
+        emit POLWithdrawn(user1, expectedPOL1, nonce1);
+        sPOLChildToken.withdrawPOL();
+        assertEq(user1.balance, initialPOLBalance1 + expectedPOL1, "User 1 should receive correct POL");
+
+        uint256 initialPOLBalance2 = user2.balance;
+        uint256 expectedPOL2 = sPOLChildToken.convertSPOLToPOL(sPOLAmount2);
+        vm.prank(user2);
+        vm.expectEmit(true, true, true, true, address(sPOLChildToken));
+        emit POLWithdrawn(user2, expectedPOL2, nonce2);
+        sPOLChildToken.withdrawPOL();
+        assertEq(user2.balance, initialPOLBalance2 + expectedPOL2, "User 2 should receive correct POL");
+    }
+
+    function test_withdrawPOL_cannot_claim_twice() public {
+        address user = makeAddr("user");
+        uint256 polAmount = 10e18;
+        _setupAndSell(user, polAmount);
+
+        address buyer = makeAddr("buyer");
+        vm.deal(buyer, 100e18);
+        vm.prank(buyer);
+        sPOLChildToken.buySPOL{value: 100e18}(100e18);
+
+        vm.mockCall(
+            address(sPOLChildToken.bridgeHelper()),
+            abi.encodeWithSelector(sPOLChildToken.bridgeHelper().bridgePOLToL1.selector),
+            abi.encode(true)
+        );
+        vm.prank(admin);
+        sPOLChildToken.balanceWithL1();
+
+        vm.prank(user);
+        sPOLChildToken.withdrawPOL();
+
+        vm.prank(user);
+        vm.expectRevert(sPOLChild.POLAmountMustBeGreaterThanZero.selector);
+        sPOLChildToken.withdrawPOL();
+    }
+
+    function test_withdrawPOL_reverts_if_nothing_to_claim() public {
+        address user = makeAddr("userWithNoClaims");
+        vm.prank(user);
+        vm.expectRevert(sPOLChild.POLAmountMustBeGreaterThanZero.selector);
+        sPOLChildToken.withdrawPOL();
+    }
+
+    function test_withdrawPOL_partial_claim() public {
+        address user = makeAddr("user");
+        uint256 polAmount1 = 5e18;
+        uint256 polAmount2 = 8e18;
+
+        uint256 nonce1 = sPOLChildToken.globalWithdrawNonce() + 1;
+        uint256 sPOLAmount1 = _setupAndSell(user, polAmount1);
+
+        address buyer = makeAddr("buyer");
+        vm.deal(buyer, 100e18);
+        vm.prank(buyer);
+        sPOLChildToken.buySPOL{value: 100e18}(100e18);
+
+        vm.mockCall(
+            address(sPOLChildToken.bridgeHelper()),
+            abi.encodeWithSelector(sPOLChildToken.bridgeHelper().bridgePOLToL1.selector),
+            abi.encode(true)
+        );
+        vm.prank(admin);
+        sPOLChildToken.balanceWithL1();
+
+        uint256 sPOLAmount2 = _setupAndSell(user, polAmount2);
+
+        uint256 initialPOLBalance = user.balance;
+        uint256 expectedPOL1 = sPOLChildToken.convertSPOLToPOL(sPOLAmount1);
+
+        vm.prank(user);
+        vm.expectEmit(true, true, true, true, address(sPOLChildToken));
+        emit POLWithdrawn(user, expectedPOL1, nonce1);
+        sPOLChildToken.withdrawPOL();
+
+        assertEq(user.balance, initialPOLBalance + expectedPOL1, "User should only receive POL from completed backfill");
+
+        sPOLChild.UserOutstandingFull[] memory outstanding = sPOLChildToken.getUserOutstandingNonces(user);
+        assertEq(outstanding.length, 1, "Should have one outstanding claim left");
+        assertEq(outstanding[0].outstandingPOL, sPOLChildToken.convertSPOLToPOL(sPOLAmount2));
+    }
 }
