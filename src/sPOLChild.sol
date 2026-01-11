@@ -329,7 +329,7 @@ contract sPOLChild is
         require(!onGoingBackfill, BackfillAlreadyOngoing());
 
         uint256 surplusPOL = polBalance - reservedWithdrawPOLBalance;
-        // more surplus than missing withdraw balance -> local backfill possible
+        // more surplus than missing withdraw balance -> full local backfill possible
         if (surplusPOL >= missingWithdrawPOLBalance) {
             if (missingWithdrawPOLBalance > 0) {
                 _startBackfill(missingWithdrawPOLBalance);
@@ -338,14 +338,17 @@ contract sPOLChild is
                 _completeBackfill(0, backFillCycle);
             }
             if (surplusPOL > 0) {
-                uint256 sPOLToBeMinted = locallyMintedSPOL - locallyToBeBurnedSPOL;
-                locallyMintedSPOL = 0;
-                locallyToBeBurnedSPOL = 0;
-                _requestMigration(surplusPOL, sPOLToBeMinted);
+                if (locallyMintedSPOL >= locallyToBeBurnedSPOL) {
+                    uint256 sPOLToBeMinted = locallyMintedSPOL - locallyToBeBurnedSPOL;
+                    locallyMintedSPOL = 0;
+                    locallyToBeBurnedSPOL = 0;
+                    _requestMigration(surplusPOL, sPOLToBeMinted);
+                } else {
+                    // special case where the safety fee surplus is also expressed as extra sPOL to be burned
+                    emit BalancedOnlyLocally();
+                }
             } else {
                 // surplus matched exactly the missing withdraw balance, or both were zero
-                locallyMintedSPOL = 0;
-                locallyToBeBurnedSPOL = 0;
                 emit BalancedOnlyLocally();
             }
         } else {
