@@ -128,7 +128,6 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     error ValidatorSharesPending(uint16 validatorId, uint256 shares);
     error ValidatorStillFunded(uint16 validatorId, uint256 totalStaked);
     error ValidatorUnderfunded(uint256 amount, uint256 maxAmount);
-    error WithdrawNotReady(uint256 nonce);
     error ZeroAddress();
 
     constructor(
