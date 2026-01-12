@@ -15,6 +15,7 @@ import {
     ERC20PermitUpgradeable
 } from "@openzeppelin-contracts-upgradeable/token/ERC20/extensions/ERC20PermitUpgradeable.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
+import {DoubleEndedQueue} from "@openzeppelin/contracts/utils/structs/DoubleEndedQueue.sol";
 
 contract sPOLChild is
     Initializable,
@@ -25,6 +26,8 @@ contract sPOLChild is
     BaseChildTunnel,
     MsgCoder
 {
+    using DoubleEndedQueue for DoubleEndedQueue.Bytes32Deque;
+
     // exchange info
     uint256 public l1SPOLBalance;
     uint256 public l1DPOLBalance;
@@ -38,18 +41,11 @@ contract sPOLChild is
     uint256 public lastExchangeRateUpdate;
 
     // local info
-    // This should always be equal to reservedWithdrawPOLBalance + actualQuickRedeemReserve
     uint256 public polBalance;
-    // Slow redeem
     // These three together should always be equal to the sum of outstanding POL in userOutstandingPOL
     uint256 public missingWithdrawPOLBalance;
     uint256 public reservedWithdrawPOLBalance;
-    uint256 public pendingWithdrawPOLBalance;
-
-    // Redeem reserve
-    uint256 public targetQuickRedeemReserve;
-    // This should be equal to polBalance - reservedWithdrawPOLBalance
-    uint256 public actualQuickRedeemReserve;
+    uint256 public requestedWithdrawPOLBalance;
 
     // sPOL originating on L2 needs to be locked in the bridge from L1 so it becomes "real"
     uint256 public locallyMintedSPOL;
@@ -73,10 +69,18 @@ contract sPOLChild is
     struct UserOutstanding {
         uint256 outstandingPOL;
         uint256 backFillCycle;
+    }
+
+    struct UserOutstandingFull {
+        uint256 outstandingPOL;
+        uint256 backFillCycle;
         uint256 nonce;
     }
 
-    mapping(address => UserOutstanding[]) public userOutstandingPOL;
+    // Nonce to Outstanding
+    mapping(uint256 => UserOutstanding) public userOutstandingWithdraw;
+    // User to nonces
+    mapping(address => DoubleEndedQueue.Bytes32Deque) public userOutstandingNonces;
     uint256 public globalWithdrawNonce;
 
     // Stake/unstake events
@@ -88,15 +92,17 @@ contract sPOLChild is
     event ExchangeRateUpdated(
         uint256 oldSPOLBalance, uint256 oldDPOLBalance, uint256 newSPOLBalance, uint256 newDPOLBalance
     );
-    event QuickRedeemReserveUpdated(uint256 oldReserve, uint256 newReserve, uint256 actualReserve);
     event SafetyFeeChanged(uint16 oldFee, uint16 newFee);
     event MaxExchangeRateDelayChanged(uint256 oldDelay, uint256 newDelay);
 
     // Migration and backfill events
-    event MigrationRequested(uint256 migratingPOLAmount, uint256 backMigratingSPOL);
-    event MigrationCompleted(uint256 backMigratingSPOL);
-    event BackfillRequested(uint256 backfillPOLAmount, uint256 bridgeMissingSPOL, uint256 backfillCycle);
     event BackfillCompleted(uint256 returnedPOL, uint256 backfillCycle);
+    event BackfillLocalCompleted(uint256 reservedPOL, uint256 backfillCycle);
+    event BackfillRequested(uint256 backfillPOLAmount, uint256 toBeBurnedSPOL, uint256 backfillCycle);
+    event BackfillStarted(uint256 backfillPOLAmount, uint256 backfillCycle);
+    event BalancedOnlyLocally();
+    event MigrationCompleted(uint256 backMigratingSPOL);
+    event MigrationRequested(uint256 migratingPOLAmount, uint256 bridgeMissingSPOL);
 
     error AddressUnauthorized(address caller);
     error BackfillAlreadyOngoing();
@@ -106,9 +112,12 @@ contract sPOLChild is
     error IncorrectPOLAmount(uint256 sent, uint256 expected);
     error InvalidMessageType();
     error MigrationAlreadyOngoing();
+    error NothingToBackfill();
+    error NothingToBalance();
     error NothingToMigrate();
     error POLAmountMustBeGreaterThanZero();
     error POLTransferFailed();
+    error ZeroAddress();
 
     modifier onlyChildChainManager() {
         require(msg.sender == childChainManager, AddressUnauthorized(msg.sender));
@@ -116,6 +125,8 @@ contract sPOLChild is
     }
 
     constructor(address _stateSyncer) BaseChildTunnel(_stateSyncer) {
+        require(_stateSyncer != address(0), ZeroAddress());
+
         _disableInitializers();
     }
 
@@ -123,10 +134,16 @@ contract sPOLChild is
         external
         initializer
     {
+        require(_authority != address(0), ZeroAddress());
+        require(_l1Messenger != address(0), ZeroAddress());
+        require(_bridgeHelper != address(0), ZeroAddress());
+        require(_childChainManager != address(0), ZeroAddress());
+
         __Pausable_init();
         __ERC20_init("Staked POL", "sPOL");
         __ERC20Permit_init("Staked POL");
         __AccessManaged_init(_authority);
+
         maxExchangeRateUpdateDelay = 30 days;
         // we get about 0,25% rewards in a month, so if we pause after a month of no update
         // 0,3% should be safe so sPOL doesn't become cheaper than L1
@@ -134,9 +151,6 @@ contract sPOLChild is
         l1Messenger = _l1Messenger;
         bridgeHelper = PolBridger(_bridgeHelper);
         childChainManager = _childChainManager;
-
-        // Should be 0, changing it requires a pol deposit
-        targetQuickRedeemReserve = 0;
 
         // Init so update can work
         // we leave lastExchangeRateUpdate at 0 so no one can buy sPOL before first update
@@ -178,66 +192,58 @@ contract sPOLChild is
         require(_polAmount > 0, POLAmountMustBeGreaterThanZero());
         uint256 spolToMint = convertPOLToSPOL(_polAmount);
         locallyMintedSPOL += spolToMint;
-        actualQuickRedeemReserve += _polAmount;
         polBalance += _polAmount;
         _mint(msg.sender, spolToMint);
         emit sPOLMinted(msg.sender, _polAmount, spolToMint);
     }
 
     function sellSPOL(uint256 _sPOLAmount) external whenNotPaused nonReentrant {
+        require(_sPOLAmount > 0, POLAmountMustBeGreaterThanZero());
         _transfer(msg.sender, address(this), _sPOLAmount);
         locallyToBeBurnedSPOL += _sPOLAmount;
         uint256 polToReturn = convertSPOLToPOL(_sPOLAmount);
-        emit sPOLBurned(msg.sender, _sPOLAmount, polToReturn, ++globalWithdrawNonce);
-        if (actualQuickRedeemReserve >= polToReturn) {
-            _quickSellSPOL(polToReturn);
-        } else {
-            _slowSellSPOL(polToReturn);
-        }
-    }
+        missingWithdrawPOLBalance += polToReturn;
 
-    function _quickSellSPOL(uint256 _polAmount) internal {
-        actualQuickRedeemReserve -= _polAmount;
-        polBalance -= _polAmount;
-        (bool success,) = payable(msg.sender).call{value: _polAmount}("");
-        require(success, POLTransferFailed());
-        emit POLWithdrawn(msg.sender, _polAmount, globalWithdrawNonce);
-    }
-
-    function _slowSellSPOL(uint256 _polAmount) internal {
-        missingWithdrawPOLBalance += _polAmount;
         UserOutstanding memory userOutstanding =
-            UserOutstanding({outstandingPOL: _polAmount, backFillCycle: backFillCycle + 1, nonce: globalWithdrawNonce});
-        userOutstandingPOL[msg.sender].push(userOutstanding);
+            UserOutstanding({outstandingPOL: polToReturn, backFillCycle: backFillCycle + 1});
+        userOutstandingWithdraw[++globalWithdrawNonce] = userOutstanding;
+        userOutstandingNonces[msg.sender].pushBack(bytes32(globalWithdrawNonce));
+        emit sPOLBurned(msg.sender, _sPOLAmount, polToReturn, globalWithdrawNonce);
+    }
+
+    function getUserOutstandingNonces(address _user) external view returns (UserOutstandingFull[] memory) {
+        DoubleEndedQueue.Bytes32Deque storage outstandingNonces = userOutstandingNonces[_user];
+        uint256 length = outstandingNonces.length();
+        UserOutstandingFull[] memory userOutstandings = new UserOutstandingFull[](length);
+        for (uint256 i = 0; i < length; i++) {
+            uint256 nonce = uint256(outstandingNonces.at(i));
+            UserOutstanding storage currentOutstanding = userOutstandingWithdraw[nonce];
+            userOutstandings[i] = UserOutstandingFull({
+                outstandingPOL: currentOutstanding.outstandingPOL,
+                backFillCycle: currentOutstanding.backFillCycle,
+                nonce: nonce
+            });
+        }
+        return userOutstandings;
     }
 
     function withdrawPOL() external whenNotPaused nonReentrant {
-        UserOutstanding[] storage outstandings = userOutstandingPOL[msg.sender];
-        uint256 totalToWithdraw = 0;
-        bool reordered;
-        for (uint256 i = 0; i < outstandings.length; i++) {
-            if (reordered) {
-                reordered = false;
-                i--;
-            }
-            if (completedBackfills[outstandings[i].backFillCycle]) {
-                reservedWithdrawPOLBalance -= outstandings[i].outstandingPOL;
-            } else if (outstandings[i].backFillCycle == backFillCycle) {
-                pendingWithdrawPOLBalance -= outstandings[i].outstandingPOL;
-            } else if (outstandings[i].outstandingPOL <= actualQuickRedeemReserve) {
-                actualQuickRedeemReserve -= outstandings[i].outstandingPOL;
-                missingWithdrawPOLBalance -= outstandings[i].outstandingPOL;
+        DoubleEndedQueue.Bytes32Deque storage outstandingNonces = userOutstandingNonces[msg.sender];
+        uint256 totalToWithdraw;
+        while (!outstandingNonces.empty()) {
+            uint256 currentNonce = uint256(outstandingNonces.front());
+            UserOutstanding storage currentOutstanding = userOutstandingWithdraw[currentNonce];
+            if (completedBackfills[currentOutstanding.backFillCycle]) {
+                totalToWithdraw += currentOutstanding.outstandingPOL;
+                emit POLWithdrawn(msg.sender, currentOutstanding.outstandingPOL, currentNonce);
+                delete userOutstandingWithdraw[currentNonce];
+                outstandingNonces.popFront();
             } else {
-                continue;
+                break;
             }
-            totalToWithdraw += outstandings[i].outstandingPOL;
-            emit POLWithdrawn(msg.sender, outstandings[i].outstandingPOL, outstandings[i].nonce);
-
-            outstandings[i] = outstandings[outstandings.length - 1];
-            outstandings.pop();
-            reordered = true;
         }
         require(totalToWithdraw > 0, POLAmountMustBeGreaterThanZero());
+        reservedWithdrawPOLBalance -= totalToWithdraw;
         polBalance -= totalToWithdraw;
         (bool success,) = payable(msg.sender).call{value: totalToWithdraw}("");
         require(success, POLTransferFailed());
@@ -285,6 +291,7 @@ contract sPOLChild is
     }
 
     function _handleExchangeRateUpdate(bytes memory _msg) internal {
+        _balanceWithL1();
         (uint256 updatedl1SPOLBalance, uint256 updatedl1DPOLBalance) = _decodeExchangeUpdateMessage(_msg);
         uint256 currentConversion = convertSPOLToPOL(1e18);
         uint256 oldSPOLBalance = l1SPOLBalance;
@@ -303,99 +310,105 @@ contract sPOLChild is
     //////////////////////////////
 
     function _handleBackfillResponse(bytes memory _msg) internal {
-        (uint256 _returnedPOL, uint256 _backFillCycle) = _decodeL1BackfillResponseMessage(_msg);
-        if (_returnedPOL > pendingWithdrawPOLBalance) {
-            uint256 leftOver = _returnedPOL - pendingWithdrawPOLBalance;
-            actualQuickRedeemReserve += leftOver;
-            reservedWithdrawPOLBalance += pendingWithdrawPOLBalance;
-            pendingWithdrawPOLBalance = 0;
-        } else {
-            pendingWithdrawPOLBalance -= _returnedPOL;
-            reservedWithdrawPOLBalance += _returnedPOL;
-        }
-        polBalance += _returnedPOL;
-        completedBackfills[_backFillCycle] = true;
-        onGoingBackfill = false;
-        emit BackfillCompleted(_returnedPOL, _backFillCycle);
-    }
-
-    function requestMigration() external whenNotPaused nonReentrant {
-        require(!onGoingMigration, MigrationAlreadyOngoing());
-        require(targetQuickRedeemReserve < actualQuickRedeemReserve, NothingToMigrate());
-        onGoingMigration = true;
-
-        uint256 polToMigrate = actualQuickRedeemReserve - targetQuickRedeemReserve;
-        actualQuickRedeemReserve -= polToMigrate;
-        polBalance -= polToMigrate;
-
-        uint256 sPOLToAddToBridge;
-        // maybe do this on response
-        if (locallyMintedSPOL > locallyToBeBurnedSPOL) {
-            sPOLToAddToBridge = locallyMintedSPOL - locallyToBeBurnedSPOL;
-            locallyMintedSPOL -= locallyToBeBurnedSPOL;
-            locallyToBeBurnedSPOL = 0;
-        } else {
-            locallyToBeBurnedSPOL -= locallyMintedSPOL;
-            locallyMintedSPOL = 0;
-        }
-        backMigratingSPOL = sPOLToAddToBridge;
-        _exitPOLforMessenger(polToMigrate);
-        _sendMessageToRoot(
-            abi.encode(MsgType.L2_MIGRATION_REQUEST, _encodeL2MigrationRequestMessage(polToMigrate, sPOLToAddToBridge))
+        (uint256 returnedPOL, uint256 returnedBackFillCycle) = _decodeL1BackfillResponseMessage(_msg);
+        require(
+            returnedPOL == requestedWithdrawPOLBalance, IncorrectPOLAmount(returnedPOL, requestedWithdrawPOLBalance)
         );
-        emit MigrationRequested(polToMigrate, sPOLToAddToBridge);
+        reservedWithdrawPOLBalance += returnedPOL;
+        requestedWithdrawPOLBalance = 0;
+        polBalance += returnedPOL;
+        _completeBackfill(returnedPOL, returnedBackFillCycle);
     }
 
-    function requestBackfill() external whenNotPaused nonReentrant {
+    function balanceWithL1() external restricted nonReentrant {
+        _balanceWithL1();
+    }
+
+    function _balanceWithL1() internal {
+        require(!onGoingMigration, MigrationAlreadyOngoing());
         require(!onGoingBackfill, BackfillAlreadyOngoing());
+
+        uint256 surplusPOL = polBalance - reservedWithdrawPOLBalance;
+        // more surplus than missing withdraw balance -> full local backfill possible
+        if (surplusPOL >= missingWithdrawPOLBalance) {
+            if (missingWithdrawPOLBalance > 0) {
+                _startBackfill(missingWithdrawPOLBalance);
+                surplusPOL -= missingWithdrawPOLBalance;
+                _localBackfill(missingWithdrawPOLBalance);
+                _completeBackfill(0, backFillCycle);
+            }
+            if (surplusPOL > 0) {
+                if (locallyMintedSPOL >= locallyToBeBurnedSPOL) {
+                    uint256 sPOLToBeMinted = locallyMintedSPOL - locallyToBeBurnedSPOL;
+                    locallyMintedSPOL = 0;
+                    locallyToBeBurnedSPOL = 0;
+                    _requestMigration(surplusPOL, sPOLToBeMinted);
+                } else {
+                    // special case where the safety fee surplus is also expressed as extra sPOL to be burned
+                    emit BalancedOnlyLocally();
+                }
+            } else {
+                // surplus matched exactly the missing withdraw balance, or both were zero
+                emit BalancedOnlyLocally();
+            }
+        } else {
+            // not enough surplus, so request backfill
+            _startBackfill(missingWithdrawPOLBalance);
+            if (surplusPOL > 0) {
+                _localBackfill(surplusPOL);
+            }
+            uint256 sPOLToBeBurned = locallyToBeBurnedSPOL - locallyMintedSPOL;
+            locallyToBeBurnedSPOL = 0;
+            locallyMintedSPOL = 0;
+            _requestBackfill(missingWithdrawPOLBalance, sPOLToBeBurned);
+            missingWithdrawPOLBalance = 0;
+        }
+    }
+
+    function _requestMigration(uint256 _polToMigrate, uint256 _spolToMint) internal {
+        onGoingMigration = true;
+        backMigratingSPOL = _spolToMint;
+
+        _exitPOLforMessenger(_polToMigrate);
+        _sendMessageToRoot(
+            abi.encode(MsgType.L2_MIGRATION_REQUEST, _encodeL2MigrationRequestMessage(_polToMigrate, _spolToMint))
+        );
+        emit MigrationRequested(_polToMigrate, _spolToMint);
+    }
+
+    function _startBackfill(uint256 _polToBackfill) internal {
         onGoingBackfill = true;
         backFillCycle += 1;
-        pendingWithdrawPOLBalance += missingWithdrawPOLBalance;
-        uint256 backFillAmount = pendingWithdrawPOLBalance;
+        emit BackfillStarted(_polToBackfill, backFillCycle);
+    }
 
-        if (actualQuickRedeemReserve < targetQuickRedeemReserve) {
-            backFillAmount += targetQuickRedeemReserve - actualQuickRedeemReserve;
-        }
-        missingWithdrawPOLBalance = 0;
+    function _localBackfill(uint256 _polBackfilled) internal {
+        missingWithdrawPOLBalance -= _polBackfilled;
+        reservedWithdrawPOLBalance += _polBackfilled;
+        emit BackfillLocalCompleted(_polBackfilled, backFillCycle);
+    }
 
-        uint256 bridgeMissingSPOL;
-        if (locallyMintedSPOL > locallyToBeBurnedSPOL) {
-            bridgeMissingSPOL = locallyMintedSPOL - locallyToBeBurnedSPOL;
-            _burnSPOLForMessenger(bridgeMissingSPOL);
-            locallyMintedSPOL -= locallyToBeBurnedSPOL;
-            locallyToBeBurnedSPOL = 0;
-        }
+    function _requestBackfill(uint256 _polToBackfill, uint256 _spolToSell) internal {
+        requestedWithdrawPOLBalance += missingWithdrawPOLBalance;
+
+        _burnSPOLForMessenger(_spolToSell);
         _sendMessageToRoot(
             abi.encode(
-                MsgType.L2_BACKFILL_REQUEST,
-                _encodeL2BackfillRequestMessage(backFillAmount, bridgeMissingSPOL, backFillCycle)
+                MsgType.L2_BACKFILL_REQUEST, _encodeL2BackfillRequestMessage(_polToBackfill, _spolToSell, backFillCycle)
             )
         );
-        emit BackfillRequested(backFillAmount, bridgeMissingSPOL, backFillCycle);
+        emit BackfillRequested(_polToBackfill, _spolToSell, backFillCycle);
+    }
+
+    function _completeBackfill(uint256 _returnedPOL, uint256 _completedBackFillCycle) internal {
+        completedBackfills[_completedBackFillCycle] = true;
+        onGoingBackfill = false;
+        emit BackfillCompleted(_returnedPOL, _completedBackFillCycle);
     }
 
     ///////////////////////////////
     ///  Config                 ///
     ///////////////////////////////
-
-    function setQuickRedeemBufferSize(uint256 _newSize) external payable restricted {
-        uint256 currentReserve = targetQuickRedeemReserve;
-        if (_newSize > currentReserve) {
-            uint256 increase = _newSize - currentReserve;
-            require(msg.value == increase, IncorrectPOLAmount(msg.value, increase));
-            actualQuickRedeemReserve += increase;
-            polBalance += increase;
-        } else if (_newSize < currentReserve) {
-            uint256 decrease = currentReserve - _newSize;
-            require(actualQuickRedeemReserve >= decrease, IncorrectPOLAmount(actualQuickRedeemReserve, decrease));
-            actualQuickRedeemReserve -= decrease;
-            polBalance -= decrease;
-            (bool success,) = payable(msg.sender).call{value: decrease}("");
-            require(success, POLTransferFailed());
-        }
-        targetQuickRedeemReserve = _newSize;
-        emit QuickRedeemReserveUpdated(currentReserve, _newSize, actualQuickRedeemReserve);
-    }
 
     function changeSafetyFee(uint16 _newFee) external restricted {
         require(_newFee <= MAX_SAFETY_FEE, FeeTooHigh(_newFee, MAX_SAFETY_FEE));

@@ -6,18 +6,12 @@ import "forge-std/console.sol";
 import "forge-std/Script.sol";
 import "../../src/sPOL.sol";
 import "../../src/sPOLController.sol";
-import "../../src/sPOLMessenger.sol";
-import "../../src/sPOLChild.sol";
 import "../../script/Deploy.s.sol";
-import "../mocks/MocksPOLMessenger.sol";
 
 import {IERC20Errors} from "@openzeppelin/contracts/interfaces/draft-IERC6093.sol";
 import {Registry as IRegistry} from "../../src/interfaces/IRegistry.sol";
 import {ERC20PredicateBurnOnly as IERC20PredicateBurnOnly} from "../../src/interfaces/IERC20Predicate.sol";
 import {WithdrawManager as IWithdrawManager} from "../../src/interfaces/IWithdrawManager.sol";
-import {IStateSender} from "../../src/msg/interfaces/IStateSender.sol";
-import {MRC20 as IMRC20} from "../../src/interfaces/IMRC20.sol";
-import {BaseChildTunnel} from "../../src/msg/BaseChildTunnel.sol";
 
 contract sPOLControllerFullL1Test is Test, Deploy {
     sPOL public sPOLToken;
@@ -37,28 +31,16 @@ contract sPOLControllerFullL1Test is Test, Deploy {
 
     IValidatorShare validator1;
     IValidatorShare validator2;
-    IValidatorShare externalValidator;
-    IValidatorShare knownValidator;
 
     address user1 = makeAddr("user1no7702delegation");
     address user2 = makeAddr("user2");
     address user3 = makeAddr("user3");
-    address user4;
-    uint256 user4pk;
-    uint8 currentV;
-    bytes32 currentR;
-    bytes32 currentS;
 
     uint256 smallAmount = 1 ether;
     uint256 mediumAmount = 300 ether;
     uint256 mediumAmount2 = 2000 ether;
     uint256 largeAmount = 5000 ether;
     uint256 hugeAmount = 2000000 ether;
-
-    uint256 expectedSPOL = 0;
-    uint256 expectedSPOL2 = 0;
-    uint256 expectedPOL = 0;
-    uint256 expectedPOL2 = 0;
 
     // 0x417a2c54c6403be4803e647ce39722321afbc1eb4fbc07612166c852bcd9eed5
     bytes rewardIncreaseCall1 =
@@ -68,10 +50,7 @@ contract sPOLControllerFullL1Test is Test, Deploy {
         hex"4e43e4950000000000000000000000000000000000000000000000000000000000000040000000000000000000000000000000000000000000000000000000000000012000000000000000000000000000000000000000000000000000000000000000c0000000000000000000000000eb4f2a75cac4bbcb4d71c252e4cc80eb80bb3a340000000000000000000000000000000000000000000000000000000004bb1ca60000000000000000000000000000000000000000000000000000000004bb1ea535cbef5831e0d2ef2b7a890a264d81910a108cc6b40df7f80f69070eee051825008cac7abbedf34deff1dedf34b09ccab63cc457993151a7f50e54c12174ad25000000000000000000000000000000000000000000000000000000000000008900000000000000000000000000000000000000000000000000000000000000693a4084c7bcdf2a138ccdca16bb287be2811bb21a62607c7b76b8d9632ab479f2765d585bd63224ecec1b58ba58512293a4ac73bb2074d6555d3ad7ea94e3ca7e000000000000000000000000000000000000000000000000000000000000001cae195009e916633305723de56a12a5bb49d81f6d4416bdde8761a960a152bd767d2f44ad24521f56900cbe282fb3408b95fc4ab44c819ca9459097a7d950bf40000000000000000000000000000000000000000000000000000000000000001b47f7baf6b9edf1bccf013b47d74e7890b882ed80ea08844b39c4f8da4420759379a47109ec18e8779270604fff119c997a3d77b8e44a664f03e04a4edb9b9f47000000000000000000000000000000000000000000000000000000000000001b73bc4b8f1ccd9abe09c4592e3ebc71ac866830d0e7e04e42c4efe1d60a86180058e613a56eb28a671b8d3ea3fff6083273029f5f50450f8ddde67bebbf714e38000000000000000000000000000000000000000000000000000000000000001ba05c9c4dd17c51cae4727cd7eb5a0685fe94f4942be0b1c02b5d181bfb1548284dda3773cd4199b7a678d5a6e437eb29b14099a6bef1160d458245b88fd3ea5b000000000000000000000000000000000000000000000000000000000000001bac0a62765c521609d8a7b393ecd8a53a3fb50a7c7c12f799edca742a7f41aa026f8d5057aad072d270ad398a25248065c671e19317dc9c2bb130440e7e1173b5000000000000000000000000000000000000000000000000000000000000001bd8b13e52d97aad0f94d67c90680c7ec670e128d0fca854762004018a6a2f98aa1b4b69cad4d48adbe0a0e0e9f05a66abb2c55c999c7e0ab7ef36069d124291e2000000000000000000000000000000000000000000000000000000000000001c2a4f2bfadf6eb6fa88ce010caea3c31702e2ca2e3f394c3047549a6d325edb2e52527ea2dd5bc509fb01b41fcb13e4fc3e40e3f0f5638862a45af325cc8b3113000000000000000000000000000000000000000000000000000000000000001c0092092cc8ea538b03b1a4913ce680ec07579cb06700890ac3013e9fc2993aa9486fce27aba13d3d8742333903e187835852fbd5ea45730fb34a26c68dd6a069000000000000000000000000000000000000000000000000000000000000001bee7d7b977b61b78527d7083413a9cb7cc12729b589ca84a90d06fee55a23dfb309269b0df8faa39dd5bacd6ecb72d4a9d59c02371c42bf5de820ec06c3cb33d2000000000000000000000000000000000000000000000000000000000000001c6d38b201e14de2dc79695be4eaabf6e9d644d9bb6e4329f0c198db63d1814917064ca39c6081f7c2da9e5d1156646ee83a30d5ecefe6cead1ecd724db5742c12000000000000000000000000000000000000000000000000000000000000001c06107b3a820ebb17c3a6f964bfa7755eb7a4fc2e547a9ad51562290686f606d6503815919238193921eb439d9f01e218fe23cf8ae9a4fdf96fde1701a5574336000000000000000000000000000000000000000000000000000000000000001bf3d9260abd15d8fd4e935ce5b89efcad3b2ebd92a8503609d6743dabf4e043b677fd6d919760fa4854937ff908295ea89f4fd9be5fb8476d49a2d939b2c90e70000000000000000000000000000000000000000000000000000000000000001ba4b4df2cc79ba3df54b23e370ab2c6f29d07af82a6de5b3e6fed9a0c086c682c798df08b640f2e672d865fe7c755a541834a4c13336cb0f1a17a4161f10ed979000000000000000000000000000000000000000000000000000000000000001b1eb369888992fa7dd75816c4a06d3847afe7dea85b8efa47dbeb4789422666307715b7a2b1b33490b66c5271eb596fba93018d1fcb525b86bced7ba38939f986000000000000000000000000000000000000000000000000000000000000001c0dc4ab355570536b43a36299d1e19fc40df02e1c14742bbf1c619b1e3870b2597707368ae4ffe33d3c5298d4830d1ae076625b54047267efc2559ad585d0c21c000000000000000000000000000000000000000000000000000000000000001c67008effa4483083bc79a1e5db5630ac3a77d5c8aece20741a987acb16852ba54ee890100927dba6baa90b80d8747f0c3251f1ac8384bc6d8d87f2c204312499000000000000000000000000000000000000000000000000000000000000001b508a527a0bc9d03646f3eb65d3ca889e031e88e508efa0f53443700640880f4a01fbc10b5544274c57e33cc2b5651b4cf9397557a09e21545b87c9645ae99804000000000000000000000000000000000000000000000000000000000000001c6a4a700d71288944238df361490dcd123b8fac5a6d991bed5bf77c0cb0fe62ba7e90e1b1c7ce7766b281ac94a470ee5b72e4f548df2eb48dcff96751dc55c9eb000000000000000000000000000000000000000000000000000000000000001cf5d6ce0c41f3febdf1a4c10dd21ce25f9b2d02ac1a3f6a00568fd256db7e30085804343f50f5ad2869ac8ed4680018c700d0a6e72d6a1c510f21f2c917a1ff08000000000000000000000000000000000000000000000000000000000000001c09e4290dfd17ef51d8e4830553d0422dd603f5ffc2cf98abef4d41603fb29ee733b740de1673f270356740285e4cb64907f7418e9d13600287f81723742e5b16000000000000000000000000000000000000000000000000000000000000001c86a4d2f2fe5c76f4ced1e50011c07574253bdef8601b25ca84bdafb89419d7ca3e53c2a6fcfd84547e87b9f6f81ed1b04b7c8672df05e91045399d223ce007bb000000000000000000000000000000000000000000000000000000000000001ce823d5e4a500ec48e829bcbba124a12bed8c561d6345d3c900829fdc9e03686e3020d3b19b5d53b8d177ff2e3bbb231c1df92ce455101189623921b71a8c079e000000000000000000000000000000000000000000000000000000000000001c8426565ed02625d2e94667da6c281586ac25854339ffa32c8c085c5ad512956b0066b4099b6c321e68731ee9e036cf4a65d7c941e836ec7c70d27831b893376d000000000000000000000000000000000000000000000000000000000000001c8baf9de932b3625e055a7b19957f11f1858d095a060fb5840a6ea89f7e9285021399e1dcb37ed9620c3ee58f8a9ca94662b318c79806043b8ec667559e36656f000000000000000000000000000000000000000000000000000000000000001c4f79bf4c381d06c3a29dad5446c6ade80e0efc670bf0f3bf8d8a6229a955060959636a640336286e7d9f2458d05cb1291f66faa2040d0d7f78c4a5bca5a029fc000000000000000000000000000000000000000000000000000000000000001c11f7c30bdfa924be8997199df7359d3d5d9a7706865ef1aa287ef22734d7b1d62f7438637910e195a3e35f9d5d4ae47cb66dd81fa398e1321d5c9679d8918ec4000000000000000000000000000000000000000000000000000000000000001cd3f38095b7defdcea08a503b5c801e58d5f88d9d96af84387271440f7be0fb0c3decfcac624717aaf30448a39dc61f0640c1188898790eb946d81a8758e3e48f000000000000000000000000000000000000000000000000000000000000001c7149efc25d2cafa9596effb122c11d81b9783ce785d3ad0232fafc5649cdd33a450712ccaf9b7214c522cf6c35128230564b884deac5868e6c42edbe1f37d632000000000000000000000000000000000000000000000000000000000000001ca0ff5517836705e08c3dbdc83d0712716be1ccbc733248a10ff4144a379b02ab33cb6b2d22ccf5e080a1efd1b6b8c9d6d9c71e83c99538928908cd5b144d76ff000000000000000000000000000000000000000000000000000000000000001c443ac652890088204ab75b9fcdbad2850ef39ead3ab32eee793e605e344984726219eb3eaba45f8d53a4f4e55905fa3347bbff8af399bad1d684a4a889b130ed000000000000000000000000000000000000000000000000000000000000001cae600bf3dbcd8da745860528ed1ab7fd6731a4714e30d710ac530a047eda63e040bd1cce62bb2a5cf5fc026f9fcd741d5934d3e22c666de299767f9148ad0888000000000000000000000000000000000000000000000000000000000000001ccc639063985f5cb584ab17bafefbab253ad4d830ac5fdab69f070fac608fd33214447f7ae36c7171d0e96d31fbefa117bc519e8aac46cbb84e1fad1c640872b5000000000000000000000000000000000000000000000000000000000000001c4faa9e9e8cec55ea90d8979aa40bd50409cc12b1aec47be4819dde8db4424524763198a91cb934d6bf854f63be4349c133d914df20dcf3a269fd3b1c798d9e10000000000000000000000000000000000000000000000000000000000000001b9c4690e40784e9715743a0105a1ec46a9600f66ba7bd457dd8f740ac364e80ed43f88d29a3985a9809254bd127e5d79c2c32f6dadead20ebc22377644c4d3ab2000000000000000000000000000000000000000000000000000000000000001be008eff4d1d1056256a78d2ce92d0ae8e86df0574234c7bfb8a50afdcc434f3c7840e8d8b3d45f866b62b9e85a53509c045a506820dc8f9a4bb573654b68e656000000000000000000000000000000000000000000000000000000000000001b63a15f08a4f477f832eb47544084a0a1b5b1dc9036fc1189500591766cca699b7ecf33e8f9fe7276c03469e2756c71ccd958c3cd94595fe4b6e309030e858d93000000000000000000000000000000000000000000000000000000000000001c871fe08d3849b22cfc0e2d6273740a905e75afd2c3ff21fb3f987bb66b9a22da1f1aeec7b500901c7aec7e61a65c6a75be47fdb63e18301757dedf471ecfa321000000000000000000000000000000000000000000000000000000000000001b3f9c261ae78952e07f07fbb91bf21791c69bbb684ccfa660d39ae3433ae92ab20836d3710c16a975e19a19b96c8c6d4375e4a7b1d10d26f4a8b0e52d6cff8aca000000000000000000000000000000000000000000000000000000000000001ce52c9c29400a73f5138e4950ab99dd990b0c9825b0638f9ada711950418b87c637ec623979cea256a6f0e39ca1ff4405af8ce827dcd9df544085c25a3c672fc0000000000000000000000000000000000000000000000000000000000000001bc1d8f3435d5e7ae4f392682a81818f4e2fae5f8f8b8f5c041b1c85106a4a388a376e20e04cad29048c7a02de9d391bf360ba419e9c329e8ad6f173ca86442d6d000000000000000000000000000000000000000000000000000000000000001c29343cd2009aad43c854157519d2214fcbdfc21b5a4335c7a065377ecedf6bd1737b54106b332cf22678a6ede90ca4d6cecf0e2d10265c7b3abc9703fca1f21d000000000000000000000000000000000000000000000000000000000000001cedab2103c61461419e54e9e13e5c97dd729b204267c555d67598823d7dc61cd771ff537bd53239f8397fd99dbec576d0f56c84b6c092a8d7e6c35e840a0f1524000000000000000000000000000000000000000000000000000000000000001baff4773e30cda17fdf707fb3db737acc10aaeccad7b52ab76e8c7f3d20f0bb0e13aad10cb2b53cc033b7232d8ecf03964be5d8a730b3454dc0b08b441e978317000000000000000000000000000000000000000000000000000000000000001c5cc39fa153349dc72240acc2b483e55585bb2eb75c3bd206d9714f825242182a3ee3a79fcb4080fda53f063737a12fbbb011d366997a6c1d3e54855ee31366dd000000000000000000000000000000000000000000000000000000000000001c60bfa389df4cad417c387560281898f41abbaf2592fd1aad3250a1c1dac01910563f15974e091b8c56ffcf27a02721012ad899668712acc158a9e74a9788bbc6000000000000000000000000000000000000000000000000000000000000001b15caeffe4d1a334ffb1d86fd44d63bac628cb056bfcbab9ffca837ebb6d8becc5648bcca2e5253d43bbb903e8696b1e742310998f08ff94e4e1724177e5a9002000000000000000000000000000000000000000000000000000000000000001c77e44050341aae1d34411368dfca9f25607e4e7f7021fdfc20609aa0b1e3838e70ee1ed6c441f80449dbf65ff37352cd4e3126e257273e0013323392e7eb3a8d000000000000000000000000000000000000000000000000000000000000001cba312121d912022a520e6f42dc9a2b8ee5abc599e30d69074cbd82afc34b76ed789e39b31e0361f34535cf78c3054aa1e2d509afcad45bd3e2d80ac1bfc4c7de000000000000000000000000000000000000000000000000000000000000001cf45acfc62adec157dc2df96b9cfba54e9d7ca708b2b8fe7b0e5d9500f44cc068589c88d46e71fe1dcfdac2948636e91dce4472aef495c8ea5c1497261e4b69d3000000000000000000000000000000000000000000000000000000000000001b88de4c821235c71c1d7e58be3c974c06305e9d80d5fbdbc73dbcbcff57a64b1c4799b751e918a077c2b2afbbe7b21dafe3ed5bf97c84053239dc4fe5b0ae6af3000000000000000000000000000000000000000000000000000000000000001c977f2d0a09d566a1387c82188eb75ea70a06720e5a2e687e5208169c6f027f0117f2ca0fc1994d4e4e568137e3a661935d892bb02a16e3a9ae1b3add23eb5c37000000000000000000000000000000000000000000000000000000000000001bac6f1948daf8a5632365d94d3540eea5b8dc7ff923cdd109fd0996f92aaace8d1f2c2d377875b01e8c3274ea7a097c62b1ca96293def4b2a32f01eb95f7b4ef4000000000000000000000000000000000000000000000000000000000000001bb8cede79eb194e718da99d73896af1ef4fc4c004571988a523a383e4c0fc5fff34b1e142c098e9a1dbba9863f2adb5883695bdf0b89b2ac153e3886d7c1c6c64000000000000000000000000000000000000000000000000000000000000001cc87b86e5a06e92bbaa0efc0d72d630c566616c2d130b6e0fd45f850e2430953a5e4c2cd4b5619cf6114ebd75d01a78fd34015a57a7f508918c58e5abd15f1adf000000000000000000000000000000000000000000000000000000000000001bf1a9cf7a53d367ca162abf5dea09fd4493ec47b31361158c0ab3bb30b577313615512ba5fab83414bbd4bc2b0a049de2d1874e94a7ec903a737cf91325c043c9000000000000000000000000000000000000000000000000000000000000001b8b004ca4f63294049cab5ca6f8466ba3c2c21a029fbc40b851b955815753c7bf4e3d449f627338eac57c4f66eafbd2a788529cdfcabddf8cb7ec9c4ff8fca474000000000000000000000000000000000000000000000000000000000000001c2a187ef1d75683f3f0236a7432768becff3ac84740998dfd3068d9a62c6bfe3f5c6cffae8a992841fd2f63eb7baf17cf245bee2e56e2e10b286aeb53ae513015000000000000000000000000000000000000000000000000000000000000001c11345e9886ef77575474ca217139f6919ca84c3b1efa339f9c479c0a4c6ab707166da52169353aed420e5eba2ae18ba67901cedac27404735795ed8685096ebd000000000000000000000000000000000000000000000000000000000000001bb29cb9a85585f79837dc586f6358fd5b7f46321368c31cad1722aad71f4eb75d708cb585ecd2d7f96fe5af4e15f1d0598cea80529a0b6b0a0e3359765b7d2911000000000000000000000000000000000000000000000000000000000000001ce5b7233bc3635246a995a117b189f364e82167764f12faca227a9c4e073e5039336fa1137bb3587c48e2d79439f07d071795d104fd8131ecb92d7be9ad898a3a000000000000000000000000000000000000000000000000000000000000001c6bf84445711e786f4c0aacfab23a77e488cec555a015eaaf902b29fb3953ca5d4ae05ebeb1535d1eeec29e706598e15b28b67fd910aec98db92928194273e791000000000000000000000000000000000000000000000000000000000000001b78a4d612146c584ace9bdc8a44e3fa2e85952393071e681b952a785a9ee5a73c58cf758fda57a8acc5e96576f3a2fa080f883cf1bd7d1c965c93c49c0eb3b4df000000000000000000000000000000000000000000000000000000000000001ca93ac48e686161f2f472337e580934fbbc1db0266f0d00846b1d261247f6db540f388214cad447e46c567596555e9ca20beacfbeac76eb1ad0fb0e5f56941da0000000000000000000000000000000000000000000000000000000000000001b5196942a5bb24928a70450865810cd090cea381696907f98ae376369cf740953174c3099bc10fcbefec6fcfa55f19492ac7dd1feba66fc63adc022537e43093f000000000000000000000000000000000000000000000000000000000000001b8a4edbbb5e590cadd5bc4f52b319f1281a90f99eedc28be29a5ad9adac40a523354c3633ad57ca4baf71c8503769ccd23f11eba5443735c0388b33e159a63acc000000000000000000000000000000000000000000000000000000000000001cf3f497a150b3bd87356f78ef8028290dacded052965d95747b82478563e3ddff277246c7870393ad25a16f86f6c57c8a7c4b90f2e895c16bf7efb521de49ab97000000000000000000000000000000000000000000000000000000000000001c0a1851178dde6ea6f65a0c2909672f08330445fedbc6047ac7d8c580523033c57322202696a4261e5138f2acf54a33a4726d974a4a15c5924e3dd2ad213b24a9000000000000000000000000000000000000000000000000000000000000001ce67d5b4429f8d9c12bf90c5f23f8b895d6991c629122491e6419edcd91662dc5261c43e053b952721a703586f364742aebfdc39ce6888a3e030b297e7002a1e2000000000000000000000000000000000000000000000000000000000000001c89a5fc19898d704fc4bf715fe170e13d2f49fd2c525e32ec72ed56990fb5ac4a3cc840d6c2a2a6d83bbe637072a26a762441f7cf3ad126e7e6d01ad107968794000000000000000000000000000000000000000000000000000000000000001b2a3c7bfa1d2c10a3bdb9cc25d53fb21e5cd4f826a19d081dc03303e65090174d0461b9c25e0bfae609026c46afef48a7f6002fa69a2f966e3b7e539402a5c05e000000000000000000000000000000000000000000000000000000000000001b43b85e5f2cbaaa6f371bf4db62e09d776366b86170154dfbf6d01a877db7f3bd69484e311d256e32497772da7ddbb1d7ac1e18207afdda0c19f5e1ae8df7f226000000000000000000000000000000000000000000000000000000000000001c9478de3ff58635c797d21d5d8a2920840446b3ab61ff1dfdb057a9ee1f560d766325e34cd852b6a2bc53134379c66b6b62ce79b29b9e453cd9df656b001317df000000000000000000000000000000000000000000000000000000000000001bc0817d6e21508659f18d9751927209ec37ef12f710ccc855174948365668b0a9672eafcc25f5874cb70764dab6cb6b0f697ad5b5439af290d6f01010cad760f3000000000000000000000000000000000000000000000000000000000000001c8876ffcf4f5555f882192774fe769d0141d7151a19da9c841dab9bfa35c832c02b15b485820bd9802c5c4ad8c798f717f051bcebbf6d3fbf959276bbe9f67490000000000000000000000000000000000000000000000000000000000000001b70b617b6925e9ba5a556ffa4cf275dacbe99c5f600ac9ae68422e98c742df6600fb56e0b884753c6a24c56c7b5d70c8bc68f0aaedb2a79a646c53501ce68598f000000000000000000000000000000000000000000000000000000000000001bd52da5a23c2d3bdce042e843861f07c122e28792ad042b9eacee0a3fb41053d2460ad95819fb119d1edae106c46874e498ee6c10995ad96be078a1d4f19e5d29000000000000000000000000000000000000000000000000000000000000001b8bb437c13de015aad1ddb7b1a01bda39c5468e0a09846c80e159486c2bf9e59b1084f93986dc8f66e2d37e69b1b5d60c283e48b808ef4154f86d6ab52310b1e2000000000000000000000000000000000000000000000000000000000000001b51c9d757be1ce20ad5022f05dc19b9ed6c3d04c6731c2e8dc3bc84ebcfe7cbb12beb33783f2e10c3382aba1eae7d07aaf25724e42d468c9c65fa26e17673fc85000000000000000000000000000000000000000000000000000000000000001b7fee5ba49a5c09ae7a61ef99f9716cd06611abe901a272ac730514380710f3c914f4e458be7d4da20f864cc444356eeccca7a9ccd7ccaf052790eb3c484a93bf000000000000000000000000000000000000000000000000000000000000001bebf4c984f84d7defd8661d3d8f5c2c1b7d0661b5d0b98e50d01af267e9f8df8a7349a1fc88072134ccec1a0c8256a5d60196f1bbc8741b22315f9099ecaeb232000000000000000000000000000000000000000000000000000000000000001c485bd8786f39d7b544e582b25e56024124e57146b1f22542803d8a01e75fe41613fb14a66b425b877bd720dcb615bb52b78a49d1d8c9d37ea427d0303d52494f000000000000000000000000000000000000000000000000000000000000001b8be5d678f084769804c05ccfca4021e9835874dd23d3d14c14f11ac1bf0e8309471640522e8778e6ecd271fd83ecd1cb1d0a4cca82be3c25edede80b71d03cec000000000000000000000000000000000000000000000000000000000000001c172f277703cfb1d7fa70ff132e23914d5be57790bc8dc7565f9957f47bf64488751ede70f6430eaea7e6427a519057657f803a6270de31d119996bab663a9206000000000000000000000000000000000000000000000000000000000000001b47e208bf41ed5a441a2c6d7d508a6e09fc20b5f15c45b15b3e12e04246b5647b4d94e4c33a27ed071d338ab5699ee31413bf421743e1cee3ee4357b4e70e1cc9000000000000000000000000000000000000000000000000000000000000001b8a681e538cdb7819ad9ab8a022165d7b78cb6bce5b3f419e36a25f1119acb405537e290b4aa784f9010c2ca211cd9139b821633d86863653389f8c5ecdf41412000000000000000000000000000000000000000000000000000000000000001c63b43222e123ce2493bf567a90dedbabca6fd4a1f76bb3b8928ed3bdfd63cc334cbc29947a45046cf1cefc0e3bdf3a3f311c3b560530ded4e110b1c7e42e0257000000000000000000000000000000000000000000000000000000000000001be92a4c8e85a4cf8196c302a9589b3a752b707c93499ab712c5e2dc0291e036fe04041d60088878f22ef88cceb0735b0b8de9936e071c66c32e89880746935830000000000000000000000000000000000000000000000000000000000000001c4dd187530196f467e6b236879a4cb47ad92132cc97ff0f9464b8de55d4c53e9412cc0b870dab48f63b525115811338b58857823ed343ebf997c347fc2a0685dc000000000000000000000000000000000000000000000000000000000000001c52b083d271b245e7827a6edc3f1d9038799b74748f07a2ce6bb37a641729184f715c5763fd5f175ac6fce4984df281906e4708785f053c61c9fd0687d5bf8776000000000000000000000000000000000000000000000000000000000000001c9ad96d9fca9fda1e2759cc5d8a79c0c2fb44ee5176affec781b61f6389853aee4995356f6b5463b7ea3d600971a285967f5433c7e5a6215f14f2ccb08fb7333b000000000000000000000000000000000000000000000000000000000000001b7d1898c494522d91f15ee552567113489c71eecfe1599109c19c3fab2d578ba3201380988471b0d01bffc91896a7671a7b6abd924fe71661cfd1dc291edcb0af000000000000000000000000000000000000000000000000000000000000001b9fe7e4d3f0b071d00ab2c55a83d9dc5195018a9755ad9401aa5da8b7b2a0fb5c1f3c676cb768d1259bd27b8a4e87610189c461c7ee1333a7022400bcd2da0992000000000000000000000000000000000000000000000000000000000000001be5defe34429cd98a2536ea7249303c8cc3069b0b831d046cf505b5a742e8811834e48a5ca0bb94e25f88469d96a0d609c42be466a9f4aa5ab9b34e462b02ddbb000000000000000000000000000000000000000000000000000000000000001b18b70e14381c5b7c2942e27f5c033dacd1085ce5bb3000749b458e57ce42189e3ab568dc2d4e92e9df18d408e958e52c544327bfb67049022a05e513e3f0f0f1000000000000000000000000000000000000000000000000000000000000001c671299244c531ff320d742d8bc415dabecde1b1ec05ad436f96c1a0159c92f7038a9799aeaffe887b8fd08c1120c1fbc23e4e571d04b54b17898fe5d6fb34634000000000000000000000000000000000000000000000000000000000000001cb87d0910edabc15ec57b0a2fd6778eb27a872ec4e25f0a41b85132058e867c2245e804e8e20cd539e33e711ce8f53ec1fcb31974be6d9b335e002278872ef926000000000000000000000000000000000000000000000000000000000000001ca1a83c934637d0fed6964f762cbe35973cc8607359f0d3396257165f37d65ba877233ad54a125a91258dffecbb612a3b75d11d3497295260c538568047211ae2000000000000000000000000000000000000000000000000000000000000001b78316f44525093125e281594bc3709a4847f7493a82188621ae6b048c87a88925bd8d6a9d50d7391d73a40fe1f897c57f8be3640175bda8a00c15c0041fbdfa5000000000000000000000000000000000000000000000000000000000000001c4ebd80d6e946562cee2c8e47739e3aef1494fccedb2b33d26080e90a712202fe658b4bf0f6e3d006f9831922684632333e134ce3aa8d954bb068374a4aae1bb1000000000000000000000000000000000000000000000000000000000000001c2f6e9cd5661d276c331503f216d1c04074d7390edfb7f34c1c2e4dff5ba38524292f72fe48e3b604e7bbff211eae93f238d46a699a0cf5bf1866a016aceefa1a000000000000000000000000000000000000000000000000000000000000001cc47026b7ebc2141cd8abe2cf15eebf5d3fb2b5f536a626b84a9d8f7d1e31648573b0664c124e6704bd1e829e4c7ceacbfce93218adaff802bb26351ea6989a8c000000000000000000000000000000000000000000000000000000000000001c76d9ae2a1cc2eb48225e7abb2e46fa3d7448c80345cdf87608f2b4e4281d56bf0daad048a169b3afbf69bab0545ad52eb5af739ee5e6c0e1a1ce4a9e202ab750000000000000000000000000000000000000000000000000000000000000001c7d3b9627222b0bfd4896af11f34f5b2fc6dc209b1aa1b07bd31b86f9ccf4dfa735b12fd9593af7c344a4c4a49c1741349296a51992dac73613069eff1c5094cb000000000000000000000000000000000000000000000000000000000000001cd40a7d37584aee8dd2bf0d6ee9775ed129a2daba64f3ec3963c85c722bad11526ab569b744e7b966c6ab8c4cdcfa19f4c87f6396d2a587f53bf2f79573da9ccb000000000000000000000000000000000000000000000000000000000000001b";
 
     function setUp() public {
-        (user4, user4pk) = makeAddrAndKey("user4");
-
         networkL1 = vm.createFork(vm.envString("L1_RPC_URL"), 23857250);
-        networkL2 = vm.createFork(vm.envString("L2_RPC_URL"), 79372100);
         // Create test addresses
         nonAdmin = makeAddr("nonAdmin");
 
@@ -92,21 +71,7 @@ contract sPOLControllerFullL1Test is Test, Deploy {
         testAdmin = admin;
         validator1 = IValidatorShare(IStakeManager(stakeManager).getValidatorContract(validator1ID));
         validator2 = IValidatorShare(IStakeManager(stakeManager).getValidatorContract(validator2ID));
-        // Verify initial state
 
-        //setup L2
-        vm.selectFork(networkL2);
-        // Deploy contracts
-        deployContractsL2(address(this));
-
-        // Get deployed contract instances
-        child = sPOLChild(address(sPOLChildProxy));
-        // Get config values
-
-        // Verify initial state
-
-        // finish chain config
-        vm.deal(admin, 1000000 ether);
         vm.selectFork(networkL1);
         // Update ValidatorShare contract in Registry
         address newShare = deployCode("test/integration/ValidatorShare.json");
@@ -114,633 +79,8 @@ contract sPOLControllerFullL1Test is Test, Deploy {
         vm.prank(registry.governance());
         registry.updateContractMap(keccak256(abi.encodePacked("validatorShare")), newShare);
         assertEq(registry.getValidatorShareAddress(), newShare);
-        // Map sPOL on root chain manager
-        // no statesync in this test, so will remain unmapped in childchainManager, this is probably fine, as we will always be pranking as CCMs
-        vm.prank(
-            IRootChainManager(rootChainManager).getRoleMember(IRootChainManager(rootChainManager).MAPPER_ROLE(), 0)
-        );
-        IRootChainManager(rootChainManager).mapToken(address(sPOLToken), address(child), keccak256("ERC20"));
-
-        // Register messenger in StateSender
-        vm.prank(IStateSender(stateSenderL1).owner());
-        IStateSender(stateSenderL1).register(address(messenger), address(child));
-
-        erc20predicatePortal = IRootChainManager(rootChainManager).typeToPredicate(keccak256("ERC20"));
-    }
-
-    function test_fullL1_expected_usage() public {
-        deal(polTokenL1, user1, 1000000000 ether);
-        vm.prank(user1);
-        IERC20(polTokenL1).approve(address(controller), type(uint256).max);
-
-        vm.selectFork(networkL1);
-
-        // user1 attempts to buy sPOL, no validators exist yet
-        vm.prank(user1);
-        vm.expectRevert();
-        controller.buySPOL(1000 ether);
-
-        // activate 1 validator
-        vm.prank(testAdmin);
-        controller.addValidator(validator1ID);
-
-        // attempt to buy again, total depositshare 0
-        // vm.prank(user1);
-        // vm.expectRevert();
-        // controller.buySPOL(1000 ether);
 
         // set validator1 deposit share to 100%
-        uint16[] memory validatorIDs = new uint16[](1);
-        validatorIDs[0] = validator1ID;
-        uint8[] memory shares = new uint8[](1);
-        shares[0] = 100;
-        vm.prank(testAdmin);
-        controller.updateValidatorTargetShare(validatorIDs, shares);
-        // user1 buys sPOL
-        vm.prank(user1);
-        controller.buySPOL(largeAmount);
-        assertEq(sPOLToken.balanceOf(user1), largeAmount);
-        assertEq(validator1.balanceOf(address(controller)), largeAmount);
-
-        // buy more
-        vm.prank(user1);
-        controller.buySPOL(hugeAmount);
-        assertEq(sPOLToken.balanceOf(user1), hugeAmount + largeAmount);
-        assertEq(validator1.balanceOf(address(controller)), hugeAmount + largeAmount);
-
-        // sell some sPOL
-        vm.prank(user1);
-        uint256[] memory firstSellNonces = controller.sellSPOL(mediumAmount);
-        assertEq(sPOLToken.balanceOf(user1), hugeAmount + largeAmount - mediumAmount);
-        sPOLController.FullNonceDetails[] memory openUserNonces = controller.getUserOpenNonces(user1);
-        assertEq(openUserNonces[0].nonce, firstSellNonces[0]);
-        (uint16 firstSellId, uint128 firstSellamount, uint96 firstSellnonce) =
-            controller.withdrawNonceDetails(firstSellNonces[0]);
-        assertEq(firstSellamount, mediumAmount);
-        assertEq(firstSellId, validator1ID);
-        assertEq(firstSellnonce, 1);
-
-        // attempt withdraw
-        vm.prank(user1);
-        vm.expectRevert(abi.encodeWithSelector(sPOLController.NoNoncesReady.selector, user1));
-        controller.withdrawPOL();
-
-        uint256 beforeWithdrawPeriod = vm.snapshotState();
-
-        // fast forward time past withdraw delay
-        vm.startPrank(IStakeManager(stakeManager).governance());
-        IStakeManager(stakeManager).setCurrentEpoch(IStakeManager(stakeManager).currentEpoch() + 80);
-        vm.stopPrank();
-
-        // withdraw successful
-        uint256 user1BalanceBefore = IERC20(polTokenL1).balanceOf(user1);
-        vm.prank(user1);
-        controller.withdrawPOL();
-        uint256 user1BalanceAfter = IERC20(polTokenL1).balanceOf(user1);
-        assertEq(user1BalanceAfter - user1BalanceBefore, mediumAmount);
-
-        vm.revertToState(beforeWithdrawPeriod);
-
-        uint256 oldExchange = controller.convertPOLtoSPOL(10000 ether);
-        assertEq(oldExchange, 10000 ether);
-        // transact seems bugged, it's resetting state
-        //vm.transact(networkL1, 0x417a2c54c6403be4803e647ce39722321afbc1eb4fbc07612166c852bcd9eed5);
-        0x86E4Dc95c7FBdBf52e33D563BbDB00823894C287.call(rewardIncreaseCall1);
-
-        controller.restakeValidator(validator1ID);
-        uint256 newExchange = controller.convertPOLtoSPOL(10000 ether);
-        assertLt(newExchange, 10000 ether);
-
-        // buy some with new exchange rate
-        expectedSPOL = controller.convertPOLtoSPOL(largeAmount);
-        vm.prank(user1);
-        controller.buySPOL(largeAmount);
-        assertLt(sPOLToken.balanceOf(user1), largeAmount + hugeAmount + largeAmount - mediumAmount);
-        assertEq(sPOLToken.balanceOf(user1), expectedSPOL + hugeAmount + largeAmount - mediumAmount);
-
-        // small sell after exchange rate change
-        expectedPOL = controller.convertSPOLtoPOL(smallAmount);
-        uint256 controllerValNonce = validator1.unbondNonces(address(controller));
-
-        vm.prank(user1);
-        uint256[] memory secondSellNonces = controller.sellSPOL(smallAmount);
-        assertEq(sPOLToken.balanceOf(user1), expectedSPOL + hugeAmount + largeAmount - mediumAmount - smallAmount);
-        openUserNonces = controller.getUserOpenNonces(user1);
-        console.log(secondSellNonces.length);
-        assertEq(openUserNonces[1].nonce, secondSellNonces[0]);
-        (uint16 secondSellId, uint128 secondSellamount, uint96 secondSellnonce) =
-            controller.withdrawNonceDetails(secondSellNonces[0]);
-        assertEq(secondSellamount, expectedPOL);
-        assertEq(secondSellId, validator1ID);
-        assertEq(secondSellnonce, controllerValNonce + 1);
-
-        // another reward increase
-        0x86E4Dc95c7FBdBf52e33D563BbDB00823894C287.call(rewardIncreaseCall2);
-        controller.restakeValidator(validator1ID);
-        // another small sell after exchange rate change
-        expectedPOL2 = controller.convertSPOLtoPOL(smallAmount);
-        vm.prank(user1);
-        uint256[] memory thirdSellNonces = controller.sellSPOL(smallAmount);
-        openUserNonces = controller.getUserOpenNonces(user1);
-
-        assertEq(
-            sPOLToken.balanceOf(user1),
-            expectedSPOL + hugeAmount + largeAmount - mediumAmount - smallAmount - smallAmount
-        );
-        assertEq(openUserNonces[2].nonce, thirdSellNonces[0]);
-        (uint16 thirdSellId, uint128 thirdSellamount, uint96 thirdSellnonce) =
-            controller.withdrawNonceDetails(thirdSellNonces[0]);
-        assertEq(thirdSellamount, expectedPOL2);
-        assertEq(thirdSellId, validator1ID);
-        assertEq(thirdSellnonce, 3);
-        assertGt(expectedPOL2, expectedPOL);
-    }
-
-    // function test_fullL2_expected_usage() public {
-    //     vm.selectFork(networkL1);
-    //     deal(polTokenL1, user1, 1000 ether);
-    //     vm.prank(user1);
-    //     IERC20(polTokenL1).approve(address(controller), type(uint256).max);
-
-    //     // activate 1 validator
-    //     vm.prank(testAdmin);
-    //     controller.addValidator(validator1ID);
-
-    //     // set validator1 deposit share to 100%
-    //     uint16[] memory validatorIDs = new uint16[](1);
-    //     validatorIDs[0] = validator1ID;
-    //     uint8[] memory shares = new uint8[](1);
-    //     shares[0] = 100;
-    //     vm.prank(testAdmin);
-    //     controller.updateValidatorTargetShare(validatorIDs, shares);
-
-    //     // user1 buys sPOL
-    //     vm.prank(user1);
-    //     controller.buySPOL(smallAmount);
-    //     assertEq(sPOLToken.balanceOf(user1), smallAmount);
-    //     assertEq(validator1.balanceOf(address(controller)), smallAmount);
-
-    //     // after setup, send a valid exchange rate update to L2
-    //     vm.recordLogs();
-    //     vm.prank(testAdmin);
-    //     messenger.updateL2ExchangeRate();
-    //     Vm.Log[] memory stateSyncLogs = vm.getRecordedLogs();
-
-    //     vm.selectFork(networkL2);
-    //     vm.prank(admin);
-    //     child.setQuickRedeemBufferSize{value: 10000 ether}(10000 ether);
-
-    //     deal(user1, 1000000000 ether);
-
-    //     // prank statesync using emitted data
-    //     assertEq(stateSyncLogs[0].topics[0], keccak256("StateSynced(uint256,address,bytes)"));
-    //     assertEq(stateSyncLogs[0].topics[2], bytes32(uint256(uint160(address(child)))));
-    //     vm.prank(stateSyncerL2);
-    //     child.onStateReceive(0, abi.decode(stateSyncLogs[0].data, (bytes)));
-
-    //     // buy some sPOL on L2
-    //     uint256 expectedReturn = child.convertPOLToSPOL(largeAmount);
-    //     vm.prank(user1);
-    //     child.buySPOL{value: largeAmount}(largeAmount);
-    //     assertLt(child.balanceOf(user1), largeAmount);
-    //     assertEq(child.balanceOf(user1), expectedReturn);
-
-    //     // sell again
-    //     uint256 balanceBefore = user1.balance;
-    //     console.log(user1);
-    //     vm.prank(user1);
-    //     child.sellSPOL(expectedReturn);
-    //     assertEq(child.balanceOf(user1), 0);
-    //     assertEq(user1.balance, balanceBefore + expectedReturn);
-
-    //     // increase exchange rate on L1 side
-    //     vm.selectFork(networkL1);
-    //     0x86E4Dc95c7FBdBf52e33D563BbDB00823894C287.call(rewardIncreaseCall1);
-    //     controller.restakeValidator(validator1ID);
-    //     // send updated exchange rate to L2
-    //     vm.recordLogs();
-    //     vm.prank(testAdmin);
-    //     messenger.updateL2ExchangeRate();
-    //     stateSyncLogs = vm.getRecordedLogs();
-
-    //     vm.selectFork(networkL2);
-
-    //     // prank statesync using emitted data
-    //     assertEq(stateSyncLogs[0].topics[0], keccak256("StateSynced(uint256,address,bytes)"));
-    //     assertEq(stateSyncLogs[0].topics[2], bytes32(uint256(uint160(address(child)))));
-
-    //     // This doesn't start a migration as no net sell/buy occured
-    //     vm.prank(stateSyncerL2);
-    //     child.onStateReceive(0, abi.decode(stateSyncLogs[0].data, (bytes)));
-    //     // buy some sPOL on L2 with new exchange rate
-    //     uint256 expectedReturn2 = child.convertPOLToSPOL(largeAmount);
-    //     vm.prank(user1);
-    //     child.buySPOL{value: largeAmount}(largeAmount);
-    //     assertEq(child.balanceOf(user1), expectedReturn2);
-    //     assertLt(expectedReturn2, expectedReturn);
-
-    //     // snapshot before sell
-    //     uint256 beforeSell = vm.snapshotState();
-    //     // sell into reserve
-    //     uint256 userBalanceBeforeSell = user1.balance;
-    //     uint256 expectedReturnSell = child.convertSPOLToPOL(8000 ether);
-    //     vm.prank(childChainManager);
-    //     child.deposit(user1, abi.encode(8000 ether));
-    //     vm.prank(user1);
-    //     child.sellSPOL(8000 ether);
-    //     assertEq(child.balanceOf(user1), expectedReturn2);
-    //     assertEq(user1.balance, userBalanceBeforeSell + expectedReturnSell);
-    //     //balancing should attempt to backfill
-    //     vm.prank(admin);
-    //     vm.expectEmit(true, true, true, true, address(child));
-    //     // POL amount requested is the return of the most recent 8k sell,minus the largeAmount just bought, minus the safety buffer from the first buy/sell
-    //     emit sPOLChild.BackfillRequested(
-    //         expectedReturnSell - largeAmount - (largeAmount - expectedReturn), 8000 ether - expectedReturn2, 1
-    //     );
-    //     child.balanceWithL1();
-    //     vm.revertToState(beforeSell);
-
-    //     // sell without reserve
-    //     vm.prank(admin);
-    //     child.setQuickRedeemBufferSize{value: 0}(0);
-    //     uint256 userSPOLBefore = child.balanceOf(user1);
-    //     vm.prank(childChainManager);
-    //     child.deposit(user1, abi.encode(8000 ether));
-    //     vm.prank(user1);
-    //     child.sellSPOL(8000 ether);
-    //     assertEq(child.balanceOf(user1), userSPOLBefore);
-    //     assertEq(user1.balance, userBalanceBeforeSell);
-    //     //balancing should attempt to backfill
-    //     vm.prank(admin);
-    //     vm.expectEmit(true, true, true, true, address(child));
-    //     // POL amount requested is the return of the most recent 8k sell minus earlier buy and safety fee from first buy/sell
-    //     emit sPOLChild.BackfillRequested(
-    //         expectedReturnSell - largeAmount - (largeAmount - expectedReturn), 8000 ether - expectedReturn2, 1
-    //     );
-    //     child.balanceWithL1();
-    //     vm.revertToState(beforeSell);
-
-    //     // start migration
-    //     uint256 reserveOverhang = child.actualQuickRedeemReserve() - child.targetQuickRedeemReserve();
-    //     bytes memory expectedData =
-    //         abi.encode(MsgCoder.MsgType.L2_MIGRATION_REQUEST, abi.encode(reserveOverhang, expectedReturn2));
-
-    //     vm.expectEmit(true, true, true, true, address(polTokenL2));
-    //     emit IMRC20.Withdraw(maticTokenL1, address(polBridger), reserveOverhang, 0, 0);
-    //     vm.expectEmit(true, true, true, true, address(child));
-    //     emit BaseChildTunnel.MessageSent(expectedData);
-    //     // balancing should attempt to migrate
-    //     vm.expectEmit(true, true, true, true, address(child));
-    //     // largeAmount from secondBuy, largeAmount-expectedReturn is the safetyFee we got from first buy/sell
-    //     emit sPOLChild.MigrationRequested(largeAmount + largeAmount - expectedReturn, expectedReturn2);
-    //     vm.prank(admin);
-    //     child.balanceWithL1();
-    //     assertEq(child.onGoingMigration(), true);
-    //     assertEq(child.backMigratingSPOL(), expectedReturn2);
-
-    //     // complete migration on L1
-    //     vm.selectFork(networkL1);
-    //     vm.mockCall(
-    //         erc20predicate,
-    //         abi.encodeWithSelector(IERC20PredicateBurnOnly.startExitWithBurntTokens.selector, "dummy proof"),
-    //         ""
-    //     );
-    //     vm.expectCall(
-    //         erc20predicate,
-    //         abi.encodeWithSelector(IERC20PredicateBurnOnly.startExitWithBurntTokens.selector, "dummy proof")
-    //     );
-    //     polBridger.exitPOL("dummy proof");
-
-    //     vm.mockCall(withdrawManager, abi.encodeWithSelector(IWithdrawManager.processExits.selector, polTokenL1), "");
-    //     vm.expectCall(withdrawManager, abi.encodeWithSelector(IWithdrawManager.processExits.selector, polTokenL1));
-    //     polBridger.finalizeExitPOL();
-
-    //     // verified correct calls are made, proof not possible here, so we just give polBridge the tokens
-    //     deal(polTokenL1, address(polBridger), reserveOverhang);
-
-    //     // deploy mock messenger that skips the proof verification
-    //     MocksPOLMessenger mockMessenger = new MocksPOLMessenger(
-    //         polTokenL1,
-    //         address(sPOLProxy),
-    //         address(sPOLControllerProxy),
-    //         rootChainManager,
-    //         depositManager,
-    //         stateSenderL1,
-    //         checkpointManager,
-    //         precalcedsPOLChildProxyAddress,
-    //         address(polBridger)
-    //     );
-
-    //     bytes memory upgradeAndCallsPOLMessengerdata = abi.encodeCall(
-    //         ProxyAdmin.upgradeAndCall,
-    //         (ITransparentUpgradeableProxy(address(sPOLMessengerProxy)), address(mockMessenger), "")
-    //     );
-    //     vm.prank(admin);
-    //     accessManagerL1.execute(address(sPOLMessengerproxyAdmin), upgradeAndCallsPOLMessengerdata);
-
-    //     // finalize migration on L1
-    //     vm.expectEmit(true, true, true, true, polTokenL1);
-    //     emit IERC20.Transfer(address(polBridger), address(messenger), reserveOverhang);
-    //     vm.expectEmit(true, true, true, true, polTokenL1);
-    //     emit IERC20.Transfer(address(messenger), address(controller), reserveOverhang);
-    //     vm.expectEmit(true, true, true, true, polTokenL1);
-    //     emit IERC20.Transfer(address(controller), address(stakeManager), reserveOverhang);
-    //     vm.expectEmit(true, true, true, true, address(sPOLToken));
-    //     emit IERC20.Transfer(address(0), address(messenger), expectedReturn2);
-    //     vm.expectEmit(true, true, true, true, address(sPOLToken));
-    //     emit IERC20.Transfer(address(messenger), erc20predicatePortal, expectedReturn2);
-    //     vm.expectEmit(false, true, false, false, address(stateSenderL1));
-    //     emit IStateSender.StateSynced(0, address(childChainManager), "");
-
-    //     MocksPOLMessenger(address(messenger)).expose_processMessageFromChild(expectedData);
-
-    //     // finish migration on L2
-    //     vm.selectFork(networkL2);
-    //     uint256 childTotalSupplyBefore = child.totalSupply();
-    //     uint256 childBalanceBefore = child.balanceOf(address(child));
-    //     vm.prank(childChainManager);
-    //     child.deposit(address(child), abi.encode(expectedReturn2));
-    //     assertEq(child.balanceOf(address(child)), childBalanceBefore);
-    //     assertEq(child.totalSupply(), childTotalSupplyBefore);
-    //     assertEq(child.onGoingMigration(), false);
-
-    //     // user1 sells more sPOL than pol available
-    //     uint256 adminBalanceBefore = admin.balance;
-    //     vm.prank(admin);
-    //     child.setQuickRedeemBufferSize(1000 ether);
-
-    //     assertEq(admin.balance, adminBalanceBefore + 9000 ether);
-    //     uint256 userBalance = user1.balance;
-    //     uint256 expectedPOL = child.convertSPOLToPOL(mediumAmount2);
-    //     vm.prank(user1);
-    //     child.sellSPOL(mediumAmount2);
-    //     assertEq(user1.balance, userBalance);
-    //     assertEq(child.missingWithdrawPOLBalance(), expectedPOL);
-    //     (uint256 _polAmount, uint256 _backFillCycle, uint256 _nonce) = child.userOutstandingPOL(user1, 0);
-    //     assertEq(_polAmount, expectedPOL);
-    //     assertEq(_backFillCycle, 1);
-    //     assertEq(_nonce, 2);
-
-    //     // backfill some POL to child contract
-    //     uint256 reserveMissing =
-    //         child.missingWithdrawPOLBalance() + child.targetQuickRedeemReserve() - child.actualQuickRedeemReserve();
-    //     uint256 l2burnedSPOL = child.locallyToBeBurnedSPOL() - child.locallyMintedSPOL();
-    //     bytes memory expectedDataBackfill =
-    //         abi.encode(MsgCoder.MsgType.L2_BACKFILL_REQUEST, abi.encode(reserveMissing, l2burnedSPOL, 1));
-
-    //     vm.expectEmit(true, true, true, true, address(child));
-    //     emit IERC20.Transfer(address(child), address(messenger), l2burnedSPOL);
-    //     vm.expectEmit(true, true, true, true, address(child));
-    //     emit IERC20.Transfer(address(messenger), address(0), l2burnedSPOL);
-    //     vm.expectEmit(true, true, true, true, address(child));
-    //     emit BaseChildTunnel.MessageSent(expectedDataBackfill);
-    //     vm.prank(admin);
-    //     child.balanceWithL1();
-
-    //     assertEq(child.missingWithdrawPOLBalance(), 0);
-    //     assertEq(child.locallyMintedSPOL(), 0);
-    //     assertEq(child.locallyToBeBurnedSPOL(), 0);
-
-    //     // complete backfill on L1
-    //     vm.selectFork(networkL1);
-    //     // mint/burn sPOL, instead of using proof
-    //     vm.prank(address(controller));
-    //     sPOLToken.mint(address(messenger), l2burnedSPOL);
-    //     vm.prank(address(controller));
-    //     sPOLToken.burn(address(erc20predicatePortal), l2burnedSPOL);
-
-    //     MocksPOLMessenger(address(messenger)).expose_processMessageFromChild(expectedDataBackfill);
-
-    //     // fast forward time past withdraw delay
-    //     vm.startPrank(IStakeManager(stakeManager).governance());
-    //     IStakeManager(stakeManager).setCurrentEpoch(IStakeManager(stakeManager).currentEpoch() + 80);
-    //     vm.stopPrank();
-    //     vm.recordLogs();
-    //     vm.expectEmit(false, false, false, false, address(stateSenderL1));
-    //     emit IStateSender.StateSynced(0, address(0), "");
-    //     vm.prank(testAdmin);
-    //     messenger.completeBackfill();
-    //     Vm.Log[] memory stateSyncLogs2 = vm.getRecordedLogs();
-
-    //     // finish backfill on L2
-    //     vm.selectFork(networkL2);
-
-    //     // mock bridging POL to L2
-    //     vm.deal(address(child), reserveMissing);
-    //     // prank statesync using emitted data
-    //     vm.prank(stateSyncerL2);
-    //     child.onStateReceive(0, abi.decode(stateSyncLogs2[stateSyncLogs2.length - 2].data, (bytes)));
-
-    //     // user1 withdraws successfully
-    //     uint256 userBalanceBefore = user1.balance;
-    //     vm.prank(user1);
-    //     child.withdrawPOL();
-    //     uint256 userBalanceAfter = user1.balance;
-    //     assertEq(userBalanceAfter - userBalanceBefore, expectedPOL, "here");
-    // }
-
-    function test_buySPOLWithDPOL() public {
-        vm.selectFork(networkL1);
-
-        // Setup the system first
-        deal(polTokenL1, user1, 10000 ether);
-        deal(polTokenL1, user2, 10000 ether);
-        deal(polTokenL1, user3, 10000 ether);
-        deal(polTokenL1, user4, mediumAmount);
-
-        vm.prank(user1);
-        IERC20(polTokenL1).approve(address(controller), type(uint256).max);
-        vm.prank(user2);
-        IERC20(polTokenL1).approve(address(controller), type(uint256).max);
-        vm.prank(user3);
-        IERC20(polTokenL1).approve(address(controller), type(uint256).max);
-
-        // Activate validators
-        vm.prank(testAdmin);
-        controller.addValidator(validator1ID);
-        // Note: validator2ID is intentionally NOT added to make it an external validator
-
-        // Set validator shares - our validator gets 100% since we only have one managed validator
-        uint16[] memory validatorIDs = new uint16[](1);
-        validatorIDs[0] = validator1ID;
-        uint8[] memory shares = new uint8[](1);
-        shares[0] = 100;
-        vm.prank(testAdmin);
-        controller.updateValidatorTargetShare(validatorIDs, shares);
-
-        externalValidator = IValidatorShare(IStakeManager(stakeManager).getValidatorContract(validator2ID));
-
-        // User1 buys dPOL
-        vm.startPrank(user1);
-        ERC20(polTokenL1).approve(address(stakeManager), largeAmount);
-        externalValidator.buyVoucherPOL(largeAmount, largeAmount);
-        externalValidator.approve(address(controller), largeAmount);
-        vm.stopPrank();
-
-        uint256 expectedSPOLFromDPOL = controller.convertPOLtoSPOL(largeAmount);
-
-        // User1 uses dPOL to buy sPOL
-        vm.prank(user1);
-        controller.buySPOLWithDPOL(largeAmount, validator2ID);
-        assertEq(sPOLToken.balanceOf(user1), expectedSPOLFromDPOL);
-
-        // user2 - Buys dPOL from known validator and attempts to convert to sPOL
-        knownValidator = IValidatorShare(IStakeManager(stakeManager).getValidatorContract(validator1ID));
-
-        // user2 buys dPOL from the known validator
-        vm.startPrank(user2);
-        ERC20(polTokenL1).approve(address(stakeManager), mediumAmount);
-        knownValidator.buyVoucherPOL(mediumAmount, mediumAmount);
-        vm.stopPrank();
-
-        // Check user2's dPOL balance
-        uint256 user2DPOLBalance = knownValidator.balanceOf(user2);
-        assertEq(user2DPOLBalance, mediumAmount, "user2 should have dPOL tokens");
-
-        // user2 approves the controller to spend their dPOL
-        vm.prank(user2);
-        knownValidator.approve(address(controller), user2DPOLBalance);
-
-        // Calculate expected sPOL from user2's dPOL
-        uint256 expectedSPOLFromuser2DPOL = controller.convertPOLtoSPOL(user2DPOLBalance);
-
-        // Record initial sPOL balance before conversion
-        uint256 user2InitialSPOLBalance = sPOLToken.balanceOf(user2);
-
-        // user2 attempts to convert dPOL to sPOL
-        vm.prank(user2);
-        controller.buySPOLWithDPOL(user2DPOLBalance, validator1ID);
-
-        // Verify user2 received the expected sPOL tokens
-        uint256 user2FinalSPOLBalance = sPOLToken.balanceOf(user2);
-        assertEq(
-            user2FinalSPOLBalance - user2InitialSPOLBalance,
-            expectedSPOLFromuser2DPOL,
-            "user2 should receive the correct amount of sPOL tokens"
-        );
-
-        // Verify user2's dPOL balance is now zero (all converted)
-        assertEq(knownValidator.balanceOf(user2), 0, "user2 should have zero dPOL tokens after conversion");
-
-        // user3 - Buys dPOL from known validator with liquid rewards and attempts to convert to sPOL
-        // user3 buys dPOL from the known validator
-        vm.startPrank(user3);
-        ERC20(polTokenL1).approve(address(stakeManager), mediumAmount);
-        knownValidator.buyVoucherPOL(mediumAmount, mediumAmount);
-        vm.stopPrank();
-
-        // Send rewards to increase dPOL balance
-        0x86E4Dc95c7FBdBf52e33D563BbDB00823894C287.call(rewardIncreaseCall1);
-
-        // Check user3's dPOL balance
-        uint256 user3DPOLBalance = knownValidator.balanceOf(user3);
-        assertEq(user3DPOLBalance, mediumAmount, "user3 should have dPOL tokens");
-        // Should have rewards
-        uint256 user3liquidRewards = knownValidator.getLiquidRewards(user3);
-        assertGt(user3liquidRewards, 0, "user3 should have liquid rewards");
-        uint256 controllerliquidRewards = knownValidator.getLiquidRewards(address(controller));
-        assertGt(controllerliquidRewards, 0, "controller should have liquid rewards");
-        uint256 controllerDPOLBalance = knownValidator.balanceOf(address(controller));
-        uint256 user3POLBalance = IERC20(polTokenL1).balanceOf(user3);
-
-        // user3 approves the controller to spend their dPOL
-        vm.prank(user3);
-        knownValidator.approve(address(controller), user3DPOLBalance);
-
-        // Calculate expected sPOL from user3's dPOL
-        uint256 expectedSPOLFromuser3DPOL = controller.convertPOLtoSPOL(user3DPOLBalance);
-
-        // Record initial sPOL balance before conversion
-        uint256 user3InitialSPOLBalance = sPOLToken.balanceOf(user3);
-
-        // user3 attempts to convert dPOL to sPOL
-        vm.prank(user3);
-        controller.buySPOLWithDPOL(user3DPOLBalance, validator1ID);
-
-        // Verify user3 received the expected sPOL tokens
-        assertEq(
-            sPOLToken.balanceOf(user3) - user3InitialSPOLBalance,
-            expectedSPOLFromuser3DPOL,
-            "user3 should receive the correct amount of sPOL tokens"
-        );
-
-        // Verify user3's dPOL balance is now zero (all converted)
-        assertEq(knownValidator.balanceOf(user3), 0, "user3 should have zero dPOL tokens after conversion");
-        // Verify user got POL
-        assertEq(
-            IERC20(polTokenL1).balanceOf(user3),
-            user3liquidRewards + user3POLBalance,
-            "user3 should have received their liquid rewards in POL"
-        );
-        assertEq(knownValidator.getLiquidRewards(user3), 0, "user3 should have no liquid rewards");
-        // Verify that the controller's dPOL balance has increased due to liquid rewards being claimed
-        assertEq(
-            knownValidator.balanceOf(address(controller)),
-            controllerDPOLBalance + controllerliquidRewards + mediumAmount,
-            "controller should have increased dPOL balance from rewards"
-        );
-        assertEq(
-            knownValidator.getLiquidRewards(address(controller)),
-            0,
-            "controller should have no liquid rewards from known validator"
-        );
-
-        // user4 buys using permit
-        vm.startPrank(user4);
-        ERC20(polTokenL1).approve(address(stakeManager), mediumAmount);
-        externalValidator.buyVoucherPOL(mediumAmount, mediumAmount);
-        vm.stopPrank();
-
-        // Check user4's dPOL balance
-        assertEq(externalValidator.balanceOf(user4), mediumAmount, "user4 should have dPOL tokens");
-
-        uint256 expectedSPOLFromuser4DPOL = controller.convertPOLtoSPOL(mediumAmount);
-        uint256 controllerDPOLBalance4 = knownValidator.balanceOf(address(controller));
-        assertEq(
-            knownValidator.getLiquidRewards(address(controller)),
-            0,
-            "controller should have no liquid rewards from known validator"
-        );
-
-        // user4 attempts to convert dPOL to sPOL using permit
-        externalValidator._cacheDomainSeparatorV4();
-        (currentV, currentR, currentS) = createPermit(
-            address(externalValidator), user4, address(controller), mediumAmount, block.timestamp + 1 hours, user4pk
-        );
-        controller.buySPOLWithDPOLPermit(
-            mediumAmount, validator2ID, user4, block.timestamp + 1 hours, currentV, currentR, currentS
-        );
-
-        assertEq(
-            controllerDPOLBalance4 + mediumAmount,
-            knownValidator.balanceOf(address(controller)),
-            "controller should have gotten permit dPOL"
-        );
-        assertEq(0, externalValidator.balanceOf(address(controller)), "controller should not get external dPOL");
-        assertEq(
-            controller.totaldPOLBalance(), controllerDPOLBalance4 + mediumAmount, "total dPOL balance should update"
-        );
-
-        (,,,, uint256 dPOLval1TotalStaked) = controller.validators(validator1ID);
-        assertEq(
-            dPOLval1TotalStaked, knownValidator.balanceOf(address(controller)), "validator dPOL balance should update"
-        );
-        // Verify user4 received the expected sPOL tokens
-        uint256 user4FinalSPOLBalance = sPOLToken.balanceOf(user4);
-        assertEq(
-            user4FinalSPOLBalance, expectedSPOLFromuser4DPOL, "user4 should receive the correct amount of sPOL tokens"
-        );
-
-        // Verify user4's dPOL balance is now zero (all converted)
-        assertEq(externalValidator.balanceOf(user4), 0, "user4 should have zero dPOL tokens after conversion");
-    }
-
-    function test_multipleWithdrawNonces_ArrayManipulation() public {
-        vm.selectFork(networkL1);
-        deal(polTokenL1, user1, 10000 ether);
-        vm.prank(user1);
-        IERC20(polTokenL1).approve(address(controller), type(uint256).max);
-
         vm.prank(testAdmin);
         controller.addValidator(validator1ID);
         uint16[] memory validatorIDs = new uint16[](1);
@@ -749,74 +89,68 @@ contract sPOLControllerFullL1Test is Test, Deploy {
         shares[0] = 100;
         vm.prank(testAdmin);
         controller.updateValidatorTargetShare(validatorIDs, shares);
-
-        vm.prank(user1);
-        controller.buySPOL(4000 ether);
-
-        // Create 2 early withdrawal nonces
-        vm.prank(user1);
-        uint256 nonce0 = controller.sellSPOL(500 ether, validator1ID);
-        vm.prank(user1);
-        uint256 nonce1 = controller.sellSPOL(500 ether, validator1ID);
-
-        // advance epoch
-        vm.startPrank(IStakeManager(stakeManager).governance());
-        IStakeManager(stakeManager).setCurrentEpoch(IStakeManager(stakeManager).currentEpoch() + 40);
-        vm.stopPrank();
-
-        // 2 more later withdrawal nonces
-        vm.prank(user1);
-        uint256 nonce2 = controller.sellSPOL(500 ether, validator1ID);
-        vm.prank(user1);
-        uint256 nonce3 = controller.sellSPOL(500 ether, validator1ID);
-
-        sPOLController.FullNonceDetails[] memory openNonces = controller.getUserOpenNonces(user1);
-        assertEq(openNonces.length, 4, "open nonces length mismatch");
-
-        assertEq(nonce0, openNonces[0].nonce, "nonce0 mismatch");
-        assertEq(nonce1, openNonces[1].nonce, "nonce1 mismatch");
-        assertEq(nonce2, openNonces[2].nonce, "nonce2 mismatch");
-        assertEq(nonce3, openNonces[3].nonce, "nonce3 mismatch");
-
-        // advance epoch so two are ready
-        vm.startPrank(IStakeManager(stakeManager).governance());
-        IStakeManager(stakeManager).setCurrentEpoch(IStakeManager(stakeManager).currentEpoch() + 60);
-        vm.stopPrank();
-
-        // Call withdrawPOL, this will process the ready nonces (0,1)
-        vm.prank(user1);
-        controller.withdrawPOL();
-
-        // remaining nonces
-        sPOLController.FullNonceDetails[] memory openNonces2 = controller.getUserOpenNonces(user1);
-        assertEq(openNonces2.length, 2, "open nonces length mismatch");
-        uint256 rnonce0 = openNonces2[0].nonce;
-        uint256 rnonce1 = openNonces2[1].nonce;
-
-        assertEq(rnonce0, nonce2, "remaining nonce not the expected nonce2");
-        assertEq(rnonce1, nonce3, "remaining nonce not the expected nonce3");
     }
 
-    // Helper
-    function createPermit(
-        address _token,
-        address _from,
-        address _spender,
-        uint256 _value,
-        uint256 _deadline,
-        uint256 _pk
-    ) internal view returns (uint8, bytes32, bytes32) {
-        uint256 nonce = ERC20Permit(_token).nonces(_from);
-        bytes32 PERMIT_TYPEHASH =
-            keccak256("Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)");
+    ///////////////////////////////////
+    /// Cleanup Function            ///
+    ///////////////////////////////////
 
-        bytes32 dataToSign = keccak256(
-            abi.encodePacked(
-                "\x19\x01",
-                ERC20Permit(_token).DOMAIN_SEPARATOR(),
-                keccak256(abi.encode(PERMIT_TYPEHASH, _from, _spender, _value, nonce, _deadline))
-            )
+    function test_cleanupMaticTokens_maticOnly() public {
+        uint256 userAmount = 5e18;
+
+        deal(polTokenL1, user1, userAmount);
+        vm.prank(user1);
+        ERC20(polTokenL1).approve(address(controller), userAmount);
+        vm.prank(user1);
+        controller.buySPOL(userAmount);
+
+        uint256 maticAmount = 5e18;
+        deal(maticTokenL1, address(controller), maticAmount);
+        assertEq(controller.convertSPOLtoPOL(userAmount), userAmount, "user owns all POL equivalent of sPOL");
+
+        vm.prank(testAdmin);
+        controller.cleanUpMaticPOL(validator1ID);
+
+        assertEq(ERC20(maticTokenL1).balanceOf(address(controller)), 0);
+        assertEq(ERC20(polTokenL1).balanceOf(address(controller)), 0);
+        assertEq(validator1.balanceOf(address(controller)), maticAmount + userAmount);
+        uint256 fee = (maticAmount * controller.rewardFee()) / 1000;
+        assertEq(
+            controller.convertSPOLtoPOL(userAmount),
+            maticAmount + userAmount - fee,
+            "user still owns POL equivalent of sPOL minus fee"
         );
-        return vm.sign(_pk, dataToSign);
+        assertEq(controller.feedPOLBalance(), fee, "total fee balance was applied to entire cleaned amount");
+    }
+
+    function test_cleanupMaticTokens_maticAndPOL() public {
+        uint256 maticAmount = 5e18;
+        uint256 polAmount = 10e18;
+        deal(maticTokenL1, address(controller), maticAmount);
+        deal(polTokenL1, address(controller), polAmount);
+
+        uint256 userAmount = 5e18;
+
+        deal(polTokenL1, user1, userAmount);
+        vm.prank(user1);
+        ERC20(polTokenL1).approve(address(controller), userAmount);
+        vm.prank(user1);
+        controller.buySPOL(userAmount);
+
+        assertEq(controller.convertSPOLtoPOL(userAmount), userAmount, "user owns all POL equivalent of sPOL");
+
+        vm.prank(testAdmin);
+        controller.cleanUpMaticPOL(validator1ID);
+
+        assertEq(ERC20(maticTokenL1).balanceOf(address(controller)), 0);
+        assertEq(ERC20(polTokenL1).balanceOf(address(controller)), 0);
+        assertEq(validator1.balanceOf(address(controller)), maticAmount + polAmount + userAmount);
+        uint256 fee = ((maticAmount + polAmount) * controller.rewardFee()) / 1000;
+        assertEq(
+            controller.convertSPOLtoPOL(userAmount),
+            maticAmount + polAmount + userAmount - fee,
+            "user still owns POL equivalent of sPOL minus fee"
+        );
+        assertEq(controller.feedPOLBalance(), fee, "total fee balance was applied to entire cleaned amount");
     }
 }
