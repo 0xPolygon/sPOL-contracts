@@ -199,6 +199,10 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     function removeValidator(uint16 _removedValidator) external restricted {
         ValidatorInfo storage removedValidator = validators[_removedValidator];
         require(
+            removedValidator.depositShare == 0,
+            ValidatorDepositShareNotZero(_removedValidator, removedValidator.depositShare)
+        );
+        require(
             removedValidator.totalStaked == 0, ValidatorStillFunded(_removedValidator, removedValidator.totalStaked)
         );
         require(removedValidator.status == ValidatorStatus.ACTIVE, ValidatorNotActive(_removedValidator));
@@ -208,7 +212,6 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         require(rewards == 0, ValidatorRewardsPending(_removedValidator, rewards));
 
         removedValidator.status = ValidatorStatus.DEACTIVATED;
-        removedValidator.depositShare = 0;
         _removeFromActiveValidators(_removedValidator);
         emit ValidatorRemoved(_removedValidator);
     }
