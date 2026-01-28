@@ -217,13 +217,13 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     }
 
     function freezeValidator(uint16 _validator) external restricted {
-        require(validators[_validator].status == ValidatorStatus.ACTIVE, ValidatorNotActive(_validator));
+        ValidatorInfo storage frozenValidator = validators[_validator];
+        require(frozenValidator.status == ValidatorStatus.ACTIVE, ValidatorNotActive(_validator));
         require(
-            validators[_validator].depositShare == 0,
-            ValidatorDepositShareNotZero(_validator, validators[_validator].depositShare)
+            frozenValidator.depositShare == 0, ValidatorDepositShareNotZero(_validator, frozenValidator.depositShare)
         );
 
-        validators[_validator].status = ValidatorStatus.FROZEN;
+        frozenValidator.status = ValidatorStatus.FROZEN;
         _removeFromActiveValidators(_validator);
         emit ValidatorFrozen(_validator);
     }
