@@ -157,6 +157,8 @@ contract sPOLChild is
         // sell still works, but with this exchange rate it's very unfavorable
         l1DPOLBalance = 1;
         l1SPOLBalance = 1;
+
+        _pause();
     }
 
     ///////////////////////////////
