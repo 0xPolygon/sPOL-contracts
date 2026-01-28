@@ -46,7 +46,6 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     uint16[] public validatorList;
     uint16[] public activeValidators;
 
-    uint32 spacer; //formerly lastSuccessfulBuyValidator and lastSuccessfulSellValidator
     // in percentage points
     uint8 public maxDivergence;
 
