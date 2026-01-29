@@ -44,6 +44,12 @@ contract sPOLChildTest is Test, Deploy {
         sPOLChildToken.onStateReceive(0, message);
     }
 
+    function _defaultUnpause() internal {
+        _sendExchangeRateUpdate(INITIAL_L1_SPOL_BALANCE, INITIAL_L1_DPOL_BALANCE);
+        vm.prank(admin);
+        sPOLChildToken.unpauseBuySell();
+    }
+
     function test_exchangeRateUpdate() public {
         uint256 l1SPOLBalance = 1000e18;
         uint256 l1DPOLBalance = 1000e18;
@@ -145,19 +151,26 @@ contract sPOLChildTest is Test, Deploy {
     }
 
     function test_buySPOL_RequiresRecentExchangeRate() public {
+        _defaultUnpause();
+        uint256 timestampBefore = sPOLChildToken.lastExchangeRateUpdate();
         uint256 polAmount = 1e18;
         address buyer = makeAddr("buyer");
         vm.deal(buyer, polAmount);
 
-        // Warp beyond maxExchangeRateUpdateDelay (30 days)
-        vm.warp(block.timestamp + 31 days);
+        // Warp beyond maxExchangeRateUpdateDelay (10 days)
+        vm.warp(timestampBefore + 11 days);
 
         vm.prank(buyer);
-        vm.expectRevert(abi.encodeWithSelector(sPOLChild.ExchangeRateUpdateTooOld.selector, 0, 2592000, 2678401));
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                sPOLChild.ExchangeRateUpdateTooOld.selector, timestampBefore, 10 days, timestampBefore + 11 days
+            )
+        );
         sPOLChildToken.buySPOL{value: polAmount}(polAmount);
     }
 
     function test_buySPOL_WorksWithRecentExchangeRate() public {
+        _defaultUnpause();
         uint256 polAmount = 1e18;
         address buyer = makeAddr("buyer");
         vm.deal(buyer, polAmount);
@@ -232,7 +245,9 @@ contract sPOLChildTest is Test, Deploy {
     // so it could be possible to extend the time where buying is possible but at the old (better) rate
     // but his requires that no one update the rate in the mean time
     function test_exchangeRateUpdate_AfterMaxDelay() public {
-        vm.warp(block.timestamp + sPOLChildToken.maxExchangeRateUpdateDelay() - 1);
+        _defaultUnpause();
+        uint256 initialTimestamp = vm.getBlockTimestamp();
+        vm.warp(initialTimestamp + sPOLChildToken.maxExchangeRateUpdateDelay() - 1);
 
         // Should still work just before expiry
         uint256 polAmount = 1e18;
@@ -243,10 +258,14 @@ contract sPOLChildTest is Test, Deploy {
         sPOLChildToken.buySPOL{value: polAmount}(polAmount);
 
         // But should fail after expiry
-        vm.warp(block.timestamp + 2);
+        vm.warp(initialTimestamp + sPOLChildToken.maxExchangeRateUpdateDelay() + 1);
 
         vm.prank(buyer);
-        vm.expectRevert(abi.encodeWithSelector(sPOLChild.ExchangeRateUpdateTooOld.selector, 0, 2592000, 2592002));
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                sPOLChild.ExchangeRateUpdateTooOld.selector, initialTimestamp, 10 days, initialTimestamp + 10 days + 1
+            )
+        );
         sPOLChildToken.buySPOL{value: polAmount}(polAmount);
 
         _sendExchangeRateUpdate(1, 1); // Update exchange rate to reset timer
@@ -256,6 +275,7 @@ contract sPOLChildTest is Test, Deploy {
     }
 
     function test_buySPOL_EmitsCorrectEvent() public {
+        _defaultUnpause();
         uint256 polAmount = 5e18;
         address buyer = makeAddr("buyer");
         vm.deal(buyer, polAmount);
@@ -270,6 +290,7 @@ contract sPOLChildTest is Test, Deploy {
     }
 
     function test_buySPOL_UpdatesCorrectBalances() public {
+        _defaultUnpause();
         uint256 polAmount = 2e18;
         address buyer = makeAddr("buyer");
         vm.deal(buyer, polAmount);
@@ -287,6 +308,7 @@ contract sPOLChildTest is Test, Deploy {
     }
 
     function test_buySPOL_RevertsWhenPaused() public {
+        _defaultUnpause();
         uint256 polAmount = 1e18;
         address buyer = makeAddr("buyer");
         vm.deal(buyer, polAmount);
@@ -299,7 +321,18 @@ contract sPOLChildTest is Test, Deploy {
         sPOLChildToken.buySPOL{value: polAmount}(polAmount);
     }
 
+    function test_buySPOL_RevertsInitially() public {
+        uint256 polAmount = 1e18;
+        address buyer = makeAddr("buyer");
+        vm.deal(buyer, polAmount);
+
+        vm.prank(buyer);
+        vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
+        sPOLChildToken.buySPOL{value: polAmount}(polAmount);
+    }
+
     function test_buySPOL_RevertsOnIncorrectPOLAmount() public {
+        _defaultUnpause();
         uint256 polAmount = 1e18;
         uint256 incorrectAmount = 0.5e18;
         address buyer = makeAddr("buyer");
@@ -311,6 +344,7 @@ contract sPOLChildTest is Test, Deploy {
     }
 
     function test_buySPOL_withZeroAmount() public {
+        _defaultUnpause();
         address buyer = makeAddr("buyer");
         vm.deal(buyer, 1e18);
 
@@ -320,6 +354,7 @@ contract sPOLChildTest is Test, Deploy {
     }
 
     function test_buySPOL_WithDifferentExchangeRates() public {
+        _defaultUnpause();
         address buyer = makeAddr("buyer");
         uint256 polAmount = 1e18;
         vm.deal(buyer, polAmount * 3);
@@ -341,6 +376,7 @@ contract sPOLChildTest is Test, Deploy {
     }
 
     function test_buySPOL_MultipleBuyers() public {
+        _defaultUnpause();
         uint256 polAmount = 1e18;
         address buyer1 = makeAddr("buyer1");
         address buyer2 = makeAddr("buyer2");
@@ -361,6 +397,7 @@ contract sPOLChildTest is Test, Deploy {
     }
 
     function test_buySPOL_LargeAmount() public {
+        _defaultUnpause();
         uint256 polAmount = 1000000000e18;
         address buyer = makeAddr("buyer");
         vm.deal(buyer, polAmount);
@@ -374,6 +411,7 @@ contract sPOLChildTest is Test, Deploy {
     }
 
     function test_buySPOL_SmallAmount() public {
+        _defaultUnpause();
         uint256 polAmount = 1000; // Very small amount
         address buyer = makeAddr("buyer");
         vm.deal(buyer, polAmount);
@@ -387,6 +425,7 @@ contract sPOLChildTest is Test, Deploy {
     }
 
     function test_convertPOLToSPOL_PrecisionImprovement() public {
+        _defaultUnpause();
         _sendExchangeRateUpdate(1000e18, 1001e18);
 
         uint256 polAmount = 1000000;
@@ -403,6 +442,7 @@ contract sPOLChildTest is Test, Deploy {
     }
 
     function test_sellSPOL_after_deposit() public {
+        _defaultUnpause();
         address user = makeAddr("user");
         vm.prank(childChainManager);
         sPOLChildToken.deposit(user, abi.encode(10e18));
@@ -439,6 +479,7 @@ contract sPOLChildTest is Test, Deploy {
     }
 
     function test_sellSPOL_simple() public {
+        _defaultUnpause();
         uint256 polAmount = 10e18;
         address seller = makeAddr("seller");
         vm.deal(seller, polAmount);
@@ -475,6 +516,7 @@ contract sPOLChildTest is Test, Deploy {
     }
 
     function test_sellSPOL_reverts_if_no_balance() public {
+        _defaultUnpause();
         address user = makeAddr("userWithNoSPOL");
         vm.prank(user);
         vm.expectRevert(abi.encodeWithSelector(IERC20Errors.ERC20InsufficientBalance.selector, user, 0, 1e18));
@@ -482,6 +524,7 @@ contract sPOLChildTest is Test, Deploy {
     }
 
     function test_sellSPOL_reverts_if_amount_is_zero() public {
+        _defaultUnpause();
         address user = makeAddr("user");
         vm.prank(user);
         vm.expectRevert(sPOLChild.POLAmountMustBeGreaterThanZero.selector);
@@ -489,6 +532,7 @@ contract sPOLChildTest is Test, Deploy {
     }
 
     function test_sellSPOL_reverts_if_paused() public {
+        _defaultUnpause();
         uint256 polAmount = 10e18;
         address seller = makeAddr("seller");
         vm.deal(seller, polAmount);
@@ -505,6 +549,7 @@ contract sPOLChildTest is Test, Deploy {
     }
 
     function test_sellSPOL_multiple_sells() public {
+        _defaultUnpause();
         uint256 polAmount = 20e18;
         address seller = makeAddr("seller");
         vm.deal(seller, polAmount);
@@ -535,6 +580,7 @@ contract sPOLChildTest is Test, Deploy {
     }
 
     function test_sellSPOL_updates_correct_balances() public {
+        _defaultUnpause();
         uint256 polAmount = 10e18;
         address seller = makeAddr("seller");
         vm.deal(seller, polAmount);
@@ -569,6 +615,7 @@ contract sPOLChildTest is Test, Deploy {
     }
 
     function test_sellSPOL_emits_correct_event() public {
+        _defaultUnpause();
         uint256 polAmount = 10e18;
         address seller = makeAddr("seller");
         vm.deal(seller, polAmount);
@@ -595,6 +642,7 @@ contract sPOLChildTest is Test, Deploy {
     }
 
     function test_withdrawPOL_single_claim() public {
+        _defaultUnpause();
         address user = makeAddr("user");
         uint256 polAmount = 10e18;
         _setupAndSell(user, polAmount);
@@ -623,6 +671,7 @@ contract sPOLChildTest is Test, Deploy {
     }
 
     function test_withdrawPOL_multiple_claims_same_user() public {
+        _defaultUnpause();
         address user = makeAddr("user");
         uint256 polAmount1 = 5e18;
         uint256 polAmount2 = 8e18;
@@ -661,6 +710,7 @@ contract sPOLChildTest is Test, Deploy {
     }
 
     function test_withdrawPOL_multiple_users() public {
+        _defaultUnpause();
         address user1 = makeAddr("user1");
         address user2 = makeAddr("user2");
         uint256 polAmount1 = 6e18;
@@ -702,6 +752,7 @@ contract sPOLChildTest is Test, Deploy {
     }
 
     function test_withdrawPOL_cannot_claim_twice() public {
+        _defaultUnpause();
         address user = makeAddr("user");
         uint256 polAmount = 10e18;
         _setupAndSell(user, polAmount);
@@ -728,6 +779,7 @@ contract sPOLChildTest is Test, Deploy {
     }
 
     function test_withdrawPOL_reverts_if_nothing_to_claim() public {
+        _defaultUnpause();
         address user = makeAddr("userWithNoClaims");
         vm.prank(user);
         vm.expectRevert(sPOLChild.POLAmountMustBeGreaterThanZero.selector);
@@ -735,6 +787,7 @@ contract sPOLChildTest is Test, Deploy {
     }
 
     function test_withdrawPOL_partial_claim() public {
+        _defaultUnpause();
         address user = makeAddr("user");
         uint256 polAmount1 = 5e18;
         uint256 polAmount2 = 8e18;
