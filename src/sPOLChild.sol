@@ -144,17 +144,13 @@ contract sPOLChild is
         __ERC20Permit_init("Staked POL");
         __AccessManaged_init(_authority);
 
-        maxExchangeRateUpdateDelay = 30 days;
-        // we get about 0,25% rewards in a month, so if we pause after a month of no update
-        // 0,3% should be safe so sPOL doesn't become cheaper than L1
+        maxExchangeRateUpdateDelay = 10 days;
         safetyFee = 30; // 0.3%
         l1Messenger = _l1Messenger;
         bridgeHelper = PolBridger(_bridgeHelper);
         childChainManager = _childChainManager;
 
         // Init so update can work
-        // we leave lastExchangeRateUpdate at 0 so no one can buy sPOL before first update
-        // sell still works, but with this exchange rate it's very unfavorable
         l1DPOLBalance = 1;
         l1SPOLBalance = 1;
 
