@@ -263,7 +263,7 @@ contract sPOLControllerTest is Test, Deploy {
         );
 
         vm.prank(testAdmin);
-        controller.reloadAllValidatorInfo();
+        controller.reloadAllActiveValidatorInfo();
 
         uint16 validator1Id = 35;
         uint16 validator2Id = 120;
@@ -275,13 +275,13 @@ contract sPOLControllerTest is Test, Deploy {
         assertEq(validator2TotalStaked, validator2Balance);
     }
 
-    function test_reloadAllValidatorInfo_OnlyAdmin() public {
+    function test_reloadSingleValidatorInfo_OnlyAdmin() public {
         vm.prank(nonAdmin);
         vm.expectRevert(abi.encodeWithSignature("AccessManagedUnauthorized(address)", nonAdmin));
-        controller.reloadAllValidatorInfo();
+        controller.reloadValidatorInfo(35);
     }
 
-    function test_reloadAllValidatorInfo_WithFrozenValidator() public {
+    function test_reloadSingleValidatorInfo_WithFrozenValidator() public {
         _addTestValidators();
 
         uint16 validator1Id = 35;
@@ -309,7 +309,9 @@ contract sPOLControllerTest is Test, Deploy {
         );
 
         vm.prank(testAdmin);
-        controller.reloadAllValidatorInfo();
+        controller.reloadValidatorInfo(validator1Id);
+        vm.prank(testAdmin);
+        controller.reloadValidatorInfo(validator2Id);
 
         (,,,, uint256 validator1TotalStaked) = controller.validators(validator1Id);
         (,,,, uint256 validator2TotalStaked) = controller.validators(validator2Id);
