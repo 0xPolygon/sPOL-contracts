@@ -546,16 +546,19 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         uint256 dPOLAmount = convertSPOLtoPOL(_amount);
         require(dPOLAmount > 0, AmountZero());
         (uint16[] memory validator, uint256[] memory amount) = _selectValidators(dPOLAmount, false);
+        uint256[] memory sPOLAmounts = new uint256[](validator.length);
+        for (uint256 i = 0; i < validator.length; i++) {
+            sPOLAmounts[i] = convertPOLtoSPOL(amount[i]);
+        }
         uint256[] memory nonces = new uint256[](validator.length);
         for (uint256 i = 0; i < validator.length; i++) {
             if (amount[i] == 0) {
                 continue;
             }
-            uint256 sPOLAmount = convertPOLtoSPOL(amount[i]);
             uint256 userNonce = _sellSharesFromValidator(validators[validator[i]], amount[i]);
             uint256 nonce = _addUserWithdrawNonceDetails(_user, validator[i], uint128(amount[i]), uint96(userNonce));
             nonces[i] = nonce;
-            emit sPOLBurned(_user, sPOLAmount, amount[i], nonce);
+            emit sPOLBurned(_user, sPOLAmounts[i], amount[i], nonce);
         }
         _takeSPOL(_amount, _user);
         _emitExchangeRateUpdate();
