@@ -12,7 +12,7 @@ import {PausableUpgradeable} from "@openzeppelin-contracts-upgradeable/utils/Pau
 import {IERC20Errors} from "@openzeppelin/contracts/interfaces/draft-IERC6093.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
-contract sPOLChildTest is Test, Deploy {
+contract sPOLChildL1BalanceTest is Test, Deploy {
     sPOLChild public sPOLChildToken;
 
     // Events from sPOLChild contract
@@ -39,6 +39,12 @@ contract sPOLChildTest is Test, Deploy {
             abi.encodeWithSelector(sPOLChildToken.bridgeHelper().bridgePOLToL1.selector),
             abi.encode(true)
         );
+
+        bytes memory message = abi.encode(MsgCoder.MsgType.EXCHANGE_UPDATE, abi.encode(1, 1));
+        vm.prank(stateSyncerL2);
+        sPOLChildToken.onStateReceive(0, message);
+        vm.prank(admin);
+        sPOLChildToken.unpauseBuySell();
     }
 
     function test_balance_only_buy() public {
