@@ -195,7 +195,11 @@ contract sPOLChild is
         emit sPOLMinted(msg.sender, _polAmount, spolToMint);
     }
 
-    function sellSPOL(uint256 _sPOLAmount) external whenNotPaused nonReentrant {
+    function sellSPOL(uint256 _sPOLAmount) external whenNotPaused {
+        require(
+            lastExchangeRateUpdate + maxExchangeRateUpdateDelay >= block.timestamp,
+            ExchangeRateUpdateTooOld(lastExchangeRateUpdate, maxExchangeRateUpdateDelay, block.timestamp)
+        );
         require(_sPOLAmount > 0, POLAmountMustBeGreaterThanZero());
         _transfer(msg.sender, address(this), _sPOLAmount);
         locallyToBeBurnedSPOL += _sPOLAmount;
@@ -421,11 +425,15 @@ contract sPOLChild is
         emit MaxExchangeRateDelayChanged(oldDelay, _newDelay);
     }
 
-    function pauseUserFunctions() external restricted {
+    function pauseBuySell() external restricted {
         _pause();
     }
 
-    function unpauseUserFunctions() external restricted {
+    function unpauseBuySell() external restricted {
+        require(
+            lastExchangeRateUpdate + maxExchangeRateUpdateDelay >= block.timestamp,
+            ExchangeRateUpdateTooOld(lastExchangeRateUpdate, maxExchangeRateUpdateDelay, block.timestamp)
+        );
         _unpause();
     }
 
