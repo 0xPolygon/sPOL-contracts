@@ -410,6 +410,7 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     }
 
     function _buySPOLSingle(uint256 _amount, uint16 _validator, address _user) internal returns (uint256) {
+        require(_amount > 0, AmountZero());
         uint256 toMint = convertPOLtoSPOL(_amount);
         ValidatorInfo storage validator = validators[_validator];
         require(validator.status == ValidatorStatus.ACTIVE, ValidatorNotActive(_validator));
@@ -424,11 +425,15 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     }
 
     function _buySPOLMulti(uint256 _amount, address _user) internal returns (uint256) {
+        require(_amount > 0, AmountZero());
         uint256 toMint = convertPOLtoSPOL(_amount);
         (uint16[] memory validator, uint256[] memory amount) = _selectValidators(_amount, true);
         _takePOL(_amount, _user);
         uint256 totalShares;
         for (uint256 i = 0; i < amount.length; i++) {
+            if (amount[i] == 0) {
+                continue;
+            }
             totalShares += _buySharesFromValidator(validators[validator[i]], amount[i]);
         }
         require(totalShares == _amount, BuySharesMismatch(_amount, totalShares));
@@ -438,6 +443,7 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     }
 
     function _buySPOLWithDPOLMulti(uint256 _amount, uint16 _validatorOfDPOL, address _user) internal returns (uint256) {
+        require(_amount > 0, AmountZero());
         uint256 sPOLToMint = convertPOLtoSPOL(_amount);
         ValidatorInfo storage incomingValidator = validators[_validatorOfDPOL];
 
@@ -457,6 +463,9 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
             require(success, DPOLRestakeTransferFromFailed());
 
             for (uint256 i = 0; i < selectedAmounts.length; i++) {
+                if (selectedAmounts[i] == 0) {
+                    continue;
+                }
                 _restakeValidator(selectedValidators[i]);
                 if (validators[selectedValidators[i]].index != _validatorOfDPOL) {
                     stakeManager.migrateDelegation(_validatorOfDPOL, selectedValidators[i], selectedAmounts[i]);
@@ -524,6 +533,7 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
 
         uint256 maxRedeem = _maxRedeem(validator);
         uint256 dPOLAmount = convertSPOLtoPOL(_amount);
+        require(dPOLAmount > 0, AmountZero());
         require(dPOLAmount <= maxRedeem, ValidatorUnderfunded(dPOLAmount, maxRedeem));
         _takeSPOL(_amount, _user);
 
@@ -537,9 +547,13 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
 
     function _sellSPOLMulti(uint256 _amount, address _user) internal returns (uint256[] memory) {
         uint256 dPOLAmount = convertSPOLtoPOL(_amount);
+        require(dPOLAmount > 0, AmountZero());
         (uint16[] memory validator, uint256[] memory amount) = _selectValidators(dPOLAmount, false);
         uint256[] memory nonces = new uint256[](validator.length);
         for (uint256 i = 0; i < validator.length; i++) {
+            if (amount[i] == 0) {
+                continue;
+            }
             uint256 sPOLAmount = convertPOLtoSPOL(amount[i]);
             uint256 userNonce = _sellSharesFromValidator(validators[validator[i]], amount[i]);
             uint256 nonce = _addUserWithdrawNonceDetails(_user, validator[i], uint128(amount[i]), uint96(userNonce));
@@ -792,6 +806,9 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         (uint16[] memory validator, uint256[] memory amount) = _selectValidators(_amountPOL, true);
         uint256 totalShares;
         for (uint256 i = 0; i < amount.length; i++) {
+            if (amount[i] == 0) {
+                continue;
+            }
             totalShares += _buySharesFromValidator(validators[validator[i]], amount[i]);
         }
         require(totalShares == _amountPOL, BuySharesMismatch(_amountPOL, totalShares));
@@ -809,11 +826,17 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         );
         _takeSPOL(_amountSPOL, msg.sender);
 
-        (uint16[] memory validator, uint256[] memory amount) = _selectValidators(_amountPOL, false);
-        for (uint256 i = 0; i < validator.length; i++) {
-            uint256 userNonce = _sellSharesFromValidator(validators[validator[i]], amount[i]);
-            _addUserWithdrawNonceDetails(msg.sender, validator[i], uint128(amount[i]), uint96(userNonce));
+        if (_amountPOL > 0) {
+            (uint16[] memory validator, uint256[] memory amount) = _selectValidators(_amountPOL, false);
+            for (uint256 i = 0; i < validator.length; i++) {
+                if (amount[i] == 0) {
+                    continue;
+                }
+                uint256 userNonce = _sellSharesFromValidator(validators[validator[i]], amount[i]);
+                _addUserWithdrawNonceDetails(msg.sender, validator[i], uint128(amount[i]), uint96(userNonce));
+            }
         }
+
         emit sPOLBackfilled(msg.sender, _amountSPOL, _amountPOL);
         _emitExchangeRateUpdate();
     }
