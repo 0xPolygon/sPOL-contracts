@@ -322,6 +322,8 @@ contract sPOLChild is
         _completeBackfill(returnedPOL, returnedBackFillCycle);
     }
 
+    receive() external payable {}
+
     function balanceWithL1() external restricted nonReentrant {
         _balanceWithL1();
     }
