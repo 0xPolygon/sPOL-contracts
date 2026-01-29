@@ -312,15 +312,12 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         _emitExchangeRateUpdate();
     }
 
-    // very expensive, includes frozen validators
-    function reloadAllValidatorInfo() external restricted {
-        uint256 totalDPOL;
-        for (uint256 i = 0; i < validatorList.length; i++) {
-            ValidatorInfo storage validator = validators[validatorList[i]];
-            validator.totalStaked = validator.validatorContract.balanceOf(address(this));
-            totalDPOL += validator.totalStaked;
-        }
-        totaldPOLBalance = totalDPOL;
+    function reloadValidatorInfo(uint16 _validator) external restricted {
+        ValidatorInfo storage validator = validators[_validator];
+        uint256 amountToReduce = validator.totalStaked;
+        uint256 amountToAdd = validator.validatorContract.balanceOf(address(this));
+        validator.totalStaked = amountToAdd;
+        totaldPOLBalance = totaldPOLBalance - amountToReduce + amountToAdd;
         _emitExchangeRateUpdate();
     }
 
