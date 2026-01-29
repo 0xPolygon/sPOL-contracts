@@ -266,7 +266,7 @@ contract Deploy is Script, ConfigLoader {
     }
 
     function _verifyDeploymentL2() internal view {
-        sPOLChild child = sPOLChild(address(sPOLChildProxy));
+        sPOLChild child = sPOLChild(payable(sPOLChildProxy));
 
         // Verify sPOLChild
         require(address(child) == precalcsPOLChildProxyAddress(), "sPOLChild proxy address incorrect");

@@ -27,7 +27,6 @@ contract ConfigLoader is Script {
     address public stateSyncerL2;
     uint8 public rewardFee;
     uint8 public maxDivergence;
-    uint256 public childTargetQuickRedeemReserve;
     address public admin;
 
     function loadMockConfig() public {
@@ -56,7 +55,6 @@ contract ConfigLoader is Script {
         stateSenderL1 = makeAddr("stateSender");
         checkpointManager = makeAddr("checkpointManager");
         stateSyncerL2 = makeAddr("stateSyncerL2");
-        childTargetQuickRedeemReserve = 1_000_000 ether;
 
         validateConfig();
         console.log("Loaded configuration for scenario:", scenarioName);
@@ -88,8 +86,6 @@ contract ConfigLoader is Script {
         feeReceiver = vm.parseJsonAddress(json, string.concat(scenarioName, ".feeReceiver"));
         rewardFee = uint8(vm.parseJsonUint(json, string.concat(scenarioName, ".rewardFee")));
         maxDivergence = uint8(vm.parseJsonUint(json, string.concat(scenarioName, ".maxDivergence")));
-        childTargetQuickRedeemReserve =
-            vm.parseJsonUint(json, string.concat(scenarioName, ".childTargetQuickRedeemReserve"));
         withdrawManager = vm.parseJsonAddress(json, string.concat(scenarioName, ".withdrawManager"));
         erc20predicate = vm.parseJsonAddress(json, string.concat(scenarioName, ".erc20predicate"));
         childChainManager = vm.parseJsonAddress(json, string.concat(scenarioName, ".childChainManager"));
