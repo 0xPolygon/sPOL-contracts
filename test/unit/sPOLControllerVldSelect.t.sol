@@ -542,7 +542,7 @@ contract sPOLControllerVLDSelectTest is Test, sPOLController {
             vm.prank(testAdmin);
             this.addValidator(_ids[i]);
 
-            // mock for future reloadInfo call
+            // mock for future reloadValidatorInfo call
             vm.mockCall(
                 validatorShare,
                 abi.encodeWithSelector(IValidatorShare.balanceOf.selector, address(this)),
@@ -552,6 +552,6 @@ contract sPOLControllerVLDSelectTest is Test, sPOLController {
         vm.prank(testAdmin);
         this.updateValidatorTargetShare(_ids, _shares);
         vm.prank(testAdmin);
-        this.reloadAllValidatorInfo();
+        this.reloadAllActiveValidatorInfo();
     }
 }

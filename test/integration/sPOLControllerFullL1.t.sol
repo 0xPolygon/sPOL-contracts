@@ -100,7 +100,7 @@ contract sPOLControllerFullL1Test is Test, Deploy {
         deployContractsL2(address(this));
 
         // Get deployed contract instances
-        child = sPOLChild(address(sPOLChildProxy));
+        child = sPOLChild(payable(sPOLChildProxy));
         // Get config values
 
         // Verify initial state

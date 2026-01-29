@@ -35,7 +35,7 @@ contract sPOLChildTest is Test, Deploy {
         vm.chainId(chainIdL2);
 
         // Get deployed contract instances
-        sPOLChildToken = sPOLChild(address(sPOLChildProxy));
+        sPOLChildToken = sPOLChild(payable(sPOLChildProxy));
     }
 
     function _sendExchangeRateUpdate(uint256 _l1SPOLBalance, uint256 _l1DPOLBalance) internal {
@@ -292,7 +292,7 @@ contract sPOLChildTest is Test, Deploy {
         vm.deal(buyer, polAmount);
 
         vm.prank(admin);
-        sPOLChildToken.pauseUserFunctions();
+        sPOLChildToken.pauseBuySell();
 
         vm.prank(buyer);
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
@@ -497,7 +497,7 @@ contract sPOLChildTest is Test, Deploy {
         uint256 sPOLBalance = sPOLChildToken.balanceOf(seller);
 
         vm.prank(admin);
-        sPOLChildToken.pauseUserFunctions();
+        sPOLChildToken.pauseBuySell();
 
         vm.prank(seller);
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);

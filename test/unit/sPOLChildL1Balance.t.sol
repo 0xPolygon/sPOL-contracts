@@ -32,7 +32,7 @@ contract sPOLChildTest is Test, Deploy {
         vm.chainId(chainIdL2);
 
         // Get deployed contract instances
-        sPOLChildToken = sPOLChild(address(sPOLChildProxy));
+        sPOLChildToken = sPOLChild(payable(sPOLChildProxy));
 
         vm.mockCall(
             address(sPOLChildToken.bridgeHelper()),
