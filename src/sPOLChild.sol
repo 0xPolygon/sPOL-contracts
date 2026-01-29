@@ -370,6 +370,7 @@ contract sPOLChild is
     function _requestMigration(uint256 _polToMigrate, uint256 _spolToMint) internal {
         onGoingMigration = true;
         backMigratingSPOL = _spolToMint;
+        polBalance -= _polToMigrate;
 
         _exitPOLforMessenger(_polToMigrate);
         _sendMessageToRoot(
