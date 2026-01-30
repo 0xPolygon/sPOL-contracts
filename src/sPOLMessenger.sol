@@ -145,8 +145,8 @@ contract sPOLMessenger is Initializable, AccessManagedUpgradeable, ReentrancyGua
             )
         );
         completedBackfill[currentActiveBackfillCycle] = true;
-        currentActiveBackfillCycle = 0;
         emit BackfillCompleted(currentActiveBackfillCycle, totalWithdraw);
+        currentActiveBackfillCycle = 0;
     }
 
     function updateL2ExchangeRate() external restricted nonReentrant {
