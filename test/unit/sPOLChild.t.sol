@@ -823,4 +823,341 @@ contract sPOLChildTest is Test, Deploy {
         assertEq(outstanding.length, 1, "Should have one outstanding claim left");
         assertEq(outstanding[0].outstandingPOL, sPOLChildToken.convertSPOLToPOL(sPOLAmount2));
     }
+
+    function test_deposit_mintsTokensToUser() public {
+        address user = makeAddr("depositUser");
+        uint256 depositAmount = 100e18;
+
+        uint256 initialBalance = sPOLChildToken.balanceOf(user);
+
+        vm.prank(childChainManager);
+        sPOLChildToken.deposit(user, abi.encode(depositAmount));
+
+        assertEq(sPOLChildToken.balanceOf(user), initialBalance + depositAmount, "User should receive deposited sPOL");
+    }
+
+    function test_deposit_onlyChildChainManager() public {
+        address user = makeAddr("depositUser");
+        address unauthorizedCaller = makeAddr("unauthorized");
+        uint256 depositAmount = 100e18;
+
+        vm.prank(unauthorizedCaller);
+        vm.expectRevert(abi.encodeWithSelector(sPOLChild.AddressUnauthorized.selector, unauthorizedCaller));
+        sPOLChildToken.deposit(user, abi.encode(depositAmount));
+    }
+
+    function test_deposit_completesMigrationWhenConditionsMet() public {
+        _defaultUnpause();
+
+        // Setup: buy sPOL to create a migration scenario
+        address buyer = makeAddr("buyer");
+        uint256 polAmount = 10e18;
+        vm.deal(buyer, polAmount);
+        vm.prank(buyer);
+        sPOLChildToken.buySPOL{value: polAmount}(polAmount);
+
+        vm.mockCall(
+            address(sPOLChildToken.bridgeHelper()),
+            abi.encodeWithSelector(sPOLChildToken.bridgeHelper().bridgePOLToL1.selector),
+            abi.encode(true)
+        );
+
+        // Trigger migration
+        vm.prank(admin);
+        sPOLChildToken.balanceWithL1();
+
+        assertTrue(sPOLChildToken.onGoingMigration(), "Migration should be ongoing");
+        uint256 backMigratingSPOL = sPOLChildToken.backMigratingSPOL();
+
+        // Complete migration by depositing to contract itself with exact amount
+        vm.prank(childChainManager);
+        vm.expectEmit(true, true, true, true, address(sPOLChildToken));
+        emit sPOLChild.MigrationCompleted(backMigratingSPOL);
+        sPOLChildToken.deposit(address(sPOLChildToken), abi.encode(backMigratingSPOL));
+
+        assertFalse(sPOLChildToken.onGoingMigration(), "Migration should be completed");
+        assertEq(sPOLChildToken.backMigratingSPOL(), 0, "backMigratingSPOL should be reset");
+    }
+
+    function test_withdraw_burnsTokens() public {
+        _defaultUnpause();
+        address user = makeAddr("withdrawUser");
+
+        // Deposit some tokens first
+        vm.prank(childChainManager);
+        sPOLChildToken.deposit(user, abi.encode(100e18));
+
+        uint256 initialBalance = sPOLChildToken.balanceOf(user);
+        uint256 withdrawAmount = 50e18;
+
+        vm.prank(user);
+        sPOLChildToken.withdraw(withdrawAmount);
+
+        assertEq(sPOLChildToken.balanceOf(user), initialBalance - withdrawAmount, "User balance should decrease");
+    }
+
+    function test_withdraw_revertsIfInsufficientBalance() public {
+        address user = makeAddr("withdrawUser");
+
+        vm.prank(user);
+        vm.expectRevert();
+        sPOLChildToken.withdraw(100e18);
+    }
+
+    function test_sellSPOL_revertsWhenExchangeRateOutdated() public {
+        _defaultUnpause();
+        address seller = makeAddr("seller");
+        uint256 polAmount = 10e18;
+        vm.deal(seller, polAmount);
+
+        // Buy some sPOL first
+        vm.prank(seller);
+        sPOLChildToken.buySPOL{value: polAmount}(polAmount);
+
+        uint256 sPOLBalance = sPOLChildToken.balanceOf(seller);
+        uint256 timestampBefore = sPOLChildToken.lastExchangeRateUpdate();
+
+        // Warp beyond maxExchangeRateUpdateDelay
+        vm.warp(timestampBefore + 11 days);
+
+        vm.prank(seller);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                sPOLChild.ExchangeRateUpdateTooOld.selector, timestampBefore, 10 days, timestampBefore + 11 days
+            )
+        );
+        sPOLChildToken.sellSPOL(sPOLBalance);
+    }
+
+    function test_onStateReceive_revertsOnInvalidMessageType() public {
+        // MsgType enum values: EXCHANGE_UPDATE=0, L2_MIGRATION_REQUEST=1, L2_BACKFILL_REQUEST=2,
+        // L1_MIGRATION_RESPONSE=3, L1_BACKFILL_RESPONSE=4
+        // Test with L1_MIGRATION_RESPONSE which should revert
+        bytes memory invalidMessage = abi.encode(MsgCoder.MsgType.L1_MIGRATION_RESPONSE, abi.encode(100e18));
+
+        vm.prank(stateSyncerL2);
+        vm.expectRevert(sPOLChild.InvalidMessageType.selector);
+        sPOLChildToken.onStateReceive(0, invalidMessage);
+    }
+
+    function test_onStateReceive_revertsOnUnknownMessageType() public {
+        // Test with an out-of-range message type by encoding a raw uint
+        bytes memory invalidMessage = abi.encode(uint8(99), abi.encode(100e18));
+
+        vm.prank(stateSyncerL2);
+        vm.expectRevert();
+        sPOLChildToken.onStateReceive(0, invalidMessage);
+    }
+
+    function test_balanceWithL1_revertsWhenMigrationOngoing() public {
+        _defaultUnpause();
+
+        // Setup migration
+        address buyer = makeAddr("buyer");
+        uint256 polAmount = 10e18;
+        vm.deal(buyer, polAmount);
+        vm.prank(buyer);
+        sPOLChildToken.buySPOL{value: polAmount}(polAmount);
+
+        vm.mockCall(
+            address(sPOLChildToken.bridgeHelper()),
+            abi.encodeWithSelector(sPOLChildToken.bridgeHelper().bridgePOLToL1.selector),
+            abi.encode(true)
+        );
+
+        vm.prank(admin);
+        sPOLChildToken.balanceWithL1();
+
+        assertTrue(sPOLChildToken.onGoingMigration(), "Migration should be ongoing");
+
+        // Try to balance again - should revert
+        vm.prank(admin);
+        vm.expectRevert(sPOLChild.MigrationAlreadyOngoing.selector);
+        sPOLChildToken.balanceWithL1();
+    }
+
+    function test_balanceWithL1_revertsWhenBackfillOngoing() public {
+        _defaultUnpause();
+
+        // Setup backfill scenario - deposit and sell without buying
+        address user = makeAddr("user");
+        vm.prank(childChainManager);
+        sPOLChildToken.deposit(user, abi.encode(10e18));
+
+        vm.prank(user);
+        sPOLChildToken.sellSPOL(10e18);
+
+        vm.mockCall(
+            address(sPOLChildToken.bridgeHelper()),
+            abi.encodeWithSelector(sPOLChildToken.bridgeHelper().bridgePOLToL1.selector),
+            abi.encode(true)
+        );
+
+        vm.prank(admin);
+        sPOLChildToken.balanceWithL1();
+
+        assertTrue(sPOLChildToken.onGoingBackfill(), "Backfill should be ongoing");
+
+        // Try to balance again - should revert
+        vm.prank(admin);
+        vm.expectRevert(sPOLChild.BackfillAlreadyOngoing.selector);
+        sPOLChildToken.balanceWithL1();
+    }
+
+    function test_balanceWithL1_onlyAdmin() public {
+        _defaultUnpause();
+        address nonAdmin = makeAddr("nonAdmin");
+
+        vm.prank(nonAdmin);
+        vm.expectRevert(abi.encodeWithSignature("AccessManagedUnauthorized(address)", nonAdmin));
+        sPOLChildToken.balanceWithL1();
+    }
+
+    function test_changeSafetyFee_success() public {
+        uint16 newFee = 50; // 0.5%
+        uint16 oldFee = sPOLChildToken.safetyFee();
+
+        vm.prank(admin);
+        vm.expectEmit(true, true, true, true, address(sPOLChildToken));
+        emit sPOLChild.SafetyFeeChanged(oldFee, newFee);
+        sPOLChildToken.changeSafetyFee(newFee);
+
+        assertEq(sPOLChildToken.safetyFee(), newFee, "Safety fee should be updated");
+    }
+
+    function test_changeSafetyFee_revertsIfTooHigh() public {
+        uint16 tooHighFee = 101; // > MAX_SAFETY_FEE (100)
+
+        vm.prank(admin);
+        vm.expectRevert(abi.encodeWithSelector(sPOLChild.FeeTooHigh.selector, tooHighFee, 100));
+        sPOLChildToken.changeSafetyFee(tooHighFee);
+    }
+
+    function test_changeSafetyFee_onlyAdmin() public {
+        address nonAdmin = makeAddr("nonAdmin");
+
+        vm.prank(nonAdmin);
+        vm.expectRevert(abi.encodeWithSignature("AccessManagedUnauthorized(address)", nonAdmin));
+        sPOLChildToken.changeSafetyFee(50);
+    }
+
+    function test_changeSafetyFee_allowsMaxFee() public {
+        uint16 maxFee = 100; // MAX_SAFETY_FEE
+
+        vm.prank(admin);
+        sPOLChildToken.changeSafetyFee(maxFee);
+
+        assertEq(sPOLChildToken.safetyFee(), maxFee, "Max fee should be allowed");
+    }
+
+    function test_changeSafetyFee_allowsZeroFee() public {
+        vm.prank(admin);
+        sPOLChildToken.changeSafetyFee(0);
+
+        assertEq(sPOLChildToken.safetyFee(), 0, "Zero fee should be allowed");
+    }
+
+    function test_setMaxExchangeRateUpdateDelay_success() public {
+        uint256 newDelay = 7 days;
+        uint256 oldDelay = sPOLChildToken.maxExchangeRateUpdateDelay();
+
+        vm.prank(admin);
+        vm.expectEmit(true, true, true, true, address(sPOLChildToken));
+        emit sPOLChild.MaxExchangeRateDelayChanged(oldDelay, newDelay);
+        sPOLChildToken.setMaxExchangeRateUpdateDelay(newDelay);
+
+        assertEq(sPOLChildToken.maxExchangeRateUpdateDelay(), newDelay, "Delay should be updated");
+    }
+
+    function test_setMaxExchangeRateUpdateDelay_onlyAdmin() public {
+        address nonAdmin = makeAddr("nonAdmin");
+
+        vm.prank(nonAdmin);
+        vm.expectRevert(abi.encodeWithSignature("AccessManagedUnauthorized(address)", nonAdmin));
+        sPOLChildToken.setMaxExchangeRateUpdateDelay(7 days);
+    }
+
+    function test_pauseBuySell_onlyAdmin() public {
+        _defaultUnpause();
+        address nonAdmin = makeAddr("nonAdmin");
+
+        vm.prank(nonAdmin);
+        vm.expectRevert(abi.encodeWithSignature("AccessManagedUnauthorized(address)", nonAdmin));
+        sPOLChildToken.pauseBuySell();
+    }
+
+    function test_pauseBuySell_success() public {
+        _defaultUnpause();
+
+        vm.prank(admin);
+        sPOLChildToken.pauseBuySell();
+
+        assertTrue(sPOLChildToken.paused(), "Contract should be paused");
+    }
+
+    function test_unpauseBuySell_onlyAdmin() public {
+        _sendExchangeRateUpdate(INITIAL_L1_SPOL_BALANCE, INITIAL_L1_DPOL_BALANCE);
+        address nonAdmin = makeAddr("nonAdmin");
+
+        vm.prank(nonAdmin);
+        vm.expectRevert(abi.encodeWithSignature("AccessManagedUnauthorized(address)", nonAdmin));
+        sPOLChildToken.unpauseBuySell();
+    }
+
+    function test_unpauseBuySell_revertsIfExchangeRateOutdated() public {
+        _sendExchangeRateUpdate(INITIAL_L1_SPOL_BALANCE, INITIAL_L1_DPOL_BALANCE);
+        uint256 timestampBefore = sPOLChildToken.lastExchangeRateUpdate();
+
+        // Warp beyond maxExchangeRateUpdateDelay
+        vm.warp(timestampBefore + 11 days);
+
+        vm.prank(admin);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                sPOLChild.ExchangeRateUpdateTooOld.selector, timestampBefore, 10 days, timestampBefore + 11 days
+            )
+        );
+        sPOLChildToken.unpauseBuySell();
+    }
+
+    function test_unpauseBuySell_success() public {
+        _sendExchangeRateUpdate(INITIAL_L1_SPOL_BALANCE, INITIAL_L1_DPOL_BALANCE);
+
+        assertTrue(sPOLChildToken.paused(), "Contract should start paused");
+
+        vm.prank(admin);
+        sPOLChildToken.unpauseBuySell();
+
+        assertFalse(sPOLChildToken.paused(), "Contract should be unpaused");
+    }
+
+    function test_withdrawPOL_revertsWhenPaused() public {
+        _defaultUnpause();
+        address user = makeAddr("user");
+        uint256 polAmount = 10e18;
+        _setupAndSell(user, polAmount);
+
+        // Setup buyer and complete backfill
+        address buyer = makeAddr("buyer");
+        vm.deal(buyer, 100e18);
+        vm.prank(buyer);
+        sPOLChildToken.buySPOL{value: 100e18}(100e18);
+
+        vm.mockCall(
+            address(sPOLChildToken.bridgeHelper()),
+            abi.encodeWithSelector(sPOLChildToken.bridgeHelper().bridgePOLToL1.selector),
+            abi.encode(true)
+        );
+        vm.prank(admin);
+        sPOLChildToken.balanceWithL1();
+
+        // Pause the contract
+        vm.prank(admin);
+        sPOLChildToken.pauseBuySell();
+
+        // Try to withdraw - should revert
+        vm.prank(user);
+        vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
+        sPOLChildToken.withdrawPOL();
+    }
 }
