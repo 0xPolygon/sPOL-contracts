@@ -92,8 +92,6 @@ contract sPOLControllerVLDSelectTest is Test, sPOLController {
         addValidators(valIds, shares, stakes);
 
         (uint16[] memory ids, uint256[] memory amounts) = _selectValidators(_amountToBuy, true);
-        console.log(ids.length);
-        console.log("Amount to buy:", _amountToBuy);
 
         // calced as others stake == (100 - share + maxdivergence )
         // my stake == others stake * their share / (100 - share + maxdivergence)
@@ -227,7 +225,6 @@ contract sPOLControllerVLDSelectTest is Test, sPOLController {
         addValidators(valIds, shares, stakes);
 
         (uint16[] memory ids, uint256[] memory amounts) = _selectValidators(_amountToSell, false);
-        console.log(amounts[0]);
         assertEq(ids.length, 1);
         assertEq(ids[0], 1);
         assertEq(amounts[0], _amountToSell > 1000 ? 1000 : _amountToSell);

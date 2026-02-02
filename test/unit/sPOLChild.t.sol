@@ -2,7 +2,6 @@
 pragma solidity ^0.8.30;
 
 import "forge-std/Test.sol";
-import "forge-std/console.sol";
 import {Deploy} from "../../script/Deploy.s.sol";
 import {sPOLChild} from "../../src/sPOLChild.sol";
 import {TransparentUpgradeableProxy} from "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol";

@@ -13,7 +13,7 @@ import {Registry as IRegistry} from "../../src/interfaces/IRegistry.sol";
 import {ERC20PredicateBurnOnly as IERC20PredicateBurnOnly} from "../../src/interfaces/IERC20Predicate.sol";
 import {WithdrawManager as IWithdrawManager} from "../../src/interfaces/IWithdrawManager.sol";
 
-contract sPOLControllerFullL1Test is Test, Deploy {
+contract sPOLControllerCleanupTest is Test, Deploy {
     sPOL public sPOLToken;
     sPOLController public controller;
     sPOLMessenger public messenger;
