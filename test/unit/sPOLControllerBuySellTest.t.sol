@@ -303,6 +303,110 @@ contract sPOLControllerBuySellTest is Test, Deploy {
         matchBalanceWithTotalStake(amount * 2 + amount / 2 + reward * 3);
     }
 
+    ////////////////////////////////////////
+    ///  Locked Validator Tests          ///
+    ////////////////////////////////////////
+
+    function test_buySPOLMulti_skipsLockedValidator_whenSingleValidatorHasCapacity() public {
+        // When one validator is locked AND the unlocked validator has enough capacity,
+        // the locked check in _validatorMaxTotalStakeDistance works correctly.
+        // First, fund validators so they have some stake (makes one underfunded relative to target)
+        controller.buySPOL(10e18);
+
+        // Lock validator 1
+        MockValidatorShare(testValidatorShare1).setLocked(true);
+
+        // Buy a small amount that validator 2 can handle alone
+        uint256 amount = 1e18;
+        uint256 val1Before = MockValidatorShare(testValidatorShare1).balanceOf(address(controller));
+        uint256 val2Before = MockValidatorShare(testValidatorShare2).balanceOf(address(controller));
+
+        controller.buySPOL(amount);
+
+        // Validator 1 (locked) should not receive new funds
+        assertEq(
+            MockValidatorShare(testValidatorShare1).balanceOf(address(controller)),
+            val1Before,
+            "Validator 1 (locked) balance should not change"
+        );
+        // Validator 2 should receive all
+        assertEq(
+            MockValidatorShare(testValidatorShare2).balanceOf(address(controller)),
+            val2Before + amount,
+            "Validator 2 should receive all new stake"
+        );
+    }
+
+    function test_buySPOLMulti_skipsLockedValidator_inFallbackDistribution() public {
+        // Verify that locked validators are skipped even in fallback distribution
+        // (when no single validator has enough capacity, e.g., on empty state)
+        MockValidatorShare(testValidatorShare1).setLocked(true);
+
+        uint256 amount = 1e18;
+        // On empty state, the fallback distribution kicks in
+        // Locked validator should be skipped, all goes to validator 2
+        controller.buySPOL(amount);
+
+        // Locked validator receives nothing
+        assertEq(
+            MockValidatorShare(testValidatorShare1).balanceOf(address(controller)),
+            0,
+            "Locked validator should receive nothing"
+        );
+        // Unlocked validator receives everything
+        assertEq(
+            MockValidatorShare(testValidatorShare2).balanceOf(address(controller)),
+            amount,
+            "Unlocked validator receives all"
+        );
+    }
+
+    function test_buySPOLMulti_allLockedReverts() public {
+        // When all validators are locked, multi-buy should revert
+        MockValidatorShare(testValidatorShare1).setLocked(true);
+        MockValidatorShare(testValidatorShare2).setLocked(true);
+
+        uint256 amount = 1e18;
+        vm.expectRevert(abi.encodeWithSelector(sPOLController.NoUnlockedValidators.selector));
+        controller.buySPOL(amount);
+    }
+
+    function test_buySPOLSingle_lockedValidatorReverts() public {
+        // Single buy with explicit validator ID will fail on the validator contract itself
+        // The locked check in _validatorMaxTotalStakeDistance doesn't protect this path
+        // because _buySPOLSingle uses _maxDeposit directly
+        controller.buySPOL(1e18); // First buy to allow subsequent single buys
+
+        MockValidatorShare(testValidatorShare1).setLocked(true);
+
+        uint256 amount = 1;
+        // This will revert on the validator share contract when attempting to stake
+        // The exact error depends on the validator share implementation
+        vm.mockCallRevert(
+            testValidatorShare1,
+            abi.encodeWithSelector(MockValidatorShare.restakeAndStakePOL.selector),
+            "validator locked"
+        );
+        vm.expectRevert("validator locked");
+        controller.buySPOL(amount, VALIDATOR_1);
+    }
+
+    function test_getMostUnderfundedValidator_skipsLockedValidator() public {
+        // Verify the getMostUnderfundedValidator function skips locked validators
+        controller.buySPOL(1e18);
+
+        // Lock validator 1 (which should be equally funded)
+        MockValidatorShare(testValidatorShare1).setLocked(true);
+
+        (uint16 validatorId, uint256 maxDeposit) = controller.getMostUnderfundedValidator();
+        assertEq(validatorId, VALIDATOR_2, "Should return validator 2 since validator 1 is locked");
+        assertGt(maxDeposit, 0, "Max deposit should be positive");
+    }
+
+    ////////////////////////////////////////
+    ///  Permit Tests                    ///
+    ////////////////////////////////////////
+
     function test_buySPOLPermit() public {
         uint256 amount = 1e18;
         uint256 deadline = block.timestamp + 100;

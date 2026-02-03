@@ -7,7 +7,12 @@ contract MockValidatorShare {
     mapping(address => uint256) public unbondNonces;
     uint256 public reward;
     mapping(address => uint256) public balanceOf;
+    bool public locked;
     //mapping(address => mapping(address => uint256)) public allowance;
+
+    function setLocked(bool _locked) external {
+        locked = _locked;
+    }
 
     function buyVoucherPOL(uint256 a, uint256) public returns (uint256) {
         balanceOf[msg.sender] += a;

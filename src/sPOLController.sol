@@ -127,6 +127,7 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     error ValidatorSharesPending(uint16 validatorId, uint256 shares);
     error ValidatorStillFunded(uint16 validatorId, uint256 totalStaked);
     error ValidatorUnderfunded(uint256 amount, uint256 maxAmount);
+    error NoUnlockedValidators();
     error ZeroAddress();
 
     constructor(
@@ -637,6 +638,12 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         uint256 maxDistance;
         for (uint256 i = 0; i < activeValidators.length; i++) {
             ValidatorInfo storage validator = validators[activeValidators[i]];
+
+            // Skip locked validators when looking for deposit capacity
+            if (_positive && validator.validatorContract.locked()) {
+                continue;
+            }
+
             uint256 distance = _validatorMaxTotalStakeDistance(validator, _positive);
 
             if (maxDistance < distance) {
@@ -696,9 +703,16 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         uint16[] memory selectedValidators = new uint16[](activeValidators.length);
         uint256[] memory amounts = new uint256[](activeValidators.length);
         uint256 remainingAmount = _amount;
+        uint256 unlockedCount = 0;
 
         for (uint256 i = 0; i < activeValidators.length; i++) {
             ValidatorInfo storage validator = validators[activeValidators[i]];
+
+            // Skip locked validators when buying
+            if (_buy && validator.validatorContract.locked()) {
+                continue;
+            }
+            unlockedCount++;
 
             uint256 maxAmount = _validatorMaxTotalStakeDistance(validator, _buy);
             if (_amount <= maxAmount) {
@@ -728,13 +742,27 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         // in this case not enough theoretical capacity, so we just distribute to all equally
         // for buy this is a fine approximation, for sell it can be really bad, so extra logic
         if (_buy) {
-            uint256 perValidator = _amount / activeValidators.length;
-            uint256 remainder = _amount % activeValidators.length;
+            require(unlockedCount > 0, NoUnlockedValidators());
+            uint256 perValidator = _amount / unlockedCount;
+            uint256 remainder = _amount % unlockedCount;
+            uint256 assignedIndex = 0;
             for (uint256 i = 0; i < activeValidators.length; i++) {
-                selectedValidators[i] = validators[activeValidators[i]].index;
-                amounts[i] = perValidator;
+                ValidatorInfo storage validator = validators[activeValidators[i]];
+                if (validator.validatorContract.locked()) {
+                    continue;
+                }
+                selectedValidators[assignedIndex] = validator.index;
+                amounts[assignedIndex] = perValidator;
+                if (assignedIndex == 0) {
+                    amounts[0] += remainder;
+                }
+                assignedIndex++;
             }
-            amounts[0] += remainder;
+            // Trim arrays to unlocked count
+            assembly {
+                mstore(selectedValidators, unlockedCount)
+                mstore(amounts, unlockedCount)
+            }
         } else {
             uint256 remaining = _amount;
             for (uint256 i = 0; i < activeValidators.length; i++) {
