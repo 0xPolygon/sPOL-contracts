@@ -347,26 +347,195 @@ contract sPOLControllerBuySellTest is Test, Deploy {
         controller.sellSPOL(amount, VALIDATOR_1);
     }
 
-    function test_sellSPOLSingle_VS_failure() public {
+    function test_sellSPOLSingle_VS_fallback_success() public {
+        uint256 amount = 1e18;
+        controller.buySPOL(amount * 100);
+
+        // Add reward to validator 1
+        uint256 reward = 1e16;
+        MockValidatorShare(testValidatorShare1).addReward(reward);
+
+        // Mock restakeAndUnstakePOL to fail - fallback to sellVoucher_newPOL should succeed
+        vm.mockCallRevert(
+            testValidatorShare1, abi.encodeWithSelector(MockValidatorShare.restakeAndUnstakePOL.selector), "failure"
+        );
+
+        uint256 dPOLBefore = controller.totaldPOLBalance();
+        uint256 sPOLBefore = controller.totalsPOLBalance();
+        (,,,, uint256 val1StakeBefore) = controller.validators(VALIDATOR_1);
+
+        controller.sellSPOL(amount, VALIDATOR_1);
+
+        // Verify sell succeeded via fallback
+        assertEq(controller.totaldPOLBalance(), dPOLBefore - amount, "Total dPOL balance should decrease by amount");
+        assertEq(controller.totalsPOLBalance(), sPOLBefore - amount, "Total sPOL balance should decrease by amount");
+
+        // Verify validator stake decreased but reward was NOT restaked (fallback doesn't restake)
+        (,,,, uint256 val1StakeAfter) = controller.validators(VALIDATOR_1);
+        assertEq(val1StakeAfter, val1StakeBefore - amount, "Validator 1 stake should decrease by amount only");
+
+        // Reward gets dropped when selling without restaking (not captured by controller)
+        assertEq(MockValidatorShare(testValidatorShare1).reward(), 0, "Reward should be dropped");
+    }
+
+    function test_sellSPOLMulti_VS_fallback_success() public {
+        uint256 amount = 1e18;
+        controller.buySPOL(amount);
+
+        // Add rewards to both validators
+        uint256 reward = 1e16;
+        MockValidatorShare(testValidatorShare1).addReward(reward);
+        MockValidatorShare(testValidatorShare2).addReward(reward);
+
+        // Mock restakeAndUnstakePOL to fail on both validators - fallback should succeed
+        vm.mockCallRevert(
+            testValidatorShare1, abi.encodeWithSelector(MockValidatorShare.restakeAndUnstakePOL.selector), "failure"
+        );
+        vm.mockCallRevert(
+            testValidatorShare2, abi.encodeWithSelector(MockValidatorShare.restakeAndUnstakePOL.selector), "failure"
+        );
+
+        controller.sellSPOL(amount);
+
+        // Verify sell succeeded via fallback
+        assertEq(controller.totaldPOLBalance(), 0, "Total dPOL balance should be 0");
+        assertEq(controller.totalsPOLBalance(), 0, "Total sPOL balance should be 0");
+
+        // Rewards get dropped when selling without restaking (not captured by controller)
+        assertEq(MockValidatorShare(testValidatorShare1).reward(), 0, "Validator 1 reward should be dropped");
+        assertEq(MockValidatorShare(testValidatorShare2).reward(), 0, "Validator 2 reward should be dropped");
+    }
+
+    function test_sellSPOLSingle_VS_fallback_also_fails() public {
+        uint256 amount = 1e18;
+        controller.buySPOL(amount * 100);
+
+        // Mock both restakeAndUnstakePOL AND sellVoucher_newPOL to fail
+        vm.mockCallRevert(
+            testValidatorShare1,
+            abi.encodeWithSelector(MockValidatorShare.restakeAndUnstakePOL.selector),
+            "restake failed"
+        );
+        vm.mockCallRevert(
+            testValidatorShare1, abi.encodeWithSelector(MockValidatorShare.sellVoucher_newPOL.selector), "sell failed"
+        );
+
+        vm.expectRevert("sell failed");
+        controller.sellSPOL(amount, VALIDATOR_1);
+    }
+
+    function test_sellSPOLMulti_VS_fallback_also_fails() public {
+        uint256 amount = 1e18;
+        controller.buySPOL(amount);
+
+        // Mock both restakeAndUnstakePOL AND sellVoucher_newPOL to fail on first validator
+        vm.mockCallRevert(
+            testValidatorShare1,
+            abi.encodeWithSelector(MockValidatorShare.restakeAndUnstakePOL.selector),
+            "restake failed"
+        );
+        vm.mockCallRevert(
+            testValidatorShare1, abi.encodeWithSelector(MockValidatorShare.sellVoucher_newPOL.selector), "sell failed"
+        );
+
+        vm.expectRevert("sell failed");
+        controller.sellSPOL(amount);
+    }
+
+    function test_sellSPOLMulti_VS_partial_fallback() public {
+        // Test where validator 1 needs fallback but validator 2 works normally
+        uint256 amount = 1e18;
+        controller.buySPOL(amount * 6);
+
+        uint256 reward = 1e16;
+        MockValidatorShare(testValidatorShare1).addReward(reward);
+        MockValidatorShare(testValidatorShare2).addReward(reward);
+
+        // Mock restakeAndUnstakePOL to fail ONLY on validator 1
+        vm.mockCallRevert(
+            testValidatorShare1, abi.encodeWithSelector(MockValidatorShare.restakeAndUnstakePOL.selector), "failure"
+        );
+
+        uint256 feedPOLBefore = controller.feedPOLBalance();
+
+        // Sell enough to use both validators
+        controller.sellSPOL(amount * 2);
+
+        // Validator 2 should have restaked rewards and added to fee
+        // Validator 1 should have used fallback (no restake, no fee from v1 rewards)
+        assertGt(controller.feedPOLBalance(), feedPOLBefore, "Fee should increase from validator 2 rewards");
+
+        // Validator 1 reward dropped (fallback path)
+        assertEq(MockValidatorShare(testValidatorShare1).reward(), 0, "Validator 1 reward should be dropped");
+        // Validator 2 reward should be claimed (normal path)
+        assertEq(MockValidatorShare(testValidatorShare2).reward(), 0, "Validator 2 reward should be claimed");
+    }
+
+    function test_sellSPOLSingle_VS_fallback_nonce_tracking() public {
+        // Verify nonce is correctly tracked even when using fallback
         uint256 amount = 1e18;
         controller.buySPOL(amount * 100);
 
         vm.mockCallRevert(
             testValidatorShare1, abi.encodeWithSelector(MockValidatorShare.restakeAndUnstakePOL.selector), "failure"
         );
-        vm.expectRevert("failure");
-        controller.sellSPOL(amount, VALIDATOR_1);
+
+        uint256 nonceBefore = controller.globalWithdrawNonce();
+
+        uint256 returnedNonce = controller.sellSPOL(amount, VALIDATOR_1);
+
+        // Verify nonce was returned and tracked
+        assertEq(returnedNonce, nonceBefore, "Returned nonce should match global nonce before");
+        assertEq(controller.globalWithdrawNonce(), nonceBefore + 1, "Global nonce should increment");
+
+        // Verify nonce details are stored
+        (uint16 validatorId, uint128 withdrawAmount,) = controller.withdrawNonceDetails(returnedNonce);
+        assertEq(validatorId, VALIDATOR_1, "Nonce should track validator 1");
+        assertEq(withdrawAmount, amount, "Nonce should track correct amount");
     }
 
-    function test_sellSPOLMulti_VS_failure() public {
+    function test_sellSPOLSingle_VS_fallback_balance_consistency() public {
+        // Verify balance consistency when using fallback
         uint256 amount = 1e18;
-        controller.buySPOL(amount);
+        controller.buySPOL(amount * 100);
 
         vm.mockCallRevert(
             testValidatorShare1, abi.encodeWithSelector(MockValidatorShare.restakeAndUnstakePOL.selector), "failure"
         );
-        vm.expectRevert("failure");
+
+        controller.sellSPOL(amount, VALIDATOR_1);
+
+        // Verify balances remain consistent
+        matchBalanceWithTotalStake(amount * 99);
+    }
+
+    function test_sellSPOLMulti_VS_fallback_consecutive() public {
+        // Test consecutive sells with fallback
+        uint256 amount = 1e18;
+        controller.buySPOL(amount * 10);
+
+        // First sell: normal path
         controller.sellSPOL(amount);
+        assertEq(controller.totaldPOLBalance(), amount * 9, "Balance after first sell");
+
+        // Mock failure for second sell
+        vm.mockCallRevert(
+            testValidatorShare1, abi.encodeWithSelector(MockValidatorShare.restakeAndUnstakePOL.selector), "failure"
+        );
+        vm.mockCallRevert(
+            testValidatorShare2, abi.encodeWithSelector(MockValidatorShare.restakeAndUnstakePOL.selector), "failure"
+        );
+
+        // Second sell: fallback path
+        controller.sellSPOL(amount);
+        assertEq(controller.totaldPOLBalance(), amount * 8, "Balance after second sell with fallback");
+
+        // Clear mocks for third sell
+        vm.clearMockedCalls();
+
+        // Third sell: back to normal path
+        controller.sellSPOL(amount);
+        assertEq(controller.totaldPOLBalance(), amount * 7, "Balance after third sell");
     }
 
     function test_sellSPOLSingle() public {

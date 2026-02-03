@@ -566,11 +566,14 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     }
 
     function _sellSharesFromValidator(ValidatorInfo storage _validator, uint256 _amount) internal returns (uint256) {
-        uint256 liquidRewards = _validator.validatorContract.restakeAndUnstakePOL(_amount);
-        _adddPOLBalanceFee(liquidRewards);
+        try _validator.validatorContract.restakeAndUnstakePOL(_amount) returns (uint256 liquidRewards) {
+            _adddPOLBalanceFee(liquidRewards);
+            validators[_validator.index].totalStaked += liquidRewards;
+        } catch {
+            _validator.validatorContract.sellVoucher_newPOL(_amount, _amount);
+        }
         _removedPOLBalance(_amount);
         validators[_validator.index].totalStaked -= _amount;
-        validators[_validator.index].totalStaked += liquidRewards;
 
         uint256 userNonce = _validator.validatorContract.unbondNonces(address(this));
         return userNonce;
