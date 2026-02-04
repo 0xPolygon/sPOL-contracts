@@ -703,7 +703,7 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         uint16[] memory selectedValidators = new uint16[](activeValidators.length);
         uint256[] memory amounts = new uint256[](activeValidators.length);
         uint256 remainingAmount = _amount;
-        uint256 unlockedCount = 0;
+        uint256 assignedIndex = 0;
 
         for (uint256 i = 0; i < activeValidators.length; i++) {
             ValidatorInfo storage validator = validators[activeValidators[i]];
@@ -712,7 +712,6 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
             if (_buy && validator.validatorContract.locked()) {
                 continue;
             }
-            unlockedCount++;
 
             uint256 maxAmount = _validatorMaxTotalStakeDistance(validator, _buy);
             if (_amount <= maxAmount) {
@@ -725,39 +724,33 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
                 }
                 return (selectedValidators, amounts);
             } else if (remainingAmount <= maxAmount) {
-                selectedValidators[i] = validator.index;
-                amounts[i] = remainingAmount;
-                // memory cut to size i+1 both arrays
+                selectedValidators[assignedIndex] = validator.index;
+                amounts[assignedIndex] = remainingAmount;
+                // memory cut to size assignedIndex+1 both arrays
                 assembly {
-                    mstore(selectedValidators, add(i, 1))
-                    mstore(amounts, add(i, 1))
+                    mstore(selectedValidators, add(assignedIndex, 1))
+                    mstore(amounts, add(assignedIndex, 1))
                 }
                 return (selectedValidators, amounts);
             } else {
-                selectedValidators[i] = validator.index;
-                amounts[i] = maxAmount;
+                selectedValidators[assignedIndex] = validator.index;
+                amounts[assignedIndex] = maxAmount;
                 remainingAmount -= maxAmount;
             }
+            assignedIndex++;
         }
         // in this case not enough theoretical capacity, so we just distribute to all equally
-        // for buy this is a fine approximation, for sell it can be really bad, so extra logic
         if (_buy) {
+            uint256 unlockedCount = assignedIndex;
             require(unlockedCount > 0, NoUnlockedValidators());
+
             uint256 perValidator = _amount / unlockedCount;
-            uint256 remainder = _amount % unlockedCount;
-            uint256 assignedIndex = 0;
-            for (uint256 i = 0; i < activeValidators.length; i++) {
-                ValidatorInfo storage validator = validators[activeValidators[i]];
-                if (validator.validatorContract.locked()) {
-                    continue;
-                }
-                selectedValidators[assignedIndex] = validator.index;
-                amounts[assignedIndex] = perValidator;
-                if (assignedIndex == 0) {
-                    amounts[0] += remainder;
-                }
-                assignedIndex++;
+            for (uint256 i = 0; i < unlockedCount; i++) {
+                amounts[i] = perValidator;
             }
+            // Assign remainder to first validator
+            amounts[0] += _amount % unlockedCount;
+
             // Trim arrays to unlocked count
             assembly {
                 mstore(selectedValidators, unlockedCount)
