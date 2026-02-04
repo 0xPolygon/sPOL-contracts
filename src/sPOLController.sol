@@ -758,10 +758,12 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
             }
         } else {
             uint256 remaining = _amount;
-            for (uint256 i = 0; i < activeValidators.length; i++) {
-                if (remaining > validators[activeValidators[i]].totalStaked) {
-                    amounts[i] = validators[activeValidators[i]].totalStaked;
-                    remaining -= validators[activeValidators[i]].totalStaked;
+            // assignedIndex is length of selectedValidators here
+            for (uint256 i = 0; i < assignedIndex; i++) {
+                uint256 staked = validators[selectedValidators[i]].totalStaked;
+                if (remaining > staked) {
+                    amounts[i] = staked;
+                    remaining -= staked;
                 } else {
                     amounts[i] = remaining;
                     remaining = 0;
@@ -769,10 +771,8 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
                         mstore(selectedValidators, add(i, 1))
                         mstore(amounts, add(i, 1))
                     }
-                    selectedValidators[i] = validators[activeValidators[i]].index;
                     break;
                 }
-                selectedValidators[i] = validators[activeValidators[i]].index;
             }
             require(remaining == 0, NotEnoughStake(remaining));
         }
