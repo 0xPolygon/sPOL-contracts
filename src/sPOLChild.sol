@@ -17,6 +17,11 @@ import {
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import {DoubleEndedQueue} from "@openzeppelin/contracts/utils/structs/DoubleEndedQueue.sol";
 
+/// @title sPOL Child
+/// @notice L2 contract for the sPOL liquid staking protocol on Polygon
+/// @dev Handles L2 buy/sell operations using a cached L1 exchange rate. Coordinates migrations
+///      (surplus POL to L1) and backfills (POL needed from L1) to keep L1/L2 balances in sync.
+///      Also serves as the sPOL ERC20 token on L2.
 contract sPOLChild is
     Initializable,
     PausableUpgradeable,
@@ -130,6 +135,12 @@ contract sPOLChild is
         _disableInitializers();
     }
 
+    /// @notice Initializes the L2 sPOL contract with bridge and access control settings
+    /// @dev Starts paused until exchange rate is received from L1. Sets initial safety fee.
+    /// @param _authority AccessManager contract for restricted function access
+    /// @param _l1Messenger L1 messenger address for sPOL migration/backfill operations
+    /// @param _bridgeHelper Helper contract for bridging POL back to L1
+    /// @param _childChainManager Polygon PoS bridge deposit manager
     function initialize(address _authority, address _l1Messenger, address _bridgeHelper, address _childChainManager)
         external
         initializer
@@ -161,10 +172,10 @@ contract sPOLChild is
     ///  Stake/Unstake          ///
     ///////////////////////////////
 
-    // balances are delayed from L1, so converting to sPOL is better than on L1, to avoid this we add a small fee
-    // this fee isn't separately collected, so it just benefits all sPOL holders
-    // conversely the conversion from sPOL to POL is automatically worse than on L1
-    // this way we always stay on the safe side regarding arbitraging
+    /// @notice Calculates POL amount received for burning sPOL on L2
+    /// @dev Uses L1 exchange rate cached on L2. No safety fee applied to sells (already worse than L1).
+    /// @param _sPOLAmount Amount of sPOL to convert
+    /// @return Amount of POL that would be redeemed
     function convertSPOLToPOL(uint256 _sPOLAmount) public view returns (uint256) {
         if (_sPOLAmount == 0) {
             return 0;
@@ -172,6 +183,10 @@ contract sPOLChild is
         return (_sPOLAmount * l1DPOLBalance) / l1SPOLBalance;
     }
 
+    /// @notice Calculates sPOL amount received for POL deposit on L2, including safety fee
+    /// @dev Applies safety fee to protect against exchange rate lag from L1. Fee benefits all sPOL holders.
+    /// @param _polAmount Amount of POL to convert
+    /// @return Amount of sPOL that would be minted (after safety fee deduction)
     function convertPOLToSPOL(uint256 _polAmount) public view returns (uint256) {
         if (_polAmount == 0) {
             return 0;
@@ -181,6 +196,10 @@ contract sPOLChild is
                 / (l1DPOLBalance * SAFETY_FEE_DENOMINATOR);
     }
 
+    /// @notice Stakes native POL on L2 and receives sPOL
+    /// @dev Requires exact POL amount as msg.value. Reverts if exchange rate is stale.
+    ///      sPOL minted locally and later synced to L1 via migration.
+    /// @param _polAmount Amount of native POL to stake (must equal msg.value)
     function buySPOL(uint256 _polAmount) external payable whenNotPaused {
         require(
             lastExchangeRateUpdate + maxExchangeRateUpdateDelay >= block.timestamp,
@@ -195,6 +214,10 @@ contract sPOLChild is
         emit sPOLMinted(msg.sender, _polAmount, spolToMint);
     }
 
+    /// @notice Burns sPOL to initiate POL redemption on L2
+    /// @dev Creates a withdrawal nonce tied to the next backfill cycle. POL is claimable after backfill completes.
+    ///      Reverts if exchange rate is stale.
+    /// @param _sPOLAmount Amount of sPOL to burn
     function sellSPOL(uint256 _sPOLAmount) external whenNotPaused {
         require(
             lastExchangeRateUpdate + maxExchangeRateUpdateDelay >= block.timestamp,
@@ -213,6 +236,10 @@ contract sPOLChild is
         emit sPOLBurned(msg.sender, _sPOLAmount, polToReturn, globalWithdrawNonce);
     }
 
+    /// @notice Returns all pending withdrawal nonces for a user on L2
+    /// @dev Each nonce has a backfillCycle. Withdrawable when corresponding backfill is completed.
+    /// @param _user Address to query open withdrawals for
+    /// @return Array of withdrawal details including POL amount, backfill cycle, and nonce
     function getUserOutstandingNonces(address _user) external view returns (UserOutstandingFull[] memory) {
         DoubleEndedQueue.Bytes32Deque storage outstandingNonces = userOutstandingNonces[_user];
         uint256 length = outstandingNonces.length();
@@ -229,6 +256,8 @@ contract sPOLChild is
         return userOutstandings;
     }
 
+    /// @notice Claims all matured POL withdrawals for the caller on L2
+    /// @dev Processes all nonces whose backfill cycle has completed. Transfers native POL to caller.
     function withdrawPOL() external whenNotPaused nonReentrant {
         DoubleEndedQueue.Bytes32Deque storage outstandingNonces = userOutstandingNonces[msg.sender];
         uint256 totalToWithdraw;
@@ -255,6 +284,11 @@ contract sPOLChild is
     ///  Token Bridging           ///
     /////////////////////////////////
 
+    /// @notice Handles sPOL deposits from L1 via PoS bridge
+    /// @dev Called by ChildChainManager during state syncs. If deposit is the returning migration sPOL, it's not minted
+    ///      (to avoid having to immediately burn it again, generating duplicate exit event).
+    /// @param user Recipient of the bridged sPOL
+    /// @param depositData ABI-encoded uint256 amount
     function deposit(address user, bytes calldata depositData) external onlyChildChainManager {
         uint256 amount = abi.decode(depositData, (uint256));
         if (user == address(this) && onGoingMigration && amount == backMigratingSPOL) {
@@ -269,6 +303,9 @@ contract sPOLChild is
         }
     }
 
+    /// @notice Burns sPOL to initiate bridge withdrawal to L1
+    /// @dev Creates a burn event that can be used to claim sPOL on L1 via PoS bridge exit.
+    /// @param amount Amount of sPOL to burn and withdraw to L1
     function withdraw(uint256 amount) external {
         _burn(msg.sender, amount);
     }
@@ -324,6 +361,9 @@ contract sPOLChild is
 
     receive() external payable {}
 
+    /// @notice Triggers L1/L2 balance synchronization
+    /// @dev Initiates either migration (surplus POL to L1), backfill request (need POL from L1) or local balancing only.
+    ///      Automatically called during exchange rate updates. Can be called manually if needed.
     function balanceWithL1() external restricted nonReentrant {
         _balanceWithL1();
     }
@@ -415,6 +455,9 @@ contract sPOLChild is
     ///  Config                 ///
     ///////////////////////////////
 
+    /// @notice Updates the safety fee applied to L2 buys
+    /// @dev Fee in basis points (30 = 0.3%). Protects against exchange rate lag arbitrage. Max 1%.
+    /// @param _newFee New safety fee (max MAX_SAFETY_FEE = 100 = 1%)
     function changeSafetyFee(uint16 _newFee) external restricted {
         require(_newFee <= MAX_SAFETY_FEE, FeeTooHigh(_newFee, MAX_SAFETY_FEE));
         uint16 oldFee = safetyFee;
@@ -422,16 +465,22 @@ contract sPOLChild is
         emit SafetyFeeChanged(oldFee, _newFee);
     }
 
+    /// @notice Updates how long the exchange rate remains valid without L1 updates
+    /// @dev If exceeded, buy/sell operations pause automatically. Prevents exchange on stale rates.
+    /// @param _newDelay New maximum age in seconds for the exchange rate
     function setMaxExchangeRateUpdateDelay(uint256 _newDelay) external restricted {
         uint256 oldDelay = maxExchangeRateUpdateDelay;
         maxExchangeRateUpdateDelay = _newDelay;
         emit MaxExchangeRateDelayChanged(oldDelay, _newDelay);
     }
 
+    /// @notice Pauses buy, sell, and withdraw operations on L2
     function pauseBuySell() external restricted {
         _pause();
     }
 
+    /// @notice Resumes buy and sell operations on L2
+    /// @dev Only succeeds if exchange rate is fresh (within maxExchangeRateUpdateDelay).
     function unpauseBuySell() external restricted {
         require(
             lastExchangeRateUpdate + maxExchangeRateUpdateDelay >= block.timestamp,

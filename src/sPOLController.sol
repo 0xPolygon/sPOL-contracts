@@ -15,6 +15,10 @@ import {
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import {DoubleEndedQueue} from "@openzeppelin/contracts/utils/structs/DoubleEndedQueue.sol";
 
+/// @title sPOL Controller
+/// @notice L1 controller for the sPOL liquid staking token of POL
+/// @dev Manages validator delegations, POL/sPOL conversions, and coordinates with L2 via sPOLMessenger.
+///      Handles staking rewards, fee collection, and the unbonding process for redemptions.
 contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgradeable, ReentrancyGuardTransient {
     using DoubleEndedQueue for DoubleEndedQueue.Bytes32Deque;
 
@@ -155,6 +159,12 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         _disableInitializers();
     }
 
+    /// @notice Initializes the controller with fee and access control settings
+    /// @dev Must be called once after proxy deployment.
+    /// @param _rewardFee Protocol fee on staking rewards in per mill (100 = 10%)
+    /// @param _feeReceiver Address that receives collected protocol fees as sPOL
+    /// @param _maxDivergence Max allowed deviation from target validator allocation in percentage points
+    /// @param _authority AccessManager contract that controls restricted functions
     function initialize(uint16 _rewardFee, address _feeReceiver, uint8 _maxDivergence, address _authority)
         external
         initializer
@@ -177,6 +187,9 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     ///  Validator Management   ///
     ///////////////////////////////
 
+    /// @notice Adds a new validator to the sPOL staking pool
+    /// @dev Validator must be active in StakeManager and accepting delegations. Starts with 0% deposit share.
+    /// @param _validatorID Polygon validator ID from the StakeManager contract
     function addValidator(uint16 _validatorID) external restricted {
         require(stakeManager.isValidator(_validatorID), ValidatorNotActive(_validatorID));
         require(validators[_validatorID].status == ValidatorStatus.INACTIVE, ValidatorNotInactive(_validatorID));
@@ -197,6 +210,10 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         emit ValidatorAdded(_validatorID);
     }
 
+    /// @notice Permanently removes a validator from the pool
+    /// @dev Validator must have 0% deposit share, no staked funds, no pending shares, and no liquid rewards.
+    ///      Once removed, the validator cannot be re-added.
+    /// @param _removedValidator Polygon validator ID to remove
     function removeValidator(uint16 _removedValidator) external restricted {
         ValidatorInfo storage removedValidator = validators[_removedValidator];
         require(
@@ -217,6 +234,9 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         emit ValidatorRemoved(_removedValidator);
     }
 
+    /// @notice Temporarily disables a validator from receiving new deposits
+    /// @dev Frozen validators keep their stake but are excluded from deposit selection. Deposit share must be 0 before freezing.
+    /// @param _validator Polygon validator ID to freeze
     function freezeValidator(uint16 _validator) external restricted {
         ValidatorInfo storage frozenValidator = validators[_validator];
         require(frozenValidator.status == ValidatorStatus.ACTIVE, ValidatorNotActive(_validator));
@@ -229,6 +249,9 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         emit ValidatorFrozen(_validator);
     }
 
+    /// @notice Re-enables a frozen validator to receive deposits
+    /// @dev Adds validator back to active list. Deposit share remains 0 until explicitly set.
+    /// @param _validator Polygon validator ID to unfreeze
     function unfreezeValidator(uint16 _validator) external restricted {
         require(validators[_validator].status == ValidatorStatus.FROZEN, ValidatorNotFrozen(_validator));
         validators[_validator].status = ValidatorStatus.ACTIVE;
@@ -246,6 +269,11 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         }
     }
 
+    /// @notice Updates target stake allocation percentages across validators
+    /// @dev All active validators' shares must sum to exactly 100%. Validators not in the array keep
+    ///      their current share. Used to rebalance stake distribution.
+    /// @param _validatorID Array of validator IDs to update
+    /// @param _newTargetShare Array of new target percentages (0-100) for each validator
     function updateValidatorTargetShare(uint16[] calldata _validatorID, uint8[] calldata _newTargetShare)
         external
         restricted
@@ -266,10 +294,15 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         require(totalPercent == 100, DepositSharesTotalNotOneHundred(totalPercent));
     }
 
+    /// @notice Claims and restakes liquid rewards for a single validator
+    /// @dev Anyone can call to compound rewards. Protocol fee is taken on claimed rewards.
+    /// @param _validator Polygon validator ID to restake rewards for
     function restakeValidator(uint16 _validator) external whenNotPaused {
         _restakeValidator(_validator);
     }
 
+    /// @notice Claims and restakes liquid rewards across all active validators
+    /// @dev Gas-intensive operation that compounds rewards for the entire pool. Protocol fee taken on rewards.
     function restakeAllActiveValidators() external whenNotPaused {
         for (uint256 i = 0; i < activeValidators.length; i++) {
             _restakeValidator(activeValidators[i]);
@@ -285,6 +318,13 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         _emitExchangeRateUpdate();
     }
 
+    /// @notice Moves stake between validators using StakeManager's migration mechanism
+    /// @dev Both validators must be active. Optionally restakes rewards before migration to ensure
+    ///      accurate stake tracking. Restake only active validators.
+    /// @param _oldValidator Source validator ID to move stake from
+    /// @param _newValidator Destination validator ID to receive stake
+    /// @param _amount Amount of POL to migrate between validators
+    /// @param _restake If true, claims and restakes rewards on both validators before migrating
     function migrateValidator(uint16 _oldValidator, uint16 _newValidator, uint256 _amount, bool _restake)
         external
         restricted
@@ -300,6 +340,9 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         emit ValidatorMigrated(_oldValidator, _newValidator, _amount);
     }
 
+    /// @notice Resyncs internal stake tracking with current validator share balances
+    /// @dev Emergency function to fix accounting discrepancies. Only use if properly prepared.
+    ///      Reads actual share balances from all active validators and updates totaldPOLBalance accordingly.
     function reloadAllActiveValidatorInfo() external restricted {
         uint256 amountToReduce;
         uint256 amountToAdd;
@@ -313,6 +356,10 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         _emitExchangeRateUpdate();
     }
 
+    /// @notice Resyncs stake tracking for a single validator with on-chain balance
+    /// @dev Emergency function to fix accounting for one validator without affecting others.
+    ///      Only use if properly prepared
+    /// @param _validator Validator ID to resync
     function reloadValidatorInfo(uint16 _validator) external restricted {
         ValidatorInfo storage validator = validators[_validator];
         uint256 amountToReduce = validator.totalStaked;
@@ -326,6 +373,9 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     ///  General Exchange       ///
     ///////////////////////////////
 
+    /// @notice Calculates sPOL amount received for a given POL deposit
+    /// @param _amountPOL Amount of POL to convert
+    /// @return Amount of sPOL that would be minted
     function convertPOLtoSPOL(uint256 _amountPOL) public view returns (uint256) {
         uint256 currentTotalsPOLBalance = totalsPOLBalance();
         if (_amountPOL == 0) {
@@ -337,6 +387,9 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         return _amountPOL * currentTotalsPOLBalance / (totaldPOLBalance - feedPOLBalance);
     }
 
+    /// @notice Calculates POL amount received for burning sPOL
+    /// @param _amountSPOL Amount of sPOL to convert
+    /// @return Amount of POL that would be redeemed
     function convertSPOLtoPOL(uint256 _amountSPOL) public view returns (uint256) {
         uint256 currentTotalsPOLBalance = totalsPOLBalance();
         if (_amountSPOL == 0) {
@@ -348,6 +401,8 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         return _amountSPOL * (totaldPOLBalance - feedPOLBalance) / currentTotalsPOLBalance;
     }
 
+    /// @notice Returns total sPOL supply used for exchange rate calculation
+    /// @return Total supply of sPOL tokens
     function totalsPOLBalance() public view returns (uint256) {
         return sPOLToken.totalSupply();
     }
@@ -356,10 +411,23 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     ///  POL -> sPOL Exchange   ///
     ///////////////////////////////
 
+    /// @notice Stakes POL and receives sPOL using automatic validator selection
+    /// @dev Distributes deposit across validators based on capacity and target allocation. Requires prior approval.
+    /// @param _amount Amount of POL to stake
+    /// @return Amount of sPOL minted to caller
     function buySPOL(uint256 _amount) external whenNotPaused returns (uint256) {
         return _buySPOLMulti(_amount, msg.sender);
     }
 
+    /// @notice Stakes POL using EIP-2612 permit for gasless approval
+    /// @dev Combines approval and stake in one transaction. Distributes across validators automatically.
+    /// @param _amount Amount of POL to stake
+    /// @param _user Address that signed the permit and will receive sPOL
+    /// @param _deadline Timestamp after which the permit expires
+    /// @param _v Recovery byte of the permit signature
+    /// @param _r First 32 bytes of the permit signature
+    /// @param _s Second 32 bytes of the permit signature
+    /// @return Amount of sPOL minted to user
     function buySPOLPermit(uint256 _amount, address _user, uint256 _deadline, uint8 _v, bytes32 _r, bytes32 _s)
         external
         whenNotPaused
@@ -369,14 +437,33 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         return _buySPOLMulti(_amount, _user);
     }
 
+    /// @notice Finds the validator with highest deposit capacity relative to target allocation
+    /// @dev Skips locked validators. Use with single-validator buySPOL to optimize gas usage.
+    /// @return validatorId ID of the most underfunded active validator
+    /// @return maxDeposit Maximum POL that can be deposited to bring validator within divergence limit
     function getMostUnderfundedValidator() external view returns (uint16, uint256) {
         return _validatorWithHighestTotalStakeDistance(true);
     }
 
+    /// @notice Stakes POL to a specific validator, saves gas compared to auto-selection
+    /// @dev Deposit must not exceed validator's capacity. Requires prior approval.
+    /// @param _amount Amount of POL to stake
+    /// @param _validator Target validator ID for the deposit
+    /// @return Amount of sPOL minted to caller
     function buySPOL(uint256 _amount, uint16 _validator) public whenNotPaused returns (uint256) {
         return _buySPOLSingle(_amount, _validator, msg.sender);
     }
 
+    /// @notice Stakes POL to specific validator using EIP-2612 permit
+    /// @dev Combines approval and single-validator stake in one transaction.
+    /// @param _amount Amount of POL to stake
+    /// @param _validator Target validator ID for the deposit
+    /// @param _user Address that signed the permit and will receive sPOL
+    /// @param _deadline Timestamp after which the permit expires
+    /// @param _v Recovery byte of the permit signature
+    /// @param _r First 32 bytes of the permit signature
+    /// @param _s Second 32 bytes of the permit signature
+    /// @return Amount of sPOL minted to user
     function buySPOLPermit(
         uint256 _amount,
         uint16 _validator,
@@ -390,6 +477,26 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         return _buySPOLSingle(_amount, _validator, _user);
     }
 
+    /// @notice Converts existing delegated POL (validator shares) to sPOL
+    /// @dev Requires prior approval of validator share tokens. Migrates existing delegation into sPOL pool.
+    ///      If validator is active and has capacity, stake stays; otherwise it's redistributed to other validators via migration.
+    /// @param _amount Amount of delegated POL to convert
+    /// @param _validatorOfDPOL Validator ID where the dPOL is currently staked
+    /// @return Amount of sPOL minted to caller
+    function buySPOLWithDPOL(uint256 _amount, uint16 _validatorOfDPOL) external whenNotPaused returns (uint256) {
+        return _buySPOLWithDPOLMulti(_amount, _validatorOfDPOL, msg.sender);
+    }
+
+    /// @notice Converts existing delegated POL (validator shares) to sPOL using permit
+    /// @dev Combines approval and dPOL conversion in one transaction. Migrates delegation into sPOL pool.
+    /// @param _amount Amount of delegated POL to convert
+    /// @param _validatorOfDPOL Validator ID where the dPOL is currently staked
+    /// @param _user Address that owns the dPOL and will receive sPOL
+    /// @param _deadline Timestamp after which the permit expires
+    /// @param _v Recovery byte of the permit signature
+    /// @param _r First 32 bytes of the permit signature
+    /// @param _s Second 32 bytes of the permit signature
+    /// @return Amount of sPOL minted to user
     function buySPOLWithDPOLPermit(
         uint256 _amount,
         uint16 _validatorOfDPOL,
@@ -401,10 +508,6 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     ) external whenNotPaused returns (uint256) {
         _applyPermit(stakeManager.getValidatorContract(_validatorOfDPOL), _amount, _user, _deadline, _v, _r, _s);
         return _buySPOLWithDPOLMulti(_amount, _validatorOfDPOL, _user);
-    }
-
-    function buySPOLWithDPOL(uint256 _amount, uint16 _validatorOfDPOL) external whenNotPaused returns (uint256) {
-        return _buySPOLWithDPOLMulti(_amount, _validatorOfDPOL, msg.sender);
     }
 
     function _buySPOLSingle(uint256 _amount, uint16 _validator, address _user) internal returns (uint256) {
@@ -491,10 +594,23 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     ///  sPOL -> POL Exchange   ///
     ///////////////////////////////
 
+    /// @notice Burns sPOL to initiate POL redemption with automatic validator selection
+    /// @dev Creates withdrawal nonces subject to StakeManager's unbonding period. Call withdrawPOL after unbonding.
+    /// @param _amount Amount of sPOL to burn
+    /// @return nonces Array of withdrawal nonces for tracking unbonding progress
     function sellSPOL(uint256 _amount) external whenNotPaused returns (uint256[] memory) {
         return _sellSPOLMulti(_amount, msg.sender);
     }
 
+    /// @notice Burns sPOL using EIP-2612 permit for gasless burn
+    /// @dev Use the permit as owner intent to sell. Creates withdrawal nonces for unbonding.
+    /// @param _amount Amount of sPOL to burn
+    /// @param _user Address that signed the permit and will receive POL after unbonding
+    /// @param _deadline Timestamp after which the permit expires
+    /// @param _v Recovery byte of the permit signature
+    /// @param _r First 32 bytes of the permit signature
+    /// @param _s Second 32 bytes of the permit signature
+    /// @return nonces Array of withdrawal nonces for tracking unbonding progress
     function sellSPOLPermit(uint256 _amount, address _user, uint256 _deadline, uint8 _v, bytes32 _r, bytes32 _s)
         external
         whenNotPaused
@@ -504,14 +620,33 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         return _sellSPOLMulti(_amount, _user);
     }
 
+    /// @notice Finds the validator with highest redemption capacity relative to target allocation
+    /// @dev Use with single-validator sellSPOL to optimize gas cost.
+    /// @return validatorId ID of the most overfunded active validator
+    /// @return maxRedeem Maximum POL that can be redeemed
     function getMostOverfundedValidator() external view returns (uint16, uint256) {
         return _validatorWithHighestTotalStakeDistance(false);
     }
 
+    /// @notice Burns sPOL to redeem from a specific validator, saves gas compared to auto-selection
+    /// @dev Redemption must not exceed validator's capacity.
+    /// @param _amount Amount of sPOL to burn
+    /// @param _validator Target validator ID to redeem from
+    /// @return nonce Withdrawal nonce for tracking unbonding progress
     function sellSPOL(uint256 _amount, uint16 _validator) external whenNotPaused returns (uint256) {
         return _sellSPOLSingle(_amount, _validator, msg.sender);
     }
 
+    /// @notice Burns sPOL from specific validator using EIP-2612 permit
+    /// @dev Combines intent proof and single-validator redemption in one transaction.
+    /// @param _amount Amount of sPOL to burn
+    /// @param _validator Target validator ID to redeem from
+    /// @param _user Address that signed the permit and will receive POL after unbonding
+    /// @param _deadline Timestamp after which the permit expires
+    /// @param _v Recovery byte of the permit signature
+    /// @param _r First 32 bytes of the permit signature
+    /// @param _s Second 32 bytes of the permit signature
+    /// @return nonce Withdrawal nonce for tracking unbonding progress
     function sellSPOLPermit(
         uint256 _amount,
         uint16 _validator,
@@ -580,6 +715,10 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         return userNonce;
     }
 
+    /// @notice Returns all pending withdrawal nonces for a user
+    /// @dev Each nonce represents an unbonding position. Check epoch progress to determine withdrawability.
+    /// @param _user Address to query withdrawals for
+    /// @return Array of withdrawal details including validator, amount, and nonce info
     function getUserOpenNonces(address _user) external view returns (FullNonceDetails[] memory) {
         DoubleEndedQueue.Bytes32Deque storage outstandingNonces = userNonces[_user];
         uint256 length = outstandingNonces.length();
@@ -597,10 +736,15 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         return fullDetails;
     }
 
+    /// @notice Claims all matured POL withdrawals for the caller
+    /// @dev Processes all ready nonces in FIFO order. Reverts if no withdrawals are ready.
     function withdrawPOL() external whenNotPaused {
         _withdrawPOL(msg.sender);
     }
 
+    /// @notice Claims all matured POL withdrawals on behalf of another user
+    /// @dev Anyone can call to process withdrawals for a user. POL sent to the user, not caller.
+    /// @param _user Address to claim withdrawals for
     function withdrawPOL(address _user) external whenNotPaused {
         _withdrawPOL(_user);
     }
@@ -783,6 +927,9 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     ///  Fee Management         ///
     ///////////////////////////////
 
+    /// @notice Updates the address that receives protocol fees
+    /// @dev Automatically collects any outstanding fees before changing receiver.
+    /// @param _newFeeReceiver New address to receive future fee distributions
     function changeFeeReceiver(address _newFeeReceiver) external restricted {
         require(_newFeeReceiver != address(0), ZeroAddress());
         _takeFee();
@@ -791,6 +938,9 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         emit FeeReceiverChanged(oldReceiver, feeReceiver);
     }
 
+    /// @notice Updates the protocol fee rate on staking rewards
+    /// @dev Fee is in per mill (100 = 10%, max 1000). Does not collect outstanding fees.
+    /// @param _newFee New fee rate in per mill
     function changeRewardFee(uint16 _newFee) external restricted {
         require(_newFee <= MAX_FEE, FeeTooLarge(_newFee, MAX_FEE));
         uint16 oldFee = rewardFee;
@@ -798,6 +948,8 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         emit RewardFeeChanged(oldFee, rewardFee);
     }
 
+    /// @notice Mints accumulated protocol fees as sPOL to the fee receiver
+    /// @dev Fees accrue in feedPOLBalance as rewards are restaked.
     function takeFee() external restricted {
         _takeFee();
     }
@@ -818,6 +970,11 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     ///  L2 interaction          ///
     ////////////////////////////////
 
+    /// @notice Processes POL migration from L2, staking and minting corresponding sPOL
+    /// @dev Only callable by sPOLMessenger. Validates that exchange rate hasn't moved unfavorably.
+    ///      Reverts with BadExchangeRate if L1 rate increased significantly since L2 calculation.
+    /// @param _amountPOL Amount of POL being migrated from L2
+    /// @param _amountSPOL Amount of sPOL to mint (calculated on L2 at time of migration request)
     function completeMigration(uint256 _amountPOL, uint256 _amountSPOL) external nonReentrant {
         require(msg.sender == sPOLMessenger, AddressUnauthorized(msg.sender));
         uint256 expectedSPOL = convertPOLtoSPOL(_amountPOL);
@@ -841,6 +998,11 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         _emitExchangeRateUpdate();
     }
 
+    /// @notice Processes L2 backfill request by burning sPOL and initiating POL withdrawal
+    /// @dev Only callable by sPOLMessenger. Validates exchange rate hasn't moved favorably for L2.
+    ///      Backfill covers L2 sell requests that couldn't be filled locally.
+    /// @param _amountPOL Amount of POL to return to L2 after unbonding
+    /// @param _amountSPOL Amount of sPOL being burned (bridged from L2)
     function startBackfillSell(uint256 _amountPOL, uint256 _amountSPOL) external nonReentrant {
         require(msg.sender == sPOLMessenger, AddressUnauthorized(msg.sender));
         uint256 expectedSPOL = convertPOLtoSPOL(_amountPOL);
@@ -939,16 +1101,22 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     ///  Config                 ///
     ///////////////////////////////
 
+    /// @notice Updates the maximum allowed stake divergence from target allocation
+    /// @dev Higher values allow more flexibility but reduce rebalancing pressure. Affects deposit/redeem limits.
+    /// @param _newDivergence New max divergence in percentage points
     function changeMaxDivergence(uint8 _newDivergence) external restricted {
         uint8 oldDivergence = maxDivergence;
         maxDivergence = _newDivergence;
         emit MaxDivergenceChanged(oldDivergence, maxDivergence);
     }
 
+    /// @notice Pauses all user-facing functions (buy, sell, withdraw, restake)
+    /// @dev Admin functions remain available.
     function pauseUserFunctions() external restricted {
         _pause();
     }
 
+    /// @notice Resumes all user-facing functions after a pause
     function unpauseUserFunctions() external restricted {
         _unpause();
     }
@@ -957,7 +1125,10 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     ///  Other                  ///
     ///////////////////////////////
 
-    /// Use responsibly, don't overfund vals except when needed, don't use when clean amount is large, but dPOL stake small
+    /// @notice Converts any MATIC/POL dust in the contract to staked POL
+    /// @dev Migrates MATIC to POL, then stakes any POL balance to the specified validator.
+    ///      The staked amount is treated as fee (benefits all holders). Use sparingly to avoid overfunding.
+    /// @param _validator Active validator to receive the staked dust
     function cleanUpMaticPOL(uint16 _validator) external restricted {
         ValidatorInfo storage validator = validators[_validator];
         require(validator.status == ValidatorStatus.ACTIVE, ValidatorNotActive(_validator));

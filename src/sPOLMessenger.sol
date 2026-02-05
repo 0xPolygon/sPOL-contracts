@@ -15,6 +15,10 @@ import {
 } from "@openzeppelin-contracts-upgradeable/access/manager/AccessManagedUpgradeable.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 
+/// @title sPOL Messenger
+/// @notice L1 bridge coordinator for cross-chain sPOL operations
+/// @dev Processes L2 migration and backfill requests via Polygon's state sync. Handles POL/sPOL
+///      bridging between L1 and L2, and pushes exchange rate updates to L2.
 contract sPOLMessenger is Initializable, AccessManagedUpgradeable, ReentrancyGuardTransient, BaseRootTunnel, MsgCoder {
     IERC20 public immutable polToken;
     IERC20 public immutable sPOLToken;
@@ -72,6 +76,10 @@ contract sPOLMessenger is Initializable, AccessManagedUpgradeable, ReentrancyGua
         _disableInitializers();
     }
 
+    /// @notice Initializes the messenger with access control and token approvals
+    /// @dev Sets up approvals for sPOLController (POL staking) and bridge contracts (POL/sPOL transfers).
+    /// @param _authority AccessManager contract for restricted function access
+    /// @param _rcmERC20Predicate RootChainManager ERC20 predicate for sPOL bridge deposits
     function initialize(address _authority, address _rcmERC20Predicate) external initializer {
         require(_authority != address(0), ZeroAddress());
         require(_rcmERC20Predicate != address(0), ZeroAddress());
@@ -125,6 +133,9 @@ contract sPOLMessenger is Initializable, AccessManagedUpgradeable, ReentrancyGua
         emit BackfillStarted(_backFillCycle, _polAmount, _sPOLAmount);
     }
 
+    /// @notice Completes an active backfill by withdrawing POL and bridging it to L2
+    /// @dev Must be called after StakeManager's unbonding period. Attempts to withdraw from sPOLController,
+    ///      then bridges the POL to L2 and notifies sPOLChild via state sync message.
     function completeBackfill() external restricted nonReentrant {
         require(currentActiveBackfillCycle != 0, BackfillNotActive(0));
         require(!completedBackfill[currentActiveBackfillCycle], BackfillAlreadyCompleted(currentActiveBackfillCycle));
@@ -149,6 +160,9 @@ contract sPOLMessenger is Initializable, AccessManagedUpgradeable, ReentrancyGua
         currentActiveBackfillCycle = 0;
     }
 
+    /// @notice Sends current L1 exchange rate to L2 via state sync
+    /// @dev Reads totaldPOLBalance (minus fees) and totalsPOLBalance from controller, then sends to L2.
+    ///      L2 uses this to calculate buy/sell operations.
     function updateL2ExchangeRate() external restricted nonReentrant {
         uint256 totalsPOLBalance = sPOLController.totalsPOLBalance();
         uint256 totaldPOLBalance = sPOLController.totaldPOLBalance() - sPOLController.feedPOLBalance();
