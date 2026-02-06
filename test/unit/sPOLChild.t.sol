@@ -1131,7 +1131,7 @@ contract sPOLChildTest is Test, Deploy {
         assertFalse(sPOLChildToken.paused(), "Contract should be unpaused");
     }
 
-    function test_withdrawPOL_revertsWhenPaused() public {
+    function test_withdrawPOL_succeedsWhenPaused() public {
         _defaultUnpause();
         address user = makeAddr("user");
         uint256 polAmount = 10e18;
@@ -1154,10 +1154,12 @@ contract sPOLChildTest is Test, Deploy {
         // Pause the contract
         vm.prank(admin);
         sPOLChildToken.pauseBuySell();
+        assertTrue(sPOLChildToken.paused(), "Contract should be paused");
 
-        // Try to withdraw - should revert
+        // Withdraw should still succeed while paused
+        uint256 balanceBefore = user.balance;
         vm.prank(user);
-        vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
         sPOLChildToken.withdrawPOL();
+        assertGt(user.balance, balanceBefore, "User should receive POL even when paused");
     }
 }

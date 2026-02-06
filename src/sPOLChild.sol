@@ -258,7 +258,7 @@ contract sPOLChild is
 
     /// @notice Claims all matured POL withdrawals for the caller on L2
     /// @dev Processes all nonces whose backfill cycle has completed. Transfers native POL to caller.
-    function withdrawPOL() external whenNotPaused nonReentrant {
+    function withdrawPOL() external nonReentrant {
         DoubleEndedQueue.Bytes32Deque storage outstandingNonces = userOutstandingNonces[msg.sender];
         uint256 totalToWithdraw;
         while (!outstandingNonces.empty()) {
@@ -474,7 +474,7 @@ contract sPOLChild is
         emit MaxExchangeRateDelayChanged(oldDelay, _newDelay);
     }
 
-    /// @notice Pauses buy, sell, and withdraw operations on L2
+    /// @notice Pauses buy and sell operations on L2. Withdrawals remain available.
     function pauseBuySell() external restricted {
         _pause();
     }
