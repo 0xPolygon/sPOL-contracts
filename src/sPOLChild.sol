@@ -94,6 +94,9 @@ contract sPOLChild is
     event POLWithdrawn(address user, uint256 amountPOL, uint256 nonce);
 
     // Exchange rate and operational events
+    event ExchangeRateDeclined(
+        uint256 currentSPOLBalance, uint256 currentDPOLBalance, uint256 declinedSPOLBalance, uint256 declinedDPOLBalance
+    );
     event ExchangeRateUpdated(
         uint256 oldSPOLBalance, uint256 oldDPOLBalance, uint256 newSPOLBalance, uint256 newDPOLBalance
     );
@@ -111,7 +114,6 @@ contract sPOLChild is
 
     error AddressUnauthorized(address caller);
     error BackfillAlreadyOngoing();
-    error ExchangeRateDeclined(uint256 newRate, uint256 currentRate);
     error ExchangeRateUpdateTooOld(uint256 lastUpdate, uint256 maxAge, uint256 currentTime);
     error FeeTooHigh(uint16 provided, uint16 maxAllowed);
     error IncorrectPOLAmount(uint256 sent, uint256 expected);
@@ -330,16 +332,16 @@ contract sPOLChild is
     }
 
     function _handleExchangeRateUpdate(bytes memory _msg) internal {
-        _balanceWithL1();
         (uint256 updatedl1SPOLBalance, uint256 updatedl1DPOLBalance) = _decodeExchangeUpdateMessage(_msg);
-        uint256 currentConversion = convertSPOLToPOL(1e18);
+        if (updatedl1DPOLBalance * l1SPOLBalance < l1DPOLBalance * updatedl1SPOLBalance) {
+            emit ExchangeRateDeclined(l1SPOLBalance, l1DPOLBalance, updatedl1SPOLBalance, updatedl1DPOLBalance);
+            return;
+        }
+        _balanceWithL1();
         uint256 oldSPOLBalance = l1SPOLBalance;
         uint256 oldDPOLBalance = l1DPOLBalance;
         l1SPOLBalance = updatedl1SPOLBalance;
         l1DPOLBalance = updatedl1DPOLBalance;
-        uint256 newConversion = convertSPOLToPOL(1e18);
-        // this then stays in failedstatesync, maybe don't revert, but ignore?
-        require(newConversion >= currentConversion, ExchangeRateDeclined(newConversion, currentConversion));
         lastExchangeRateUpdate = block.timestamp;
         emit ExchangeRateUpdated(oldSPOLBalance, oldDPOLBalance, updatedl1SPOLBalance, updatedl1DPOLBalance);
     }

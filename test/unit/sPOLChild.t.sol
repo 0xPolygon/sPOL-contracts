@@ -89,17 +89,18 @@ contract sPOLChildTest is Test, Deploy {
         assertGt(timestampAfter, timestampBefore, "Timestamp should increase");
     }
 
-    function test_exchangeRateUpdate_RevertsOnDecliningRate() public {
+    function test_exchangeRateUpdate_IgnoresDecliningRate() public {
         uint256 worseL1SPOLBalance = 1000e18;
         uint256 worseL1DPOLBalance = 950e18;
 
         bytes memory message =
             abi.encode(MsgCoder.MsgType.EXCHANGE_UPDATE, abi.encode(worseL1SPOLBalance, worseL1DPOLBalance));
 
-        uint256 currentRate = sPOLChildToken.convertSPOLToPOL(1e18);
-        uint256 newRate = (1e18 * worseL1DPOLBalance) / worseL1SPOLBalance;
         vm.prank(stateSyncerL2);
-        vm.expectRevert(abi.encodeWithSelector(sPOLChild.ExchangeRateDeclined.selector, newRate, currentRate));
+        vm.expectEmit(true, true, true, true, address(sPOLChildToken));
+        emit sPOLChild.ExchangeRateDeclined(
+            INITIAL_L1_SPOL_BALANCE, INITIAL_L1_DPOL_BALANCE, worseL1SPOLBalance, worseL1DPOLBalance
+        );
         sPOLChildToken.onStateReceive(0, message);
 
         // Verify balances remain unchanged
@@ -113,6 +114,43 @@ contract sPOLChildTest is Test, Deploy {
 
         assertEq(sPOLChildToken.l1SPOLBalance(), INITIAL_L1_SPOL_BALANCE);
         assertEq(sPOLChildToken.l1DPOLBalance(), INITIAL_L1_DPOL_BALANCE);
+    }
+
+    function test_exchangeRateUpdate_SameRateRefreshesTimestamp() public {
+        _defaultUnpause();
+        uint256 initialTimestamp = sPOLChildToken.lastExchangeRateUpdate();
+
+        // Warp close to expiry
+        vm.warp(initialTimestamp + 9 days);
+
+        // Same rate update should refresh the timestamp
+        _sendExchangeRateUpdate(INITIAL_L1_SPOL_BALANCE, INITIAL_L1_DPOL_BALANCE);
+        assertEq(sPOLChildToken.lastExchangeRateUpdate(), initialTimestamp + 9 days);
+
+        // Warp another 9 days — would have expired without the refresh
+        vm.warp(initialTimestamp + 18 days);
+
+        // Buy should still work because the timer was refreshed
+        address buyer = makeAddr("buyer");
+        vm.deal(buyer, 1e18);
+        vm.prank(buyer);
+        sPOLChildToken.buySPOL{value: 1e18}(1e18);
+        assertGt(sPOLChildToken.balanceOf(buyer), 0);
+    }
+
+    function test_exchangeRateUpdate_DecliningRateDoesNotRefreshTimestamp() public {
+        _defaultUnpause();
+        
+        // Set a real rate first
+        _sendExchangeRateUpdate(1000e18, 1100e18);
+        uint256 updatedTimestamp = sPOLChildToken.lastExchangeRateUpdate();
+
+        // Warp forward
+        vm.warp(updatedTimestamp + 5 days);
+
+        // Send a declining rate — should be ignored, timestamp should NOT refresh
+        _sendExchangeRateUpdate(1000e18, 1050e18);
+        assertEq(sPOLChildToken.lastExchangeRateUpdate(), updatedTimestamp, "Timestamp should not refresh on decline");
     }
 
     function test_exchangeRateUpdate_OnlyStateSyncerCanUpdate() public {
