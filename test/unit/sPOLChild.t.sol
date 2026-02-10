@@ -1002,7 +1002,7 @@ contract sPOLChildTest is Test, Deploy {
         vm.record();
         vm.prank(stateSyncerL2);
         vm.expectEmit(true, true, true, true, address(sPOLChildToken));
-        emit sPOLChild.InvalidMessageType();
+        emit sPOLChild.InvalidMessageType(uint8(MsgCoder.MsgType.L1_MIGRATION_RESPONSE));
         sPOLChildToken.onStateReceive(0, invalidMessage);
         (, bytes32[] memory writes) = vm.accesses(address(sPOLChildToken));
         assertEq(writes.length, 0, "Invalid message should not modify storage");

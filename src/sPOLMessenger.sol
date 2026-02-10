@@ -35,12 +35,12 @@ contract sPOLMessenger is Initializable, AccessManagedUpgradeable, ReentrancyGua
     event BackfillCompleted(uint256 indexed backfillCycle, uint256 totalWithdraw);
     event BackfillStarted(uint256 indexed backfillCycle, uint256 polAmount, uint256 sPOLAmount);
     event ExchangeRateUpdateSent(uint256 totalsPOLBalance, uint256 totaldPOLBalance);
+    event InvalidMessageType(uint8 msgType);
     event MigrationProcessed(uint256 polAmount, uint256 mintedSPOL);
 
     error BackfillAlreadyCompleted(uint256 backfillCycle);
     error BackfillAlreadyOngoing(uint256 backfillCycle);
     error BackfillNotActive(uint256 backfillCycle);
-    error InvalidMessageType(uint8 msgType);
     error NotEnoughPOLInMessenger(uint256 required, uint256 available);
     error NotEnoughSPOLInMessenger(uint256 required, uint256 available);
     error ZeroAddress();
@@ -98,7 +98,8 @@ contract sPOLMessenger is Initializable, AccessManagedUpgradeable, ReentrancyGua
         } else if (msgType == MsgType.L2_BACKFILL_REQUEST) {
             _handleBackfill(actualMessage);
         } else {
-            revert InvalidMessageType(uint8(msgType));
+            emit InvalidMessageType(uint8(msgType));
+            return;
         }
     }
 

@@ -100,7 +100,7 @@ contract sPOLChild is
     event ExchangeRateUpdated(
         uint256 oldSPOLBalance, uint256 oldDPOLBalance, uint256 newSPOLBalance, uint256 newDPOLBalance
     );
-    event InvalidMessageType();
+    event InvalidMessageType(uint8 msgType);
     event SafetyFeeChanged(uint16 oldFee, uint16 newFee);
     event MaxExchangeRateDelayChanged(uint256 oldDelay, uint256 newDelay);
 
@@ -324,7 +324,7 @@ contract sPOLChild is
         } else if (msgType == MsgType.L1_BACKFILL_RESPONSE) {
             _handleBackfillResponse(actualMessage);
         } else {
-            emit InvalidMessageType();
+            emit InvalidMessageType(uint8(msgType));
             return;
         }
     }
