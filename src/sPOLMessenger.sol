@@ -119,7 +119,7 @@ contract sPOLMessenger is Initializable, AccessManagedUpgradeable, ReentrancyGua
             NotEnoughSPOLInMessenger(_mintedSPOL, sPOLToken.balanceOf(address(this)))
         );
 
-        rootChainManager.depositFor(childTunnel, address(sPOLToken), abi.encodePacked(_mintedSPOL));
+        rootChainManager.depositFor(childTunnel, address(sPOLToken), abi.encode(_mintedSPOL));
         // disabled for portal because of cyclical exit issue, should be activated for lxly
         //_sendMessageToChild(abi.encode(MsgType.L1_MIGRATION_RESPONSE, encodeL1MigrationResponseMessage(_mintedSPOL)));
         emit MigrationProcessed(_polAmount, _mintedSPOL);

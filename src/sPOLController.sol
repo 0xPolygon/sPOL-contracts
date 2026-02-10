@@ -286,17 +286,16 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     /// @notice Claims and restakes liquid rewards for a single validator
     /// @dev Anyone can call to compound rewards. Protocol fee is taken on claimed rewards.
     /// @param _validator Polygon validator ID to restake rewards for
-    function restakeValidator(uint16 _validator) external whenNotPaused {
+    function restakeValidator(uint16 _validator) external whenNotPaused nonReentrant {
         _restakeValidator(_validator);
     }
 
     /// @notice Claims and restakes liquid rewards across all active validators
     /// @dev Gas-intensive operation that compounds rewards for the entire pool. Protocol fee taken on rewards.
-    function restakeAllActiveValidators() external whenNotPaused {
+    function restakeAllActiveValidators() external whenNotPaused nonReentrant {
         for (uint256 i = 0; i < activeValidators.length; i++) {
             _restakeValidator(activeValidators[i]);
         }
-        _emitExchangeRateUpdate();
     }
 
     function _restakeValidator(uint16 _validator) internal {
@@ -405,7 +404,7 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     /// @dev Distributes deposit across validators based on capacity and target allocation. Requires prior approval.
     /// @param _amount Amount of POL to stake
     /// @return Amount of sPOL minted to caller
-    function buySPOL(uint256 _amount) external whenNotPaused returns (uint256) {
+    function buySPOL(uint256 _amount) external whenNotPaused nonReentrant returns (uint256) {
         return _buySPOLMulti(_amount, msg.sender);
     }
 
@@ -421,6 +420,7 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     function buySPOLPermit(uint256 _amount, address _user, uint256 _deadline, uint8 _v, bytes32 _r, bytes32 _s)
         external
         whenNotPaused
+        nonReentrant
         returns (uint256)
     {
         _applyPermit(address(polToken), _amount, _user, _deadline, _v, _r, _s);
@@ -440,7 +440,7 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     /// @param _amount Amount of POL to stake
     /// @param _validator Target validator ID for the deposit
     /// @return Amount of sPOL minted to caller
-    function buySPOL(uint256 _amount, uint16 _validator) public whenNotPaused returns (uint256) {
+    function buySPOL(uint256 _amount, uint16 _validator) external whenNotPaused nonReentrant returns (uint256) {
         return _buySPOLSingle(_amount, _validator, msg.sender);
     }
 
@@ -462,7 +462,7 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         uint8 _v,
         bytes32 _r,
         bytes32 _s
-    ) public whenNotPaused returns (uint256) {
+    ) external whenNotPaused nonReentrant returns (uint256) {
         _applyPermit(address(polToken), _amount, _user, _deadline, _v, _r, _s);
         return _buySPOLSingle(_amount, _validator, _user);
     }
@@ -473,7 +473,12 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     /// @param _amount Amount of delegated POL to convert
     /// @param _validatorOfDPOL Validator ID where the dPOL is currently staked
     /// @return Amount of sPOL minted to caller
-    function buySPOLWithDPOL(uint256 _amount, uint16 _validatorOfDPOL) external whenNotPaused returns (uint256) {
+    function buySPOLWithDPOL(uint256 _amount, uint16 _validatorOfDPOL)
+        external
+        whenNotPaused
+        nonReentrant
+        returns (uint256)
+    {
         return _buySPOLWithDPOLMulti(_amount, _validatorOfDPOL, msg.sender);
     }
 
@@ -495,7 +500,7 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         uint8 _v,
         bytes32 _r,
         bytes32 _s
-    ) external whenNotPaused returns (uint256) {
+    ) external whenNotPaused nonReentrant returns (uint256) {
         _applyPermit(stakeManager.getValidatorContract(_validatorOfDPOL), _amount, _user, _deadline, _v, _r, _s);
         return _buySPOLWithDPOLMulti(_amount, _validatorOfDPOL, _user);
     }
@@ -588,7 +593,7 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     /// @dev Creates withdrawal nonces subject to StakeManager's unbonding period. Call withdrawPOL after unbonding.
     /// @param _amount Amount of sPOL to burn
     /// @return nonces Array of withdrawal nonces for tracking unbonding progress
-    function sellSPOL(uint256 _amount) external whenNotPaused returns (uint256[] memory) {
+    function sellSPOL(uint256 _amount) external whenNotPaused nonReentrant returns (uint256[] memory) {
         return _sellSPOLMulti(_amount, msg.sender);
     }
 
@@ -604,6 +609,7 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     function sellSPOLPermit(uint256 _amount, address _user, uint256 _deadline, uint8 _v, bytes32 _r, bytes32 _s)
         external
         whenNotPaused
+        nonReentrant
         returns (uint256[] memory)
     {
         _applyPermit(address(sPOLToken), _amount, _user, _deadline, _v, _r, _s);
@@ -623,7 +629,7 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     /// @param _amount Amount of sPOL to burn
     /// @param _validator Target validator ID to redeem from
     /// @return nonce Withdrawal nonce for tracking unbonding progress
-    function sellSPOL(uint256 _amount, uint16 _validator) external whenNotPaused returns (uint256) {
+    function sellSPOL(uint256 _amount, uint16 _validator) external whenNotPaused nonReentrant returns (uint256) {
         return _sellSPOLSingle(_amount, _validator, msg.sender);
     }
 
@@ -645,7 +651,7 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         uint8 _v,
         bytes32 _r,
         bytes32 _s
-    ) external whenNotPaused returns (uint256) {
+    ) external whenNotPaused nonReentrant returns (uint256) {
         _applyPermit(address(sPOLToken), _amount, _user, _deadline, _v, _r, _s);
         return _sellSPOLSingle(_amount, _validator, _user);
     }
@@ -728,14 +734,14 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
 
     /// @notice Claims all matured POL withdrawals for the caller
     /// @dev Processes all ready nonces in FIFO order. Reverts if no withdrawals are ready.
-    function withdrawPOL() external whenNotPaused {
+    function withdrawPOL() external whenNotPaused nonReentrant {
         _withdrawPOL(msg.sender);
     }
 
     /// @notice Claims all matured POL withdrawals on behalf of another user
     /// @dev Anyone can call to process withdrawals for a user. POL sent to the user, not caller.
     /// @param _user Address to claim withdrawals for
-    function withdrawPOL(address _user) external whenNotPaused {
+    function withdrawPOL(address _user) external whenNotPaused nonReentrant {
         _withdrawPOL(_user);
     }
 

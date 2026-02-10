@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: SEE LICENSE IN LICENSE
 pragma solidity 0.8.30;
 
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {PolBridger} from "./polBridger.sol";
 
 import {BaseChildTunnel} from "./msg/BaseChildTunnel.sol";
@@ -200,7 +199,7 @@ contract sPOLChild is
     /// @dev Requires exact POL amount as msg.value. Reverts if exchange rate is stale.
     ///      sPOL minted locally and later synced to L1 via migration.
     /// @param _polAmount Amount of native POL to stake (must equal msg.value)
-    function buySPOL(uint256 _polAmount) external payable whenNotPaused {
+    function buySPOL(uint256 _polAmount) external payable whenNotPaused nonReentrant {
         require(
             lastExchangeRateUpdate + maxExchangeRateUpdateDelay >= block.timestamp,
             ExchangeRateUpdateTooOld(lastExchangeRateUpdate, maxExchangeRateUpdateDelay, block.timestamp)
@@ -218,7 +217,7 @@ contract sPOLChild is
     /// @dev Creates a withdrawal nonce tied to the next backfill cycle. POL is claimable after backfill completes.
     ///      Reverts if exchange rate is stale.
     /// @param _sPOLAmount Amount of sPOL to burn
-    function sellSPOL(uint256 _sPOLAmount) external whenNotPaused {
+    function sellSPOL(uint256 _sPOLAmount) external whenNotPaused nonReentrant {
         require(
             lastExchangeRateUpdate + maxExchangeRateUpdateDelay >= block.timestamp,
             ExchangeRateUpdateTooOld(lastExchangeRateUpdate, maxExchangeRateUpdateDelay, block.timestamp)
@@ -435,7 +434,7 @@ contract sPOLChild is
     }
 
     function _requestBackfill(uint256 _polToBackfill, uint256 _spolToSell) internal {
-        requestedWithdrawPOLBalance += missingWithdrawPOLBalance;
+        requestedWithdrawPOLBalance += _polToBackfill;
 
         _burnSPOLForMessenger(_spolToSell);
         _sendMessageToRoot(
