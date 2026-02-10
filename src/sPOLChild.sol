@@ -110,6 +110,7 @@ contract sPOLChild is
     event BackfillRequested(uint256 backfillPOLAmount, uint256 toBeBurnedSPOL, uint256 backfillCycle);
     event BackfillStarted(uint256 backfillPOLAmount, uint256 backfillCycle);
     event BalancedOnlyLocally();
+    event BalancingAlreadyOngoing();
     event MigrationCompleted(uint256 backMigratingSPOL);
     event MigrationRequested(uint256 migratingPOLAmount, uint256 bridgeMissingSPOL);
 
@@ -332,6 +333,10 @@ contract sPOLChild is
         (uint256 updatedl1SPOLBalance, uint256 updatedl1DPOLBalance) = _decodeExchangeUpdateMessage(_msg);
         if (updatedl1DPOLBalance * l1SPOLBalance < l1DPOLBalance * updatedl1SPOLBalance) {
             emit ExchangeRateDeclined(l1SPOLBalance, l1DPOLBalance, updatedl1SPOLBalance, updatedl1DPOLBalance);
+            return;
+        }
+        if (onGoingMigration || onGoingBackfill) {
+            emit BalancingAlreadyOngoing();
             return;
         }
         _balanceWithL1();

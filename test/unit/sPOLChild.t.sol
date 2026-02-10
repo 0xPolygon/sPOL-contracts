@@ -140,7 +140,7 @@ contract sPOLChildTest is Test, Deploy {
 
     function test_exchangeRateUpdate_DecliningRateDoesNotRefreshTimestamp() public {
         _defaultUnpause();
-        
+
         // Set a real rate first
         _sendExchangeRateUpdate(1000e18, 1100e18);
         uint256 updatedTimestamp = sPOLChildToken.lastExchangeRateUpdate();
@@ -151,6 +151,35 @@ contract sPOLChildTest is Test, Deploy {
         // Send a declining rate — should be ignored, timestamp should NOT refresh
         _sendExchangeRateUpdate(1000e18, 1050e18);
         assertEq(sPOLChildToken.lastExchangeRateUpdate(), updatedTimestamp, "Timestamp should not refresh on decline");
+    }
+
+    function test_exchangeRateUpdate_EmitsWhenBalancingOngoing() public {
+        _defaultUnpause();
+
+        // Buy sPOL to create surplus for migration
+        address buyer = makeAddr("buyer");
+        vm.deal(buyer, 10e18);
+        vm.prank(buyer);
+        sPOLChildToken.buySPOL{value: 10e18}(10e18);
+
+        // Trigger migration via balanceWithL1
+        vm.mockCall(
+            address(sPOLChildToken.bridgeHelper()),
+            abi.encodeWithSelector(sPOLChildToken.bridgeHelper().bridgePOLToL1.selector),
+            abi.encode(true)
+        );
+        vm.prank(admin);
+        sPOLChildToken.balanceWithL1();
+        assertTrue(sPOLChildToken.onGoingMigration(), "Migration should be ongoing");
+
+        // Exchange rate update should emit BalancingAlreadyOngoing and not modify state
+        vm.record();
+        vm.prank(stateSyncerL2);
+        vm.expectEmit(true, true, true, true, address(sPOLChildToken));
+        emit sPOLChild.BalancingAlreadyOngoing();
+        sPOLChildToken.onStateReceive(0, abi.encode(MsgCoder.MsgType.EXCHANGE_UPDATE, abi.encode(1e18, 1e18)));
+        (, bytes32[] memory writes) = vm.accesses(address(sPOLChildToken));
+        assertEq(writes.length, 0, "Should not modify storage");
     }
 
     function test_exchangeRateUpdate_OnlyStateSyncerCanUpdate() public {
