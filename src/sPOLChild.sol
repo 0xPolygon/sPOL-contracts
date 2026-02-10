@@ -100,6 +100,7 @@ contract sPOLChild is
     event ExchangeRateUpdated(
         uint256 oldSPOLBalance, uint256 oldDPOLBalance, uint256 newSPOLBalance, uint256 newDPOLBalance
     );
+    event InvalidMessageType();
     event SafetyFeeChanged(uint16 oldFee, uint16 newFee);
     event MaxExchangeRateDelayChanged(uint256 oldDelay, uint256 newDelay);
 
@@ -117,7 +118,6 @@ contract sPOLChild is
     error ExchangeRateUpdateTooOld(uint256 lastUpdate, uint256 maxAge, uint256 currentTime);
     error FeeTooHigh(uint16 provided, uint16 maxAllowed);
     error IncorrectPOLAmount(uint256 sent, uint256 expected);
-    error InvalidMessageType();
     error MigrationAlreadyOngoing();
     error NothingToBackfill();
     error NothingToBalance();
@@ -320,14 +320,11 @@ contract sPOLChild is
         (MsgType msgType, bytes memory actualMessage) = abi.decode(message, (MsgType, bytes));
         if (msgType == MsgType.EXCHANGE_UPDATE) {
             _handleExchangeRateUpdate(actualMessage);
-        } else if (msgType == MsgType.L1_MIGRATION_RESPONSE) {
-            revert InvalidMessageType();
-            //handleMigrationResponse(actualMessage);
         } else if (msgType == MsgType.L1_BACKFILL_RESPONSE) {
             _handleBackfillResponse(actualMessage);
         } else {
-            // maybe don't revert here to avoid failedStateSync issues
-            revert InvalidMessageType();
+            emit InvalidMessageType();
+            return;
         }
     }
 

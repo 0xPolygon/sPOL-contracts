@@ -967,19 +967,19 @@ contract sPOLChildTest is Test, Deploy {
         sPOLChildToken.sellSPOL(sPOLBalance);
     }
 
-    function test_onStateReceive_revertsOnInvalidMessageType() public {
-        // MsgType enum values: EXCHANGE_UPDATE=0, L2_MIGRATION_REQUEST=1, L2_BACKFILL_REQUEST=2,
-        // L1_MIGRATION_RESPONSE=3, L1_BACKFILL_RESPONSE=4
-        // Test with L1_MIGRATION_RESPONSE which should revert
+    function test_onStateReceive_emitsOnInvalidMessageType() public {
         bytes memory invalidMessage = abi.encode(MsgCoder.MsgType.L1_MIGRATION_RESPONSE, abi.encode(100e18));
 
+        vm.record();
         vm.prank(stateSyncerL2);
-        vm.expectRevert(sPOLChild.InvalidMessageType.selector);
+        vm.expectEmit(true, true, true, true, address(sPOLChildToken));
+        emit sPOLChild.InvalidMessageType();
         sPOLChildToken.onStateReceive(0, invalidMessage);
+        (, bytes32[] memory writes) = vm.accesses(address(sPOLChildToken));
+        assertEq(writes.length, 0, "Invalid message should not modify storage");
     }
 
-    function test_onStateReceive_revertsOnUnknownMessageType() public {
-        // Test with an out-of-range message type by encoding a raw uint
+    function test_onStateReceive_revertsOnOutOfBoundsMessageType() public {
         bytes memory invalidMessage = abi.encode(uint8(99), abi.encode(100e18));
 
         vm.prank(stateSyncerL2);
