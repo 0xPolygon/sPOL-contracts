@@ -50,6 +50,7 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     uint16[] public activeValidators;
 
     // in percentage points
+    uint8 public constant MAX_DIVERGENCE = 100;
     uint8 public maxDivergence;
 
     // Total dPOL balance managed by the controller, including outstanding fees
@@ -109,6 +110,7 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     error DPOLRestakeTransferFromFailed();
     error FeeTooLarge(uint16 provided, uint16 maxAllowed);
     error IncorrectValidatorShareExchangeRate(uint256 expected, uint256 actual);
+    error MaxDivergenceTooLarge(uint8 provided, uint8 maxAllowed);
     error InvalidPermit();
     error NoOpenNonces(address user);
     error NoNoncesReady(address user);
@@ -159,6 +161,7 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         initializer
     {
         require(_rewardFee <= MAX_FEE, FeeTooLarge(_rewardFee, MAX_FEE));
+        require(_maxDivergence <= MAX_DIVERGENCE, MaxDivergenceTooLarge(_maxDivergence, MAX_DIVERGENCE));
         require(_feeReceiver != address(0), ZeroAddress());
         require(_authority != address(0), ZeroAddress());
 
@@ -1040,6 +1043,7 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     /// @dev Higher values allow more flexibility but reduce rebalancing pressure. Affects deposit/redeem limits.
     /// @param _newDivergence New max divergence in percentage points
     function changeMaxDivergence(uint8 _newDivergence) external restricted {
+        require(_newDivergence <= MAX_DIVERGENCE, MaxDivergenceTooLarge(_newDivergence, MAX_DIVERGENCE));
         uint8 oldDivergence = maxDivergence;
         maxDivergence = _newDivergence;
         emit MaxDivergenceChanged(oldDivergence, maxDivergence);
