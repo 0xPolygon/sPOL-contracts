@@ -954,14 +954,14 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     }
 
     function _takeFee() internal {
-        if (feedPOLBalance == 0) {
+        uint256 currentFeedPOLBalance = feedPOLBalance;
+        if (currentFeedPOLBalance == 0) {
             return;
         }
-        uint256 feeInsPOL = convertPOLtoSPOL(feedPOLBalance);
-        uint256 feePOLAmount = feedPOLBalance;
+        uint256 feeInsPOL = convertPOLtoSPOL(currentFeedPOLBalance);
         feedPOLBalance = 0;
         sPOLToken.mint(feeReceiver, feeInsPOL);
-        emit FeeCollected(feeReceiver, feePOLAmount, feeInsPOL);
+        emit FeeCollected(feeReceiver, currentFeedPOLBalance, feeInsPOL);
         _emitExchangeRateUpdate();
     }
 

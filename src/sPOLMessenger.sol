@@ -144,13 +144,15 @@ contract sPOLMessenger is Initializable, AccessManagedUpgradeable, ReentrancyGua
     /// @dev Must be called after StakeManager's unbonding period. Attempts to withdraw from sPOLController,
     ///      then bridges the POL to L2 and notifies sPOLChild via state sync message.
     function completeBackfill() external restricted nonReentrant {
-        require(currentActiveBackfillCycle != 0, BackfillNotActive(0));
-        require(!completedBackfill[currentActiveBackfillCycle], BackfillAlreadyCompleted(currentActiveBackfillCycle));
-        require(backfillAmounts[currentActiveBackfillCycle] > 0, BackfillNotActive(currentActiveBackfillCycle));
+        uint256 processingBackfillCycle = currentActiveBackfillCycle;
+        uint256 totalRequested = backfillAmounts[processingBackfillCycle];
+
+        require(processingBackfillCycle != 0, BackfillNotActive(0));
+        require(!completedBackfill[processingBackfillCycle], BackfillAlreadyCompleted(processingBackfillCycle));
+        require(totalRequested > 0, BackfillNotActive(processingBackfillCycle));
 
         try sPOLController.withdrawPOL() {} catch {}
 
-        uint256 totalRequested = backfillAmounts[currentActiveBackfillCycle];
         uint256 polBalance = polToken.balanceOf(address(this));
         require(polBalance >= totalRequested, NotEnoughPOLInMessenger(totalRequested, polBalance));
         // send surplus POL to controller, to be cleaned up later
@@ -158,12 +160,11 @@ contract sPOLMessenger is Initializable, AccessManagedUpgradeable, ReentrancyGua
         depositManager.depositERC20ForUser(address(polToken), childTunnel, totalRequested);
         _sendMessageToChild(
             abi.encode(
-                MsgType.L1_BACKFILL_RESPONSE,
-                _encodeL1BackfillResponseMessage(totalRequested, currentActiveBackfillCycle)
+                MsgType.L1_BACKFILL_RESPONSE, _encodeL1BackfillResponseMessage(totalRequested, processingBackfillCycle)
             )
         );
-        completedBackfill[currentActiveBackfillCycle] = true;
-        emit BackfillCompleted(currentActiveBackfillCycle, totalRequested);
+        completedBackfill[processingBackfillCycle] = true;
+        emit BackfillCompleted(processingBackfillCycle, totalRequested);
         currentActiveBackfillCycle = 0;
     }
 

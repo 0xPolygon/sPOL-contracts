@@ -230,9 +230,10 @@ contract sPOLChild is
 
         UserOutstanding memory userOutstanding =
             UserOutstanding({outstandingPOL: polToReturn, backFillCycle: backFillCycle + 1});
-        userOutstandingWithdraw[++globalWithdrawNonce] = userOutstanding;
-        userOutstandingNonces[msg.sender].pushBack(bytes32(globalWithdrawNonce));
-        emit sPOLBurned(msg.sender, _sPOLAmount, polToReturn, globalWithdrawNonce);
+        uint256 currentNonce = ++globalWithdrawNonce;
+        userOutstandingWithdraw[currentNonce] = userOutstanding;
+        userOutstandingNonces[msg.sender].pushBack(bytes32(currentNonce));
+        emit sPOLBurned(msg.sender, _sPOLAmount, polToReturn, currentNonce);
     }
 
     /// @notice Returns all pending withdrawal nonces for a user on L2
