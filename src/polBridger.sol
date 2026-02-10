@@ -2,6 +2,7 @@
 pragma solidity 0.8.30;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {MRC20 as IMRC20} from "./interfaces/IMRC20.sol";
 import {ERC20PredicateBurnOnly as IERC20PredicateBurnOnly} from "./interfaces/IERC20Predicate.sol";
 import {WithdrawManager as IWithdrawManager} from "./interfaces/IWithdrawManager.sol";
@@ -101,7 +102,15 @@ contract PolBridger is AccessManaged, Pausable, ReentrancyGuardTransient {
     /// @param _to Recipient address for rescued tokens
     /// @param _amount Amount of tokens to transfer
     function rescue(address _token, address _to, uint256 _amount) external restricted {
-        IERC20(_token).transfer(_to, _amount);
+        SafeERC20.safeTransfer(IERC20(_token), _to, _amount);
+    }
+
+    /// @notice Recovers native POL/ETH accidentally sent to the bridger on L2/L1
+    /// @param _to Recipient address for rescued native POL/ETH
+    /// @param _amount Amount of native POL/ETH to transfer
+    function rescueNative(address _to, uint256 _amount) external restricted {
+        (bool success,) = payable(_to).call{value: _amount}("");
+        require(success, "Native transfer failed");
     }
 
     /// @notice Pauses all bridge operations
