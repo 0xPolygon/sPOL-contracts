@@ -109,7 +109,8 @@ contract sPOLMessenger is Initializable, AccessManagedUpgradeable, ReentrancyGua
         uint256 polBalance = polToken.balanceOf(address(this));
         require(polBalance >= _polAmount, NotEnoughPOLInMessenger(_polAmount, polBalance));
 
-        uint256 requiredPOL = sPOLController.convertSPOLtoPOL(_mintedSPOL);
+        // +1 to compensate for rounding loss in the sPOL->POL->sPOL round-trip,
+        uint256 requiredPOL = sPOLController.convertSPOLtoPOL(_mintedSPOL) + 1;
         sPOLController.buySPOL(requiredPOL);
         // send surplus POL to controller, to be cleaned up later
         polToken.transfer(address(sPOLController), polBalance - requiredPOL);
