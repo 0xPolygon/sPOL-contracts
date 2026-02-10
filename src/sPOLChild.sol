@@ -47,7 +47,7 @@ contract sPOLChild is
 
     // local info
     uint256 public polBalance;
-    // These three together should always be equal to the sum of outstanding POL in userOutstandingPOL
+    // These three together should always be equal to the sum of outstanding POL in userOutstandingWithdraw
     uint256 public missingWithdrawPOLBalance;
     uint256 public reservedWithdrawPOLBalance;
     uint256 public requestedWithdrawPOLBalance;
@@ -120,9 +120,6 @@ contract sPOLChild is
     error FeeTooHigh(uint16 provided, uint16 maxAllowed);
     error IncorrectPOLAmount(uint256 sent, uint256 expected);
     error MigrationAlreadyOngoing();
-    error NothingToBackfill();
-    error NothingToBalance();
-    error NothingToMigrate();
     error POLAmountMustBeGreaterThanZero();
     error POLTransferFailed();
     error ZeroAddress();
@@ -461,6 +458,9 @@ contract sPOLChild is
 
     /// @notice Updates the safety fee applied to L2 buys
     /// @dev Fee in basis points (30 = 0.3%). Protects against exchange rate lag arbitrage. Max 1%.
+    ///      WARNING: Setting fee to 0 removes arbitrage protection entirely. The fee must be large
+    ///      enough to cover the expected L1 exchange rate appreciation during maxExchangeRateUpdateDelay.
+    ///      Must be re-evaluated if L1 StakeManager reward parameters change.
     /// @param _newFee New safety fee (max MAX_SAFETY_FEE = 100 = 1%)
     function changeSafetyFee(uint16 _newFee) external restricted {
         require(_newFee <= MAX_SAFETY_FEE, FeeTooHigh(_newFee, MAX_SAFETY_FEE));

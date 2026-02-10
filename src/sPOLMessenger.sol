@@ -111,7 +111,7 @@ contract sPOLMessenger is Initializable, AccessManagedUpgradeable, ReentrancyGua
 
         uint256 requiredPOL = sPOLController.convertSPOLtoPOL(_mintedSPOL);
         sPOLController.buySPOL(requiredPOL);
-        // send surplus POL to controller, to be cleanUp later
+        // send surplus POL to controller, to be cleaned up later
         polToken.transfer(address(sPOLController), polBalance - requiredPOL);
         require(
             sPOLToken.balanceOf(address(this)) >= _mintedSPOL,
@@ -152,7 +152,7 @@ contract sPOLMessenger is Initializable, AccessManagedUpgradeable, ReentrancyGua
         uint256 totalRequested = backfillAmounts[currentActiveBackfillCycle];
         uint256 polBalance = polToken.balanceOf(address(this));
         require(polBalance >= totalRequested, NotEnoughPOLInMessenger(totalRequested, polBalance));
-        // send surplus POL to controller, to be cleanUp later
+        // send surplus POL to controller, to be cleaned up later
         polToken.transfer(address(sPOLController), polBalance - totalRequested);
         depositManager.depositERC20ForUser(address(polToken), childTunnel, totalRequested);
         _sendMessageToChild(

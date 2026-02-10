@@ -102,7 +102,6 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     event MaticTokensCleaned(uint256 maticAmount);
     event POLTokensCleaned(uint16 validatorId, uint256 polAmount);
 
-    error AmountTooLarge(uint256 amount, uint256 maxAmount);
     error AmountZero();
     error ArrayLengthMismatch(uint256 validatorLength, uint256 shareLength);
     error BuySharesMismatch(uint256 expected, uint256 actual);
@@ -111,7 +110,6 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     error FeeTooLarge(uint16 provided, uint16 maxAllowed);
     error IncorrectValidatorShareExchangeRate(uint256 expected, uint256 actual);
     error InvalidPermit();
-    error NonceNotFound(address user, uint256 nonce);
     error NoOpenNonces(address user);
     error NoNoncesReady(address user);
     error NotEnoughStake(uint256 remaining);
@@ -310,8 +308,9 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     }
 
     /// @notice Moves stake between validators using StakeManager's migration mechanism
-    /// @dev Both validators must be active. Optionally restakes rewards before migration to ensure
-    ///      accurate stake tracking. Restake only active validators.
+    /// @dev When _restake=true, both validators must be active. When _restake=false, no status checks
+    ///      are enforced — this is intentional to allow recovery migrations (e.g. from frozen/deactivated
+    ///      validators), but the caller must ensure correctness to avoid breaking accounting.
     /// @param _oldValidator Source validator ID to move stake from
     /// @param _newValidator Destination validator ID to receive stake
     /// @param _amount Amount of POL to migrate between validators
@@ -814,11 +813,11 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
 
         uint256 theOtherShare = totaldPOLBalance - _validator.totalStaked;
         uint8 restShare = 100 - mySmallShare;
-        uint256 myactualMinSahre = (theOtherShare * mySmallShare) / restShare;
-        if (myactualMinSahre >= _validator.totalStaked) {
+        uint256 myactualMinShare = (theOtherShare * mySmallShare) / restShare;
+        if (myactualMinShare >= _validator.totalStaked) {
             return 0;
         }
-        return _validator.totalStaked - myactualMinSahre;
+        return _validator.totalStaked - myactualMinShare;
     }
 
     // positive to check how much can be added, negative to check how much can be removed
