@@ -105,12 +105,18 @@ contract sPOLMessenger is Initializable, AccessManagedUpgradeable, ReentrancyGua
     function _handleMigration(bytes memory _msg) internal {
         (uint256 _polAmount, uint256 _mintedSPOL) = _decodeL2MigrationRequestMessage(_msg);
         polBridger.takePOLL1(_polAmount);
+        uint256 polBalance = polToken.balanceOf(address(this));
+        require(polBalance >= _polAmount, NotEnoughPOLInMessenger(_polAmount, polBalance));
+
+        uint256 requiredPOL = sPOLController.convertSPOLtoPOL(_mintedSPOL);
+        sPOLController.buySPOL(requiredPOL);
+        // send surplus POL to controller, to be cleanUp later
+        polToken.transfer(address(sPOLController), polBalance - requiredPOL);
         require(
-            polToken.balanceOf(address(this)) >= _polAmount,
-            NotEnoughPOLInMessenger(_polAmount, polToken.balanceOf(address(this)))
+            sPOLToken.balanceOf(address(this)) >= _mintedSPOL,
+            NotEnoughSPOLInMessenger(_mintedSPOL, sPOLToken.balanceOf(address(this)))
         );
 
-        sPOLController.completeMigration(_polAmount, _mintedSPOL);
         rootChainManager.depositFor(childTunnel, address(sPOLToken), abi.encodePacked(_mintedSPOL));
         // disabled for portal because of cyclical exit issue, should be activated for lxly
         //_sendMessageToChild(abi.encode(MsgType.L1_MIGRATION_RESPONSE, encodeL1MigrationResponseMessage(_mintedSPOL)));
@@ -119,15 +125,14 @@ contract sPOLMessenger is Initializable, AccessManagedUpgradeable, ReentrancyGua
 
     function _handleBackfill(bytes memory _msg) internal {
         (uint256 _polAmount, uint256 _sPOLAmount, uint256 _backFillCycle) = _decodeL2BackfillRequestMessage(_msg);
+        uint256 sPOLBalance = sPOLToken.balanceOf(address(this));
 
         require(currentActiveBackfillCycle == 0, BackfillAlreadyOngoing(currentActiveBackfillCycle));
         require(!completedBackfill[_backFillCycle], BackfillAlreadyCompleted(_backFillCycle));
         require(backfillAmounts[_backFillCycle] == 0, BackfillAlreadyOngoing(_backFillCycle));
-        require(
-            sPOLToken.balanceOf(address(this)) >= _sPOLAmount,
-            NotEnoughSPOLInMessenger(_sPOLAmount, sPOLToken.balanceOf(address(this)))
-        );
-        sPOLController.startBackfillSell(_polAmount, _sPOLAmount);
+        require(sPOLBalance >= _sPOLAmount, NotEnoughSPOLInMessenger(_sPOLAmount, sPOLBalance));
+
+        sPOLController.sellSPOL(sPOLBalance);
         backfillAmounts[_backFillCycle] = _polAmount;
         currentActiveBackfillCycle = _backFillCycle;
         emit BackfillStarted(_backFillCycle, _polAmount, _sPOLAmount);
@@ -143,20 +148,20 @@ contract sPOLMessenger is Initializable, AccessManagedUpgradeable, ReentrancyGua
 
         try sPOLController.withdrawPOL() {} catch {}
 
-        uint256 totalWithdraw = backfillAmounts[currentActiveBackfillCycle];
-        require(
-            polToken.balanceOf(address(this)) >= totalWithdraw,
-            NotEnoughPOLInMessenger(totalWithdraw, polToken.balanceOf(address(this)))
-        );
-        depositManager.depositERC20ForUser(address(polToken), childTunnel, totalWithdraw);
+        uint256 totalRequested = backfillAmounts[currentActiveBackfillCycle];
+        uint256 polBalance = polToken.balanceOf(address(this));
+        require(polBalance >= totalRequested, NotEnoughPOLInMessenger(totalRequested, polBalance));
+        // send surplus POL to controller, to be cleanUp later
+        polToken.transfer(address(sPOLController), polBalance - totalRequested);
+        depositManager.depositERC20ForUser(address(polToken), childTunnel, totalRequested);
         _sendMessageToChild(
             abi.encode(
                 MsgType.L1_BACKFILL_RESPONSE,
-                _encodeL1BackfillResponseMessage(totalWithdraw, currentActiveBackfillCycle)
+                _encodeL1BackfillResponseMessage(totalRequested, currentActiveBackfillCycle)
             )
         );
         completedBackfill[currentActiveBackfillCycle] = true;
-        emit BackfillCompleted(currentActiveBackfillCycle, totalWithdraw);
+        emit BackfillCompleted(currentActiveBackfillCycle, totalRequested);
         currentActiveBackfillCycle = 0;
     }
 

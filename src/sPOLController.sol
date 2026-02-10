@@ -17,7 +17,7 @@ import {DoubleEndedQueue} from "@openzeppelin/contracts/utils/structs/DoubleEnde
 
 /// @title sPOL Controller
 /// @notice L1 controller for the sPOL liquid staking token of POL
-/// @dev Manages validator delegations, POL/sPOL conversions, and coordinates with L2 via sPOLMessenger.
+/// @dev Manages validator delegations, POL/sPOL conversions, and coordinates with L2 via sPOLMessenger on L1.
 ///      Handles staking rewards, fee collection, and the unbonding process for redemptions.
 contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgradeable, ReentrancyGuardTransient {
     using DoubleEndedQueue for DoubleEndedQueue.Bytes32Deque;
@@ -43,7 +43,6 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     IPolygonMigration public immutable polygonMigration;
     IStakeManager public immutable stakeManager;
     sPOL public immutable sPOLToken;
-    address public immutable sPOLMessenger;
 
     // Validator management
     mapping(uint16 => ValidatorInfo) public validators;
@@ -93,9 +92,6 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     event sPOLBurned(address user, uint256 amountSPOL, uint256 amountPOL, uint256 nonce);
     event POLWithdrawn(address user, uint256 amountPOL, uint256 nonce);
     event ExchangeRateSnapshot(uint256 totalsPOLSupply, uint256 totalbPOLBalance);
-    // L2 message events
-    event sPOLMigrated(address user, uint256 amountPOL, uint256 amountSPOL);
-    event sPOLBackfilled(address user, uint256 amountSPOL, uint256 amountPOL);
     // Fee management events
     event FeeCollected(address feeReceiver, uint256 feePOLAmount, uint256 feesPOLAmount);
     event FeeReceiverChanged(address oldReceiver, address newReceiver);
@@ -106,11 +102,9 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     event MaticTokensCleaned(uint256 maticAmount);
     event POLTokensCleaned(uint16 validatorId, uint256 polAmount);
 
-    error AddressUnauthorized(address caller);
     error AmountTooLarge(uint256 amount, uint256 maxAmount);
     error AmountZero();
     error ArrayLengthMismatch(uint256 validatorLength, uint256 shareLength);
-    error BadExchangeRate(uint256 polProvided, uint256 sPOLProvided, uint256 polCurrent, uint256 sPOLCurrent);
     error BuySharesMismatch(uint256 expected, uint256 actual);
     error DepositSharesTotalNotOneHundred(uint8 totalPercent);
     error DPOLRestakeTransferFromFailed();
@@ -139,22 +133,19 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         address _maticToken,
         address _polygonMigration,
         address _sPOLToken,
-        address _stakeManager,
-        address _sPOLMessenger
+        address _stakeManager
     ) {
         require(_polToken != address(0), ZeroAddress());
         require(_maticToken != address(0), ZeroAddress());
         require(_polygonMigration != address(0), ZeroAddress());
         require(_sPOLToken != address(0), ZeroAddress());
         require(_stakeManager != address(0), ZeroAddress());
-        require(_sPOLMessenger != address(0), ZeroAddress());
 
         polToken = ERC20Permit(_polToken);
         maticToken = ERC20(_maticToken);
         polygonMigration = IPolygonMigration(_polygonMigration);
         sPOLToken = sPOL(_sPOLToken);
         stakeManager = IStakeManager(_stakeManager);
-        sPOLMessenger = _sPOLMessenger;
 
         _disableInitializers();
     }
@@ -963,67 +954,6 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         feedPOLBalance = 0;
         sPOLToken.mint(feeReceiver, feeInsPOL);
         emit FeeCollected(feeReceiver, feePOLAmount, feeInsPOL);
-        _emitExchangeRateUpdate();
-    }
-
-    ////////////////////////////////
-    ///  L2 interaction          ///
-    ////////////////////////////////
-
-    /// @notice Processes POL migration from L2, staking and minting corresponding sPOL
-    /// @dev Only callable by sPOLMessenger. Validates that exchange rate hasn't moved unfavorably.
-    ///      Reverts with BadExchangeRate if L1 rate increased significantly since L2 calculation.
-    /// @param _amountPOL Amount of POL being migrated from L2
-    /// @param _amountSPOL Amount of sPOL to mint (calculated on L2 at time of migration request)
-    function completeMigration(uint256 _amountPOL, uint256 _amountSPOL) external nonReentrant {
-        require(msg.sender == sPOLMessenger, AddressUnauthorized(msg.sender));
-        uint256 expectedSPOL = convertPOLtoSPOL(_amountPOL);
-        require(
-            expectedSPOL >= _amountSPOL,
-            BadExchangeRate(_amountPOL, _amountSPOL, totaldPOLBalance - feedPOLBalance, totalsPOLBalance())
-        );
-        _takePOL(_amountPOL, msg.sender);
-
-        (uint16[] memory validator, uint256[] memory amount) = _selectValidators(_amountPOL, true);
-        uint256 totalShares;
-        for (uint256 i = 0; i < amount.length; i++) {
-            if (amount[i] == 0) {
-                continue;
-            }
-            totalShares += _buySharesFromValidator(validators[validator[i]], amount[i]);
-        }
-        require(totalShares == _amountPOL, BuySharesMismatch(_amountPOL, totalShares));
-        sPOLToken.mint(msg.sender, _amountSPOL);
-        emit sPOLMigrated(msg.sender, _amountPOL, _amountSPOL);
-        _emitExchangeRateUpdate();
-    }
-
-    /// @notice Processes L2 backfill request by burning sPOL and initiating POL withdrawal
-    /// @dev Only callable by sPOLMessenger. Validates exchange rate hasn't moved favorably for L2.
-    ///      Backfill covers L2 sell requests that couldn't be filled locally.
-    /// @param _amountPOL Amount of POL to return to L2 after unbonding
-    /// @param _amountSPOL Amount of sPOL being burned (bridged from L2)
-    function startBackfillSell(uint256 _amountPOL, uint256 _amountSPOL) external nonReentrant {
-        require(msg.sender == sPOLMessenger, AddressUnauthorized(msg.sender));
-        uint256 expectedSPOL = convertPOLtoSPOL(_amountPOL);
-        require(
-            _amountSPOL >= expectedSPOL,
-            BadExchangeRate(_amountPOL, _amountSPOL, totaldPOLBalance - feedPOLBalance, totalsPOLBalance())
-        );
-        _takeSPOL(_amountSPOL, msg.sender);
-
-        if (_amountPOL > 0) {
-            (uint16[] memory validator, uint256[] memory amount) = _selectValidators(_amountPOL, false);
-            for (uint256 i = 0; i < validator.length; i++) {
-                if (amount[i] == 0) {
-                    continue;
-                }
-                uint256 userNonce = _sellSharesFromValidator(validators[validator[i]], amount[i]);
-                _addUserWithdrawNonceDetails(msg.sender, validator[i], uint128(amount[i]), uint96(userNonce));
-            }
-        }
-
-        emit sPOLBackfilled(msg.sender, _amountSPOL, _amountPOL);
         _emitExchangeRateUpdate();
     }
 
