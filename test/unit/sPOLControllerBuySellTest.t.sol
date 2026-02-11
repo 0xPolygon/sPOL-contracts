@@ -91,9 +91,7 @@ contract sPOLControllerBuySellTest is Test, Deploy {
         controller.updateValidatorTargetShare(validators, depositShares);
         // Mock getLiquidRewards to return 0 so removeValidator succeeds
         vm.mockCall(
-            testValidatorShare1,
-            abi.encodeWithSelector(IValidatorShare.getLiquidRewards.selector),
-            abi.encode(0)
+            testValidatorShare1, abi.encodeWithSelector(IValidatorShare.getLiquidRewards.selector), abi.encode(0)
         );
         vm.prank(testAdmin);
         controller.removeValidator(VALIDATOR_1);

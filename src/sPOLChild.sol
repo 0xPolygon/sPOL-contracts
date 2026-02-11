@@ -353,9 +353,7 @@ contract sPOLChild is
 
     function _handleBackfillResponse(bytes memory _msg) internal {
         (uint256 returnedPOL, uint256 returnedBackFillCycle) = _decodeL1BackfillResponseMessage(_msg);
-        require(
-            returnedBackFillCycle == backFillCycle, BackfillCycleMismatch(backFillCycle, returnedBackFillCycle)
-        );
+        require(returnedBackFillCycle == backFillCycle, BackfillCycleMismatch(backFillCycle, returnedBackFillCycle));
         require(
             returnedPOL == requestedWithdrawPOLBalance, IncorrectPOLAmount(returnedPOL, requestedWithdrawPOLBalance)
         );
