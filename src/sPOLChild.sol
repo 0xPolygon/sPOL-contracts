@@ -88,9 +88,9 @@ contract sPOLChild is
     uint256 public globalWithdrawNonce;
 
     // Stake/unstake events
-    event sPOLMinted(address user, uint256 amountPOL, uint256 amountSPOL);
-    event sPOLBurned(address user, uint256 amountSPOL, uint256 amountPOL, uint256 nonce);
-    event POLWithdrawn(address user, uint256 amountPOL, uint256 nonce);
+    event sPOLMinted(address indexed user, uint256 amountPOL, uint256 amountSPOL);
+    event sPOLBurned(address indexed user, uint256 amountSPOL, uint256 amountPOL, uint256 nonce);
+    event POLWithdrawn(address indexed user, uint256 amountPOL, uint256 nonce);
 
     // Exchange rate and operational events
     event ExchangeRateDeclined(

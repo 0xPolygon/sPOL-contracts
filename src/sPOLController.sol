@@ -86,9 +86,9 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     event ValidatorTargetShareChanged(uint16 validatorId, uint8 newTargetShare);
     event ValidatorMigrated(uint16 oldValidator, uint16 newValidator, uint256 amount);
     // sPOL exchange events
-    event sPOLMinted(address user, uint256 amountPOL, uint256 amountSPOL);
-    event sPOLBurned(address user, uint256 amountSPOL, uint256 amountPOL, uint256 nonce);
-    event POLWithdrawn(address user, uint256 amountPOL, uint256 nonce);
+    event sPOLMinted(address indexed user, uint256 amountPOL, uint256 amountSPOL);
+    event sPOLBurned(address indexed user, uint256 amountSPOL, uint256 amountPOL, uint256 nonce);
+    event POLWithdrawn(address indexed user, uint256 amountPOL, uint256 nonce);
     event ExchangeRateSnapshot(uint256 totalsPOLSupply, uint256 totalbPOLBalance);
     // Fee management events
     event FeeCollected(address feeReceiver, uint256 feePOLAmount, uint256 feesPOLAmount);

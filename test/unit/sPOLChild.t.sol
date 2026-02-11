@@ -18,9 +18,9 @@ contract sPOLChildTest is Test, Deploy {
     uint256 constant INITIAL_L1_DPOL_BALANCE = 1;
 
     // Events from sPOLChild contract
-    event sPOLMinted(address user, uint256 amountPOL, uint256 amountSPOL);
-    event sPOLBurned(address user, uint256 amountSPOL, uint256 amountPOL, uint256 nonce);
-    event POLWithdrawn(address user, uint256 amountPOL, uint256 nonce);
+    event sPOLMinted(address indexed user, uint256 amountPOL, uint256 amountSPOL);
+    event sPOLBurned(address indexed user, uint256 amountSPOL, uint256 amountPOL, uint256 nonce);
+    event POLWithdrawn(address indexed user, uint256 amountPOL, uint256 nonce);
 
     function setUp() public {
         // Create test addresses
