@@ -115,6 +115,7 @@ contract sPOLChild is
 
     error AddressUnauthorized(address caller);
     error BackfillAlreadyOngoing();
+    error BackfillCycleMismatch(uint256 expected, uint256 received);
     error ExchangeRateUpdateTooOld(uint256 lastUpdate, uint256 maxAge, uint256 currentTime);
     error FeeTooHigh(uint16 provided, uint16 maxAllowed);
     error IncorrectPOLAmount(uint256 sent, uint256 expected);
@@ -265,8 +266,9 @@ contract sPOLChild is
             uint256 currentNonce = uint256(outstandingNonces.front());
             UserOutstanding storage currentOutstanding = userOutstandingWithdraw[currentNonce];
             if (completedBackfills[currentOutstanding.backFillCycle]) {
-                totalToWithdraw += currentOutstanding.outstandingPOL;
-                emit POLWithdrawn(msg.sender, currentOutstanding.outstandingPOL, currentNonce);
+                uint256 outstandingPOL = currentOutstanding.outstandingPOL;
+                totalToWithdraw += outstandingPOL;
+                emit POLWithdrawn(msg.sender, outstandingPOL, currentNonce);
                 delete userOutstandingWithdraw[currentNonce];
                 outstandingNonces.popFront();
             } else {
@@ -351,6 +353,9 @@ contract sPOLChild is
 
     function _handleBackfillResponse(bytes memory _msg) internal {
         (uint256 returnedPOL, uint256 returnedBackFillCycle) = _decodeL1BackfillResponseMessage(_msg);
+        require(
+            returnedBackFillCycle == backFillCycle, BackfillCycleMismatch(backFillCycle, returnedBackFillCycle)
+        );
         require(
             returnedPOL == requestedWithdrawPOLBalance, IncorrectPOLAmount(returnedPOL, requestedWithdrawPOLBalance)
         );
@@ -471,6 +476,8 @@ contract sPOLChild is
 
     /// @notice Updates how long the exchange rate remains valid without L1 updates
     /// @dev If exceeded, buy/sell operations pause automatically. Prevents exchange on stale rates.
+    ///      WARNING: Setting to 0 blocks all buys/sells. Setting too high allows trading on stale rates,
+    ///      which weakens the safety fee protection. Must be aligned with the service's update frequency.
     /// @param _newDelay New maximum age in seconds for the exchange rate
     function setMaxExchangeRateUpdateDelay(uint256 _newDelay) external restricted {
         uint256 oldDelay = maxExchangeRateUpdateDelay;
@@ -498,8 +505,9 @@ contract sPOLChild is
     /////////////////////////////////
 
     function _burnSPOLForMessenger(uint256 _sPOLAmount) internal {
-        _transfer(address(this), l1Messenger, _sPOLAmount);
-        _burn(l1Messenger, _sPOLAmount);
+        address messenger = l1Messenger;
+        _transfer(address(this), messenger, _sPOLAmount);
+        _burn(messenger, _sPOLAmount);
     }
 
     function _exitPOLforMessenger(uint256 _polAmount) internal {

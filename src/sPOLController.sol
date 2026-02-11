@@ -212,9 +212,10 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
             removedValidator.totalStaked == 0, ValidatorStillFunded(_removedValidator, removedValidator.totalStaked)
         );
         require(removedValidator.status == ValidatorStatus.ACTIVE, ValidatorNotActive(_removedValidator));
-        uint256 shares = removedValidator.validatorContract.balanceOf(address(this));
+        IValidatorShare validatorContract = removedValidator.validatorContract;
+        uint256 shares = validatorContract.balanceOf(address(this));
         require(shares == 0, ValidatorSharesPending(_removedValidator, shares));
-        uint256 rewards = removedValidator.validatorContract.getLiquidRewards(address(this));
+        uint256 rewards = validatorContract.getLiquidRewards(address(this));
         require(rewards == 0, ValidatorRewardsPending(_removedValidator, rewards));
 
         removedValidator.status = ValidatorStatus.DEACTIVATED;
@@ -223,9 +224,10 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     }
 
     function _removeFromActiveValidators(uint16 _validator) internal {
-        for (uint256 i = 0; i < activeValidators.length; i++) {
+        uint256 activeValidatorsLength = activeValidators.length;
+        for (uint256 i = 0; i < activeValidatorsLength; i++) {
             if (activeValidators[i] == _validator) {
-                activeValidators[i] = activeValidators[activeValidators.length - 1];
+                activeValidators[i] = activeValidators[activeValidatorsLength - 1];
                 activeValidators.pop();
                 break;
             }
@@ -251,7 +253,8 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
             emit ValidatorTargetShareChanged(_validatorID[i], _newTargetShare[i]);
         }
         uint8 totalPercent;
-        for (uint256 i = 0; i < activeValidators.length; i++) {
+        uint256 activeValidatorsLength = activeValidators.length;
+        for (uint256 i = 0; i < activeValidatorsLength; i++) {
             totalPercent += validators[activeValidators[i]].depositShare;
         }
         require(totalPercent == 100, DepositSharesTotalNotOneHundred(totalPercent));
@@ -267,7 +270,8 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     /// @notice Claims and restakes liquid rewards across all active validators
     /// @dev Gas-intensive operation that compounds rewards for the entire pool. Protocol fee taken on rewards.
     function restakeAllActiveValidators() external whenNotPaused nonReentrant {
-        for (uint256 i = 0; i < activeValidators.length; i++) {
+        uint256 activeValidatorsLength = activeValidators.length;
+        for (uint256 i = 0; i < activeValidatorsLength; i++) {
             _restakeValidator(activeValidators[i]);
         }
     }
@@ -309,11 +313,13 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     function reloadAllActiveValidatorInfo() external restricted {
         uint256 amountToReduce;
         uint256 amountToAdd;
-        for (uint256 i = 0; i < activeValidators.length; i++) {
+        uint256 activeValidatorsLength = activeValidators.length;
+        for (uint256 i = 0; i < activeValidatorsLength; i++) {
             ValidatorInfo storage validator = validators[activeValidators[i]];
             amountToReduce += validator.totalStaked;
-            validator.totalStaked = validator.validatorContract.balanceOf(address(this));
-            amountToAdd += validator.totalStaked;
+            uint256 newStaked = validator.validatorContract.balanceOf(address(this));
+            validator.totalStaked = newStaked;
+            amountToAdd += newStaked;
         }
         totaldPOLBalance = totaldPOLBalance - amountToReduce + amountToAdd;
         _emitExchangeRateUpdate();
@@ -321,7 +327,9 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
 
     /// @notice Resyncs stake tracking for a single validator with on-chain balance
     /// @dev Emergency function to fix accounting for one validator without affecting others.
-    ///      Only use if properly prepared
+    ///      WARNING: Reloading a deactivated or inactive validator adds its shares to totaldPOLBalance
+    ///      without a way to sell them, inflating the exchange rate. Only use on active validators
+    ///      unless you intend to migrate the shares afterward.
     /// @param _validator Validator ID to resync
     function reloadValidatorInfo(uint16 _validator) external restricted {
         ValidatorInfo storage validator = validators[_validator];
@@ -725,18 +733,18 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
 
         uint256 totalToWithdraw;
         while (!outstandingNonces.empty()) {
-            uint256 currentNonce = uint256(outstandingNonces.front());
-            NonceDetails storage currentDetails = withdrawNonceDetails[currentNonce];
-            ValidatorInfo storage validator = validators[currentDetails.validatorId];
-            (uint256 shares, uint256 withdrawEpoch) =
-                validator.validatorContract.unbonds_new(address(this), currentDetails.validatorNonce);
+            uint256 currentUserNonce = uint256(outstandingNonces.front());
+            NonceDetails storage currentDetails = withdrawNonceDetails[currentUserNonce];
+            IValidatorShare validatorContract = validators[currentDetails.validatorId].validatorContract;
+            uint96 validatorNonce = currentDetails.validatorNonce;
+            (uint256 shares, uint256 withdrawEpoch) = validatorContract.unbonds_new(address(this), validatorNonce);
             if (withdrawEpoch + stakeManager.withdrawalDelay() > stakeManager.epoch()) {
                 break;
             }
-            validator.validatorContract.unstakeClaimTokens_newPOL(currentDetails.validatorNonce);
+            validatorContract.unstakeClaimTokens_newPOL(validatorNonce);
             totalToWithdraw += shares;
-            emit POLWithdrawn(_user, shares, currentNonce);
-            delete withdrawNonceDetails[currentNonce];
+            emit POLWithdrawn(_user, shares, currentUserNonce);
+            delete withdrawNonceDetails[currentUserNonce];
             outstandingNonces.popFront();
         }
         require(totalToWithdraw > 0, NoNoncesReady(_user));
@@ -750,7 +758,8 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     function _validatorWithHighestTotalStakeDistance(bool _positive) internal view returns (uint16, uint256) {
         uint16 selectedValidator = activeValidators[0];
         uint256 maxDistance;
-        for (uint256 i = 0; i < activeValidators.length; i++) {
+        uint256 activeValidatorsLength = activeValidators.length;
+        for (uint256 i = 0; i < activeValidatorsLength; i++) {
             ValidatorInfo storage validator = validators[activeValidators[i]];
 
             // Skip locked validators when looking for deposit capacity
@@ -776,28 +785,32 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         if (myBigShare >= 100) {
             return type(uint256).max;
         }
-        uint256 theOtherShare = totaldPOLBalance - _validator.totalStaked;
+        uint256 validatorStaked = _validator.totalStaked;
+        uint256 theOtherShare = totaldPOLBalance - validatorStaked;
         uint8 restShare = 100 - myBigShare;
         uint256 myactualMaxShare = (theOtherShare * myBigShare) / restShare;
-        if (myactualMaxShare <= _validator.totalStaked) {
+        if (myactualMaxShare <= validatorStaked) {
             return 0;
         }
-        return myactualMaxShare - _validator.totalStaked;
+        return myactualMaxShare - validatorStaked;
     }
 
     function _maxRedeem(ValidatorInfo storage _validator) internal view returns (uint256) {
-        if (_validator.depositShare <= maxDivergence) {
-            return _validator.totalStaked;
+        uint256 validatorStaked = _validator.totalStaked;
+        uint8 validatorShare = _validator.depositShare;
+        uint8 currentMaxDivergence = maxDivergence;
+        if (validatorShare <= currentMaxDivergence) {
+            return validatorStaked;
         }
-        uint8 mySmallShare = _validator.depositShare - maxDivergence;
+        uint8 mySmallShare = validatorShare - currentMaxDivergence;
 
-        uint256 theOtherShare = totaldPOLBalance - _validator.totalStaked;
+        uint256 theOtherShare = totaldPOLBalance - validatorStaked;
         uint8 restShare = 100 - mySmallShare;
         uint256 myactualMinShare = (theOtherShare * mySmallShare) / restShare;
-        if (myactualMinShare >= _validator.totalStaked) {
+        if (myactualMinShare >= validatorStaked) {
             return 0;
         }
-        return _validator.totalStaked - myactualMinShare;
+        return validatorStaked - myactualMinShare;
     }
 
     // positive to check how much can be added, negative to check how much can be removed
@@ -814,12 +827,13 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     }
 
     function _selectValidators(uint256 _amount, bool _buy) internal view returns (uint16[] memory, uint256[] memory) {
-        uint16[] memory selectedValidators = new uint16[](activeValidators.length);
-        uint256[] memory amounts = new uint256[](activeValidators.length);
+        uint256 activeValidatorsLength = activeValidators.length;
+        uint16[] memory selectedValidators = new uint16[](activeValidatorsLength);
+        uint256[] memory amounts = new uint256[](activeValidatorsLength);
         uint256 remainingAmount = _amount;
         uint256 assignedIndex = 0;
 
-        for (uint256 i = 0; i < activeValidators.length; i++) {
+        for (uint256 i = 0; i < activeValidatorsLength; i++) {
             ValidatorInfo storage validator = validators[activeValidators[i]];
 
             // Skip locked validators when buying
