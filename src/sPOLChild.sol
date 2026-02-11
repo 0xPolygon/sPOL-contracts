@@ -117,6 +117,7 @@ contract sPOLChild is
     error BackfillAlreadyOngoing();
     error BackfillCycleMismatch(uint256 expected, uint256 received);
     error ExchangeRateUpdateTooOld(uint256 lastUpdate, uint256 maxAge, uint256 currentTime);
+    error FeeCannotBeZero();
     error FeeTooHigh(uint16 provided, uint16 maxAllowed);
     error IncorrectPOLAmount(uint256 sent, uint256 expected);
     error MigrationAlreadyOngoing();
@@ -461,11 +462,11 @@ contract sPOLChild is
 
     /// @notice Updates the safety fee applied to L2 buys
     /// @dev Fee in basis points (30 = 0.3%). Protects against exchange rate lag arbitrage. Max 1%.
-    ///      WARNING: Setting fee to 0 removes arbitrage protection entirely. The fee must be large
-    ///      enough to cover the expected L1 exchange rate appreciation during maxExchangeRateUpdateDelay.
-    ///      Must be re-evaluated if L1 StakeManager reward parameters change.
-    /// @param _newFee New safety fee (max MAX_SAFETY_FEE = 100 = 1%)
+    ///      The fee must be large enough to cover the expected L1 exchange rate appreciation during
+    ///      maxExchangeRateUpdateDelay. Must be re-evaluated if L1 StakeManager reward parameters change.
+    /// @param _newFee New safety fee (max MAX_SAFETY_FEE = 100 = 1%, cannot be 0)
     function changeSafetyFee(uint16 _newFee) external restricted {
+        require(_newFee > 0, FeeCannotBeZero());
         require(_newFee <= MAX_SAFETY_FEE, FeeTooHigh(_newFee, MAX_SAFETY_FEE));
         uint16 oldFee = safetyFee;
         safetyFee = _newFee;

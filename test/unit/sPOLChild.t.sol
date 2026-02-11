@@ -1117,11 +1117,10 @@ contract sPOLChildTest is Test, Deploy {
         assertEq(sPOLChildToken.safetyFee(), maxFee, "Max fee should be allowed");
     }
 
-    function test_changeSafetyFee_allowsZeroFee() public {
+    function test_changeSafetyFee_revertsOnZeroFee() public {
         vm.prank(admin);
+        vm.expectRevert(sPOLChild.FeeCannotBeZero.selector);
         sPOLChildToken.changeSafetyFee(0);
-
-        assertEq(sPOLChildToken.safetyFee(), 0, "Zero fee should be allowed");
     }
 
     function test_setMaxExchangeRateUpdateDelay_success() public {
