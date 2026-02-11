@@ -179,20 +179,23 @@ contract sPOLControllerVldMgnTest is Test, Deploy {
         controller.removeValidator(VALIDATOR_1);
     }
 
-    function test_RemoveValidator_RevertsWhenSharesPending() public {
+    function test_RemoveValidator_SucceedsWithDonatedShares() public {
         vm.prank(testAdmin);
         controller.addValidator(VALIDATOR_1);
 
-        // Mock validator share balance as non-zero
+        // Mock validator share balance as non-zero (donated shares)
         vm.mockCall(
             testValidatorShare1,
             abi.encodeWithSelector(IValidatorShare.balanceOf.selector, address(controller)),
             abi.encode(100)
         );
 
+        // Removal succeeds — donated shares are ignored since totalStaked == 0
         vm.prank(testAdmin);
-        vm.expectRevert(abi.encodeWithSelector(sPOLController.ValidatorSharesPending.selector, VALIDATOR_1, 100));
         controller.removeValidator(VALIDATOR_1);
+
+        (sPOLController.ValidatorStatus status,,,,) = controller.validators(VALIDATOR_1);
+        assertEq(uint8(status), uint8(sPOLController.ValidatorStatus.DEACTIVATED));
     }
 
     function test_RemoveValidator_RevertsWhenRewardsPending() public {

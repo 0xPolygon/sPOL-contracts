@@ -199,7 +199,7 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     }
 
     /// @notice Permanently removes a validator from the pool
-    /// @dev Validator must have 0% deposit share, no staked funds, no pending shares, and no liquid rewards.
+    /// @dev Validator must have 0% deposit share, no tracked staked funds, and no liquid rewards.
     ///      Once removed, the validator cannot be re-added.
     /// @param _removedValidator Polygon validator ID to remove
     function removeValidator(uint16 _removedValidator) external restricted {
@@ -212,10 +212,7 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
             removedValidator.totalStaked == 0, ValidatorStillFunded(_removedValidator, removedValidator.totalStaked)
         );
         require(removedValidator.status == ValidatorStatus.ACTIVE, ValidatorNotActive(_removedValidator));
-        IValidatorShare validatorContract = removedValidator.validatorContract;
-        uint256 shares = validatorContract.balanceOf(address(this));
-        require(shares == 0, ValidatorSharesPending(_removedValidator, shares));
-        uint256 rewards = validatorContract.getLiquidRewards(address(this));
+        uint256 rewards = removedValidator.validatorContract.getLiquidRewards(address(this));
         require(rewards == 0, ValidatorRewardsPending(_removedValidator, rewards));
 
         removedValidator.status = ValidatorStatus.DEACTIVATED;
