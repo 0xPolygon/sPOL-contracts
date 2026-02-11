@@ -33,8 +33,7 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     enum ValidatorStatus {
         INACTIVE,
         ACTIVE,
-        DEACTIVATED,
-        FROZEN
+        DEACTIVATED
     }
 
     // External contracts
@@ -84,8 +83,6 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     // Validator management events
     event ValidatorAdded(uint16 validatorId);
     event ValidatorRemoved(uint16 validatorId);
-    event ValidatorFrozen(uint16 validatorId);
-    event ValidatorUnfrozen(uint16 validatorId);
     event ValidatorTargetShareChanged(uint16 validatorId, uint8 newTargetShare);
     event ValidatorMigrated(uint16 oldValidator, uint16 newValidator, uint256 amount);
     // sPOL exchange events
@@ -119,7 +116,6 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
     error ValidatorNotActive(uint16 validatorId);
     error ValidatorNotInactive(uint16 validatorId);
     error ValidatorNotDelegating(uint16 validatorId);
-    error ValidatorNotFrozen(uint16 validatorId);
     error ValidatorOverfunded(uint256 amount, uint256 maxAmount);
     error ValidatorRewardsPending(uint16 validatorId, uint256 rewards);
     error ValidatorSharesPending(uint16 validatorId, uint256 shares);
@@ -226,31 +222,6 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
         emit ValidatorRemoved(_removedValidator);
     }
 
-    /// @notice Temporarily disables a validator from receiving new deposits
-    /// @dev Frozen validators keep their stake but are excluded from deposit selection. Deposit share must be 0 before freezing.
-    /// @param _validator Polygon validator ID to freeze
-    function freezeValidator(uint16 _validator) external restricted {
-        ValidatorInfo storage frozenValidator = validators[_validator];
-        require(frozenValidator.status == ValidatorStatus.ACTIVE, ValidatorNotActive(_validator));
-        require(
-            frozenValidator.depositShare == 0, ValidatorDepositShareNotZero(_validator, frozenValidator.depositShare)
-        );
-
-        frozenValidator.status = ValidatorStatus.FROZEN;
-        _removeFromActiveValidators(_validator);
-        emit ValidatorFrozen(_validator);
-    }
-
-    /// @notice Re-enables a frozen validator to receive deposits
-    /// @dev Adds validator back to active list. Deposit share remains 0 until explicitly set.
-    /// @param _validator Polygon validator ID to unfreeze
-    function unfreezeValidator(uint16 _validator) external restricted {
-        require(validators[_validator].status == ValidatorStatus.FROZEN, ValidatorNotFrozen(_validator));
-        validators[_validator].status = ValidatorStatus.ACTIVE;
-        activeValidators.push(_validator);
-        emit ValidatorUnfrozen(_validator);
-    }
-
     function _removeFromActiveValidators(uint16 _validator) internal {
         for (uint256 i = 0; i < activeValidators.length; i++) {
             if (activeValidators[i] == _validator) {
@@ -311,7 +282,7 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
 
     /// @notice Moves stake between validators using StakeManager's migration mechanism
     /// @dev When _restake=true, both validators must be active. When _restake=false, no status checks
-    ///      are enforced — this is intentional to allow recovery migrations (e.g. from frozen/deactivated
+    ///      are enforced — this is intentional to allow recovery migrations (e.g. from deactivated
     ///      validators), but the caller must ensure correctness to avoid breaking accounting.
     /// @param _oldValidator Source validator ID to move stake from
     /// @param _newValidator Destination validator ID to receive stake

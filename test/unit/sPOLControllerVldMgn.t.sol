@@ -25,8 +25,6 @@ contract sPOLControllerVldMgnTest is Test, Deploy {
     // Events
     event ValidatorAdded(uint16 validatorId);
     event ValidatorRemoved(uint16 validatorId);
-    event ValidatorFrozen(uint16 validatorId);
-    event ValidatorUnfrozen(uint16 validatorId);
     event ValidatorTargetShareChanged(uint16 validatorId, uint8 newTargetShare);
 
     function setUp() public {
@@ -230,88 +228,6 @@ contract sPOLControllerVldMgnTest is Test, Deploy {
         vm.prank(testAdmin);
         vm.expectRevert(abi.encodeWithSelector(sPOLController.ValidatorStillFunded.selector, VALIDATOR_1, 1));
         controller.removeValidator(VALIDATOR_1);
-    }
-
-    ///////////////////////////////
-    ///  Freeze Validator Tests ///
-    ///////////////////////////////
-
-    function test_FreezeValidator_Success() public {
-        vm.prank(testAdmin);
-        controller.addValidator(VALIDATOR_1);
-
-        vm.prank(testAdmin);
-        vm.expectEmit(true, true, true, true, address(controller));
-        emit ValidatorFrozen(VALIDATOR_1);
-
-        controller.freezeValidator(VALIDATOR_1);
-
-        // Verify validator status changed to FROZEN
-        (sPOLController.ValidatorStatus status,,,,) = controller.validators(VALIDATOR_1);
-        assertEq(uint8(status), uint8(sPOLController.ValidatorStatus.FROZEN), "Status should be FROZEN");
-    }
-
-    function test_FreezeValidator_RevertsForNonAdmin() public {
-        vm.prank(testAdmin);
-        controller.addValidator(VALIDATOR_1);
-
-        vm.prank(nonAdmin);
-        vm.expectRevert(abi.encodeWithSignature("AccessManagedUnauthorized(address)", nonAdmin));
-        controller.freezeValidator(VALIDATOR_1);
-    }
-
-    function test_FreezeValidator_RevertsWhenShareNotZero() public {
-        vm.prank(testAdmin);
-        controller.addValidator(VALIDATOR_1);
-
-        // Set target share for the validator
-        uint16[] memory validatorIds = new uint16[](1);
-        uint8[] memory targetShares = new uint8[](1);
-        validatorIds[0] = VALIDATOR_1;
-        targetShares[0] = 100;
-
-        vm.prank(testAdmin);
-        controller.updateValidatorTargetShare(validatorIds, targetShares);
-
-        // Now try to freeze - should revert because share is not zero
-        vm.prank(testAdmin);
-        vm.expectRevert(abi.encodeWithSelector(sPOLController.ValidatorDepositShareNotZero.selector, VALIDATOR_1, 100));
-        controller.freezeValidator(VALIDATOR_1);
-    }
-
-    ///////////////////////////////
-    /// Unfreeze Validator Tests///
-    ///////////////////////////////
-
-    function test_UnfreezeValidator_Success() public {
-        vm.prank(testAdmin);
-        controller.addValidator(VALIDATOR_1);
-
-        // First freeze the validator
-        vm.prank(testAdmin);
-        controller.freezeValidator(VALIDATOR_1);
-
-        // Now unfreeze it
-        vm.prank(testAdmin);
-        vm.expectEmit(true, true, true, true, address(controller));
-        emit ValidatorUnfrozen(VALIDATOR_1);
-
-        controller.unfreezeValidator(VALIDATOR_1);
-
-        // Verify validator status changed back to ACTIVE
-        (sPOLController.ValidatorStatus status,,,,) = controller.validators(VALIDATOR_1);
-        assertEq(uint8(status), uint8(sPOLController.ValidatorStatus.ACTIVE), "Status should be ACTIVE");
-    }
-
-    function test_UnfreezeValidator_RevertsForNonAdmin() public {
-        vm.prank(testAdmin);
-        controller.addValidator(VALIDATOR_1);
-        vm.prank(testAdmin);
-        controller.freezeValidator(VALIDATOR_1);
-
-        vm.prank(nonAdmin);
-        vm.expectRevert(abi.encodeWithSignature("AccessManagedUnauthorized(address)", nonAdmin));
-        controller.unfreezeValidator(VALIDATOR_1);
     }
 
     ///////////////////////////////

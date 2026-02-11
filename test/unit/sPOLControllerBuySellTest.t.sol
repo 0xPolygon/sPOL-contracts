@@ -85,13 +85,18 @@ contract sPOLControllerBuySellTest is Test, Deploy {
     }
 
     function test_buySPOLSingle_VALIDATOR_NOT_ACTIVE() public {
-        controller.buySPOL(1e18);
         depositShares[0] = 0;
         depositShares[1] = 100;
         vm.prank(testAdmin);
         controller.updateValidatorTargetShare(validators, depositShares);
+        // Mock getLiquidRewards to return 0 so removeValidator succeeds
+        vm.mockCall(
+            testValidatorShare1,
+            abi.encodeWithSelector(IValidatorShare.getLiquidRewards.selector),
+            abi.encode(0)
+        );
         vm.prank(testAdmin);
-        controller.freezeValidator(VALIDATOR_1);
+        controller.removeValidator(VALIDATOR_1);
         vm.expectRevert(abi.encodeWithSelector(sPOLController.ValidatorNotActive.selector, VALIDATOR_1));
         controller.buySPOL(1 ether, VALIDATOR_1);
     }
