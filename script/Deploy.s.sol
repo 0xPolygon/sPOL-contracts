@@ -86,7 +86,14 @@ contract Deploy is Script, ConfigLoader {
         accessManagerL1 = new AccessManager{salt: getSalt("polygon-access-manager")}(_deployer);
 
         polBridger = new PolBridger{salt: getSalt("pol-bridger")}(
-            polTokenL1, polTokenL2, chainIdL1, chainIdL2, erc20predicate, withdrawManager, address(accessManagerL1)
+            polTokenL1,
+            polTokenL2,
+            maticTokenL1,
+            chainIdL1,
+            chainIdL2,
+            erc20predicate,
+            withdrawManager,
+            address(accessManagerL1)
         );
 
         sPOLControllerProxy = new TransparentUpgradeableProxy{salt: getSalt("spol-controller-proxy")}(
@@ -131,7 +138,14 @@ contract Deploy is Script, ConfigLoader {
         accessManagerL2 = new AccessManager{salt: getSalt("polygon-access-manager")}(_deployer);
 
         polBridger = new PolBridger{salt: getSalt("pol-bridger")}(
-            polTokenL1, polTokenL2, chainIdL1, chainIdL2, erc20predicate, withdrawManager, address(accessManagerL2)
+            polTokenL1,
+            polTokenL2,
+            maticTokenL1,
+            chainIdL1,
+            chainIdL2,
+            erc20predicate,
+            withdrawManager,
+            address(accessManagerL2)
         );
         sPOLChildImpl = new sPOLChild{salt: getSalt("spol-child-impl")}(stateSyncerL2);
         sPOLChildProxy = new TransparentUpgradeableProxy{salt: getSalt("spol-child-proxy")}(

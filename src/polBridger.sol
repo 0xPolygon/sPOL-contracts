@@ -18,6 +18,7 @@ import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/Reentrancy
 contract PolBridger is AccessManaged, Pausable, ReentrancyGuardTransient {
     address public immutable polTokenL1;
     address public immutable polTokenL2;
+    address public immutable maticTokenL1;
     uint256 public immutable chainIDL1;
     uint256 public immutable chainIDL2;
     address public immutable erc20predicate;
@@ -36,6 +37,7 @@ contract PolBridger is AccessManaged, Pausable, ReentrancyGuardTransient {
     constructor(
         address _polTokenL1,
         address _polTokenL2,
+        address _maticTokenL1,
         uint256 _chainIDL1,
         uint256 _chainIDL2,
         address _erc20predicate,
@@ -44,6 +46,7 @@ contract PolBridger is AccessManaged, Pausable, ReentrancyGuardTransient {
     ) AccessManaged(_authority) {
         polTokenL1 = _polTokenL1;
         polTokenL2 = _polTokenL2;
+        maticTokenL1 = _maticTokenL1;
         chainIDL1 = _chainIDL1;
         chainIDL2 = _chainIDL2;
         erc20predicate = _erc20predicate;
@@ -81,11 +84,11 @@ contract PolBridger is AccessManaged, Pausable, ReentrancyGuardTransient {
         IERC20PredicateBurnOnly(erc20predicate).startExitWithBurntTokens(proof);
     }
 
-    /// @notice Processes pending POL exits and releases tokens to this contract
+    /// @notice Processes pending POL(matic) exits and releases tokens to this contract
     /// @dev Anyone can call. Processes all exits in queue for POL token. POL stays in bridger until taken.
     function finalizeExitPOL() external whenNotPaused nonReentrant {
         require(block.chainid == chainIDL1, InvalidOriginChain(block.chainid, chainIDL1));
-        IWithdrawManager(withdrawManager).processExits(polTokenL1);
+        IWithdrawManager(withdrawManager).processExits(maticTokenL1);
     }
 
     /// @notice Transfers POL from bridger to messenger for migration processing
