@@ -324,7 +324,7 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
 
     /// @notice Resyncs stake tracking for a single validator with on-chain balance
     /// @dev Emergency function to fix accounting for one validator without affecting others.
-    ///      WARNING: Reloading a deactivated or inactive validator adds its shares to totaldPOLBalance
+    ///      WARNING: Reloading a deactivated validator adds its shares to totaldPOLBalance
     ///      without a way to sell them, inflating the exchange rate. Only use on active validators
     ///      unless you intend to migrate the shares afterward.
     /// @param _validator Validator ID to resync
