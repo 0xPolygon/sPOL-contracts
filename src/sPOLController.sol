@@ -800,9 +800,11 @@ contract sPOLController is Initializable, PausableUpgradeable, AccessManagedUpgr
             return validatorStaked;
         }
         uint8 mySmallShare = validatorShare - currentMaxDivergence;
-
-        uint256 theOtherShare = totaldPOLBalance - validatorStaked;
         uint8 restShare = 100 - mySmallShare;
+        if (restShare == 0) {
+            return validatorStaked;
+        }
+        uint256 theOtherShare = totaldPOLBalance - validatorStaked;
         uint256 myactualMinShare = (theOtherShare * mySmallShare) / restShare;
         if (myactualMinShare >= validatorStaked) {
             return 0;
