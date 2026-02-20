@@ -198,44 +198,6 @@ contract sPOLControllerTest is Test, Deploy {
         assertTrue(controller.totaldPOLBalance() == validator1Balance + validator2Balance);
     }
 
-    function test_reloadActiveValidatorInfo_WithFrozenValidator() public {
-        _addTestValidators();
-
-        uint16 validator1Id = 35;
-        uint16 validator2Id = 120;
-
-        vm.prank(testAdmin);
-        controller.freezeValidator(validator2Id);
-
-        // Set up balances
-        uint256 validator1Balance = 1000e18;
-        uint256 validator2Balance = 500e18;
-
-        address testValidatorShare1 = makeAddr("testValidatorShare1");
-        address testValidatorShare2 = makeAddr("testValidatorShare2");
-
-        vm.mockCall(
-            testValidatorShare1,
-            abi.encodeWithSelector(IValidatorShare.balanceOf.selector, address(controller)),
-            abi.encode(validator1Balance)
-        );
-        vm.mockCall(
-            testValidatorShare2,
-            abi.encodeWithSelector(IValidatorShare.balanceOf.selector, address(controller)),
-            abi.encode(validator2Balance)
-        );
-
-        vm.prank(testAdmin);
-        controller.reloadAllActiveValidatorInfo();
-
-        (,,,, uint256 validator1TotalStaked) = controller.validators(validator1Id);
-        (,,,, uint256 validator2TotalStaked) = controller.validators(validator2Id);
-
-        assertEq(controller.totaldPOLBalance(), validator1Balance);
-        assertEq(validator1TotalStaked, validator1Balance);
-        assertEq(validator2TotalStaked, 0);
-    }
-
     function test_reloadAllActiveValidatorInfo_OnlyAdmin() public {
         vm.prank(nonAdmin);
         vm.expectRevert(abi.encodeWithSignature("AccessManagedUnauthorized(address)", nonAdmin));
@@ -263,7 +225,7 @@ contract sPOLControllerTest is Test, Deploy {
         );
 
         vm.prank(testAdmin);
-        controller.reloadAllValidatorInfo();
+        controller.reloadAllActiveValidatorInfo();
 
         uint16 validator1Id = 35;
         uint16 validator2Id = 120;
@@ -275,48 +237,10 @@ contract sPOLControllerTest is Test, Deploy {
         assertEq(validator2TotalStaked, validator2Balance);
     }
 
-    function test_reloadAllValidatorInfo_OnlyAdmin() public {
+    function test_reloadSingleValidatorInfo_OnlyAdmin() public {
         vm.prank(nonAdmin);
         vm.expectRevert(abi.encodeWithSignature("AccessManagedUnauthorized(address)", nonAdmin));
-        controller.reloadAllValidatorInfo();
-    }
-
-    function test_reloadAllValidatorInfo_WithFrozenValidator() public {
-        _addTestValidators();
-
-        uint16 validator1Id = 35;
-        uint16 validator2Id = 120;
-
-        vm.prank(testAdmin);
-        controller.freezeValidator(validator2Id);
-
-        // Set up balances
-        uint256 validator1Balance = 1000e18;
-        uint256 validator2Balance = 500e18;
-
-        address testValidatorShare1 = makeAddr("testValidatorShare1");
-        address testValidatorShare2 = makeAddr("testValidatorShare2");
-
-        vm.mockCall(
-            testValidatorShare1,
-            abi.encodeWithSelector(IValidatorShare.balanceOf.selector, address(controller)),
-            abi.encode(validator1Balance)
-        );
-        vm.mockCall(
-            testValidatorShare2,
-            abi.encodeWithSelector(IValidatorShare.balanceOf.selector, address(controller)),
-            abi.encode(validator2Balance)
-        );
-
-        vm.prank(testAdmin);
-        controller.reloadAllValidatorInfo();
-
-        (,,,, uint256 validator1TotalStaked) = controller.validators(validator1Id);
-        (,,,, uint256 validator2TotalStaked) = controller.validators(validator2Id);
-
-        assertEq(controller.totaldPOLBalance(), validator1Balance + validator2Balance);
-        assertEq(validator1TotalStaked, validator1Balance);
-        assertEq(validator2TotalStaked, validator2Balance);
+        controller.reloadValidatorInfo(35);
     }
 
     ///////////////////////////////////

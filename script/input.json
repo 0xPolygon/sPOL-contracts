@@ -1,6 +1,7 @@
 {
     "sepolia-amoy": {
         "scenarioName": "sepolia-amoy",
+        "saltPrefix": "Testnet-",
         "chainIdL1": 11155111,
         "chainIdL2": 80002,
         "polTokenL1": "0x44499312f493F62f2DFd3C6435Ca3603EbFCeeBa",
@@ -25,6 +26,7 @@
     },
     "ethereum-polygon": {
         "scenarioName": "ethereum-polygon",
+        "saltPrefix": "Mainnet-",
         "chainIdL1": 1,
         "chainIdL2": 137,
         "polTokenL1": "0x455e53CBB86018Ac2B8092FdCd39d8444aFFC3F6",

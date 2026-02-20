@@ -7,6 +7,7 @@ import {DummyImpl} from "./DummyImpl.sol";
 contract ConfigLoader is Script {
     // Network configuration variables
     string public scenarioName;
+    string public saltPrefix;
     uint256 public chainIdL1;
     uint256 public chainIdL2;
     address public polTokenL1;
@@ -26,15 +27,16 @@ contract ConfigLoader is Script {
     address public stateSyncerL2;
     uint8 public rewardFee;
     uint8 public maxDivergence;
-    uint256 public childTargetQuickRedeemReserve;
     address public admin;
 
     function loadMockConfig() public {
         scenarioName = "mock-scenario";
+        saltPrefix = "Mock-";
         polTokenL1 = makeAddr("polTokenL1");
         vm.etch(polTokenL1, type(DummyImpl).runtimeCode);
         //deployCodeTo("out/ERC20Permit.sol/ERC20Permit.json", abi.encode("POL Token L1", "POL L1", 18, 0), polTokenL1);
         polTokenL2 = makeAddr("polTokenL2");
+        vm.etch(polTokenL2, type(DummyImpl).runtimeCode);
         chainIdL1 = 1;
         chainIdL2 = 2;
         maticTokenL1 = makeAddr("maticTokenL1");
@@ -53,7 +55,6 @@ contract ConfigLoader is Script {
         stateSenderL1 = makeAddr("stateSender");
         checkpointManager = makeAddr("checkpointManager");
         stateSyncerL2 = makeAddr("stateSyncerL2");
-        childTargetQuickRedeemReserve = 1_000_000 ether;
 
         validateConfig();
         console.log("Loaded configuration for scenario:", scenarioName);
@@ -76,6 +77,7 @@ contract ConfigLoader is Script {
         polTokenL2 = vm.parseJsonAddress(json, string.concat(scenarioName, ".polTokenL2"));
         chainIdL1 = vm.parseJsonUint(json, string.concat(scenarioName, ".chainIdL1"));
         chainIdL2 = vm.parseJsonUint(json, string.concat(scenarioName, ".chainIdL2"));
+        saltPrefix = vm.parseJsonString(json, string.concat(scenarioName, ".saltPrefix"));
 
         maticTokenL1 = vm.parseJsonAddress(json, string.concat(scenarioName, ".maticTokenL1"));
         polygonMigration = vm.parseJsonAddress(json, string.concat(scenarioName, ".polygonMigration"));
@@ -84,8 +86,6 @@ contract ConfigLoader is Script {
         feeReceiver = vm.parseJsonAddress(json, string.concat(scenarioName, ".feeReceiver"));
         rewardFee = uint8(vm.parseJsonUint(json, string.concat(scenarioName, ".rewardFee")));
         maxDivergence = uint8(vm.parseJsonUint(json, string.concat(scenarioName, ".maxDivergence")));
-        childTargetQuickRedeemReserve =
-            vm.parseJsonUint(json, string.concat(scenarioName, ".childTargetQuickRedeemReserve"));
         withdrawManager = vm.parseJsonAddress(json, string.concat(scenarioName, ".withdrawManager"));
         erc20predicate = vm.parseJsonAddress(json, string.concat(scenarioName, ".erc20predicate"));
         childChainManager = vm.parseJsonAddress(json, string.concat(scenarioName, ".childChainManager"));
@@ -102,6 +102,7 @@ contract ConfigLoader is Script {
 
     function validateConfig() public view {
         require(bytes(scenarioName).length != 0, "Scenario name is empty");
+        require(bytes(saltPrefix).length != 0, "Salt prefix is empty");
         require(polTokenL1 != address(0), "POL Token L1 address is zero");
         require(polTokenL2 != address(0), "POL Token L2 address is zero");
         require(maticTokenL1 != address(0), "MATIC Token address is zero");

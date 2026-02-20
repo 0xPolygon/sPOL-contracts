@@ -40,6 +40,8 @@ contract Deploy is Script, ConfigLoader {
     PolBridger public polBridger;
 
     address precalcedsPOLChildProxyAddress;
+    address dummyImplL1;
+    address dummyImplL2;
 
     function run(string memory _scenarioName) public {
         uint256 pk = vm.envUint("DEPLOYER_PRIVATE_KEY");
@@ -79,41 +81,43 @@ contract Deploy is Script, ConfigLoader {
     }
 
     function deployContractsL1(address _deployer) public {
-        address dummyImplL1 = address(new DummyImpl{salt: "dummy-impl"}());
+        dummyImplL1 = address(new DummyImpl{salt: getSalt("dummy-impl")}());
 
-        accessManagerL1 = new AccessManager{salt: "polygon-access-manager"}(_deployer);
+        accessManagerL1 = new AccessManager{salt: getSalt("polygon-access-manager")}(_deployer);
 
-        polBridger = new PolBridger{salt: "pol-bridger"}(
-            polTokenL1, polTokenL2, chainIdL1, chainIdL2, erc20predicate, withdrawManager, address(accessManagerL1)
+        polBridger = new PolBridger{salt: getSalt("pol-bridger")}(
+            polTokenL1,
+            polTokenL2,
+            maticTokenL1,
+            chainIdL1,
+            chainIdL2,
+            erc20predicate,
+            withdrawManager,
+            address(accessManagerL1)
         );
 
-        sPOLControllerProxy =
-            new TransparentUpgradeableProxy{salt: "spol-controller-proxy"}(dummyImplL1, address(accessManagerL1), "");
+        sPOLControllerProxy = new TransparentUpgradeableProxy{salt: getSalt("spol-controller-proxy")}(
+            dummyImplL1, address(accessManagerL1), ""
+        );
         sPOLControllerproxyAdmin = getProxyAdmin(sPOLControllerProxy);
 
-        sPOLProxy = new TransparentUpgradeableProxy{salt: "spol-proxy"}(dummyImplL1, address(accessManagerL1), "");
+        sPOLProxy =
+            new TransparentUpgradeableProxy{salt: getSalt("spol-proxy")}(dummyImplL1, address(accessManagerL1), "");
         sPOLproxyAdmin = getProxyAdmin(sPOLProxy);
 
-        sPOLMessengerProxy =
-            new TransparentUpgradeableProxy{salt: "spol-messenger-proxy"}(dummyImplL1, address(accessManagerL1), "");
+        sPOLMessengerProxy = new TransparentUpgradeableProxy{salt: getSalt("spol-messenger-proxy")}(
+            dummyImplL1, address(accessManagerL1), ""
+        );
         sPOLMessengerproxyAdmin = getProxyAdmin(sPOLMessengerProxy);
 
-        sPOLControllerImpl = new sPOLController{salt: "spol-controller-impl"}(
-            polTokenL1, maticTokenL1, polygonMigration, address(sPOLProxy), stakeManager, address(sPOLMessengerProxy)
+        sPOLControllerImpl = new sPOLController{salt: getSalt("spol-controller-impl")}(
+            polTokenL1, maticTokenL1, polygonMigration, address(sPOLProxy), stakeManager
         );
 
-        sPOLImpl = new sPOL{salt: "spol-impl"}(address(sPOLControllerProxy));
+        sPOLImpl = new sPOL{salt: getSalt("spol-impl")}(address(sPOLControllerProxy));
 
-        precalcedsPOLChildProxyAddress = vm.computeCreate2Address(
-            "spol-child-proxy",
-            keccak256(
-                abi.encodePacked(
-                    type(TransparentUpgradeableProxy).creationCode,
-                    abi.encode(dummyImplL1, address(accessManagerL1), "")
-                )
-            )
-        );
-        sPOLMessengerImpl = new sPOLMessenger{salt: "spol-messenger-impl"}(
+        precalcedsPOLChildProxyAddress = precalcsPOLChildProxyAddress();
+        sPOLMessengerImpl = new sPOLMessenger{salt: getSalt("spol-messenger-impl")}(
             polTokenL1,
             address(sPOLProxy),
             address(sPOLControllerProxy),
@@ -129,16 +133,24 @@ contract Deploy is Script, ConfigLoader {
     }
 
     function deployContractsL2(address _deployer) public {
-        address dummyImplL2 = address(new DummyImpl{salt: "dummy-impl"}());
+        dummyImplL2 = address(new DummyImpl{salt: getSalt("dummy-impl")}());
 
-        accessManagerL2 = new AccessManager{salt: "polygon-access-manager"}(_deployer);
+        accessManagerL2 = new AccessManager{salt: getSalt("polygon-access-manager")}(_deployer);
 
-        polBridger = new PolBridger{salt: "pol-bridger"}(
-            polTokenL1, polTokenL2, chainIdL1, chainIdL2, erc20predicate, withdrawManager, address(accessManagerL2)
+        polBridger = new PolBridger{salt: getSalt("pol-bridger")}(
+            polTokenL1,
+            polTokenL2,
+            maticTokenL1,
+            chainIdL1,
+            chainIdL2,
+            erc20predicate,
+            withdrawManager,
+            address(accessManagerL2)
         );
-        sPOLChildImpl = new sPOLChild{salt: "spol-child-impl"}(stateSyncerL2);
-        sPOLChildProxy =
-            new TransparentUpgradeableProxy{salt: "spol-child-proxy"}(dummyImplL2, address(accessManagerL2), "");
+        sPOLChildImpl = new sPOLChild{salt: getSalt("spol-child-impl")}(stateSyncerL2);
+        sPOLChildProxy = new TransparentUpgradeableProxy{salt: getSalt("spol-child-proxy")}(
+            dummyImplL2, address(accessManagerL2), ""
+        );
         sPOLChildproxyAdmin = getProxyAdmin(sPOLChildProxy);
 
         _configureDeploymentL2(_deployer);
@@ -268,9 +280,10 @@ contract Deploy is Script, ConfigLoader {
     }
 
     function _verifyDeploymentL2() internal view {
-        sPOLChild child = sPOLChild(address(sPOLChildProxy));
+        sPOLChild child = sPOLChild(payable(sPOLChildProxy));
 
         // Verify sPOLChild
+        require(address(child) == precalcsPOLChildProxyAddress(), "sPOLChild proxy address incorrect");
         require(child.stateSyncer() == stateSyncerL2, "sPOLChild state syncer incorrect");
         require(address(child.bridgeHelper()) == address(polBridger), "sPOLChild bridger incorrect");
         require(child.authority() == address(accessManagerL2), "sPOLChild admin incorrect");
@@ -282,6 +295,11 @@ contract Deploy is Script, ConfigLoader {
             "sPOLChild implementation address incorrect"
         );
         require(getProxyAdmin(sPOLChildProxy).owner() == address(accessManagerL2), "sPOLChild ProxyAdmin wrong owner");
+        // If L1 was deployed then addresses should match
+        if (address(accessManagerL1) != address(0)) {
+            require(address(accessManagerL1) == address(accessManagerL2), "Access managers should be same");
+            require(address(dummyImplL1) == address(dummyImplL2), "Access managers should be same");
+        }
         console.log("All verifications passed for L2!");
     }
 
@@ -295,5 +313,33 @@ contract Deploy is Script, ConfigLoader {
                 )
             )
         );
+    }
+
+    function precalcsPOLChildProxyAddress() public view returns (address) {
+        address accessManagerAddress;
+        address dummyImplAddress;
+        // in this case L1 was deployed
+        if (address(accessManagerL1) != address(0)) {
+            accessManagerAddress = address(accessManagerL1);
+            dummyImplAddress = address(dummyImplL1);
+        } else if (address(accessManagerL2) != address(0)) {
+            accessManagerAddress = address(accessManagerL2);
+            dummyImplAddress = address(dummyImplL2);
+        } else {
+            revert("Access manager not deployed");
+        }
+        return vm.computeCreate2Address(
+            getSalt("spol-child-proxy"),
+            keccak256(
+                abi.encodePacked(
+                    type(TransparentUpgradeableProxy).creationCode,
+                    abi.encode(dummyImplAddress, address(accessManagerAddress), "")
+                )
+            )
+        );
+    }
+
+    function getSalt(string memory _name) public view returns (bytes32) {
+        return bytes32(bytes(string.concat(string(saltPrefix), _name)));
     }
 }
