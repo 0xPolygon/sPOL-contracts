@@ -14,15 +14,10 @@ contract sPOLControllerVLDSelectTest is Test, sPOLController {
     address testSPOLToken = makeAddr("testSPOLToken");
     address testValidatorShare = makeAddr("testValidatorShare");
     address testAuthority = makeAddr("testAuthority");
-    address testMessenger = makeAddr("testMessenger");
     uint8 testMaxDivergence = 20;
     uint8 testRewardFeee = 10;
 
-    constructor()
-        sPOLController(
-            testPolToken, testMaticToken, testPolygonMigration, testSPOLToken, testStakeManager, testMessenger
-        )
-    {}
+    constructor() sPOLController(testPolToken, testMaticToken, testPolygonMigration, testSPOLToken, testStakeManager) {}
 
     function setUp() public {
         // initialize sPOLController
@@ -92,8 +87,6 @@ contract sPOLControllerVLDSelectTest is Test, sPOLController {
         addValidators(valIds, shares, stakes);
 
         (uint16[] memory ids, uint256[] memory amounts) = _selectValidators(_amountToBuy, true);
-        console.log(ids.length);
-        console.log("Amount to buy:", _amountToBuy);
 
         // calced as others stake == (100 - share + maxdivergence )
         // my stake == others stake * their share / (100 - share + maxdivergence)
@@ -227,7 +220,6 @@ contract sPOLControllerVLDSelectTest is Test, sPOLController {
         addValidators(valIds, shares, stakes);
 
         (uint16[] memory ids, uint256[] memory amounts) = _selectValidators(_amountToSell, false);
-        console.log(amounts[0]);
         assertEq(ids.length, 1);
         assertEq(ids[0], 1);
         assertEq(amounts[0], _amountToSell > 1000 ? 1000 : _amountToSell);
@@ -531,6 +523,79 @@ contract sPOLControllerVLDSelectTest is Test, sPOLController {
         assertEq(amount, 54000 - 2000);
     }
 
+    ////////////////////////////////////////
+    ///  Locked Validator Selection Tests //
+    ////////////////////////////////////////
+
+    function test_buy_locked_validator_skipped_when_would_be_selected() public {
+        // Setup: Two validators, first one would normally be selected but is locked
+        uint16[] memory valIds = new uint16[](2);
+        valIds[0] = 1;
+        valIds[1] = 35;
+        uint8[] memory shares = new uint8[](2);
+        shares[0] = 50;
+        shares[1] = 50;
+        uint16[] memory stakes = new uint16[](2);
+        stakes[0] = 0; // Validator 1 has no stake, would be selected first
+        stakes[1] = 1000;
+
+        addValidators(valIds, shares, stakes);
+
+        // Lock validator 1 (would normally be selected as most underfunded)
+        address validatorShare1 = makeAddr(string(abi.encodePacked("ValidatorShare", valIds[0])));
+        vm.mockCall(validatorShare1, abi.encodeWithSelector(IValidatorShare.locked.selector), abi.encode(true));
+
+        uint256 amountToBuy = 100;
+        (uint16[] memory ids, uint256[] memory amounts) = _selectValidators(amountToBuy, true);
+
+        // Should skip locked validator 1 and select validator 35 instead
+        assertEq(ids.length, 1, "Should select only one validator");
+        assertEq(ids[0], 35, "Should select validator 35 (unlocked)");
+        assertEq(amounts[0], amountToBuy, "Should assign full amount to unlocked validator");
+    }
+
+    function test_buy_locked_validator_skipped_in_equal_distribution() public {
+        // Setup: Three validators with equal shares, triggering fallback equal distribution
+        uint16[] memory valIds = new uint16[](3);
+        valIds[0] = 1;
+        valIds[1] = 35;
+        valIds[2] = 74;
+        uint8[] memory shares = new uint8[](3);
+        shares[0] = 34;
+        shares[1] = 33;
+        shares[2] = 33;
+        uint16[] memory stakes = new uint16[](3);
+        stakes[0] = 1000;
+        stakes[1] = 1000;
+        stakes[2] = 1000;
+
+        addValidators(valIds, shares, stakes);
+
+        // Lock validator 35 (middle one)
+        address validatorShare35 = makeAddr(string(abi.encodePacked("ValidatorShare", valIds[1])));
+        vm.mockCall(validatorShare35, abi.encodeWithSelector(IValidatorShare.locked.selector), abi.encode(true));
+
+        // Use large amount to trigger equal distribution fallback
+        uint256 amountToBuy = 100001;
+        (uint16[] memory ids, uint256[] memory amounts) = _selectValidators(amountToBuy, true);
+
+        // Should only select unlocked validators (1 and 74)
+        assertEq(ids.length, 2, "Should select only two unlocked validators");
+        assertEq(ids[0], 1, "First selected should be validator 1");
+        assertEq(ids[1], 74, "Second selected should be validator 74");
+
+        // Sum check: total amounts must equal the buy amount
+        uint256 totalAmount = 0;
+        for (uint256 i = 0; i < amounts.length; i++) {
+            totalAmount += amounts[i];
+        }
+        assertEq(totalAmount, amountToBuy, "Sum of amounts must equal total buy amount");
+
+        // Distribution check: should be split between 2 validators
+        assertEq(amounts[0], amountToBuy / 2 + amountToBuy % 2, "First validator gets half plus remainder");
+        assertEq(amounts[1], amountToBuy / 2, "Second validator gets half");
+    }
+
     function addValidators(uint16[] memory _ids, uint8[] memory _shares, uint16[] memory _stakes) internal {
         for (uint256 i = 0; i < _ids.length; i++) {
             address validatorShare = makeAddr(string(abi.encodePacked("ValidatorShare", _ids[i])));
@@ -542,16 +607,18 @@ contract sPOLControllerVLDSelectTest is Test, sPOLController {
             vm.prank(testAdmin);
             this.addValidator(_ids[i]);
 
-            // mock for future reloadInfo call
+            // mock for future reloadValidatorInfo call
             vm.mockCall(
                 validatorShare,
                 abi.encodeWithSelector(IValidatorShare.balanceOf.selector, address(this)),
                 abi.encode(_stakes[i])
             );
+            // mock locked() to return false by default
+            vm.mockCall(validatorShare, abi.encodeWithSelector(IValidatorShare.locked.selector), abi.encode(false));
         }
         vm.prank(testAdmin);
         this.updateValidatorTargetShare(_ids, _shares);
         vm.prank(testAdmin);
-        this.reloadAllValidatorInfo();
+        this.reloadAllActiveValidatorInfo();
     }
 }

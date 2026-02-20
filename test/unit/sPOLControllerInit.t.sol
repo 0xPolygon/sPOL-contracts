@@ -21,21 +21,18 @@ contract sPOLControllerInitTest is Test {
     address testPolygonMigration = makeAddr("testPolygonMigration");
     address testStakeManager = makeAddr("testStakeManager");
     address testSPOLToken = makeAddr("testSPOLToken");
-    address testMessenger = makeAddr("testMessenger");
     uint8 testMaxDivergence = 20;
 
     function setUp() public {
         vm.etch(testPolToken, type(DummyImpl).runtimeCode);
-        controllerImpl = new sPOLController(
-            testPolToken, testMaticToken, testPolygonMigration, testSPOLToken, testStakeManager, testMessenger
-        );
+        controllerImpl =
+            new sPOLController(testPolToken, testMaticToken, testPolygonMigration, testSPOLToken, testStakeManager);
     }
 
     function test_Constructor_SetsImmutableVariables() public {
         // Deploy a new implementation to test constructor directly
-        sPOLController testController = new sPOLController(
-            testPolToken, testMaticToken, testPolygonMigration, testSPOLToken, testStakeManager, testMessenger
-        );
+        sPOLController testController =
+            new sPOLController(testPolToken, testMaticToken, testPolygonMigration, testSPOLToken, testStakeManager);
 
         // Verify immutable variables are set correctly
         assertEq(address(testController.polToken()), testPolToken, "POL token not set correctly");

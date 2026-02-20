@@ -7,7 +7,12 @@ contract MockValidatorShare {
     mapping(address => uint256) public unbondNonces;
     uint256 public reward;
     mapping(address => uint256) public balanceOf;
+    bool public locked;
     //mapping(address => mapping(address => uint256)) public allowance;
+
+    function setLocked(bool _locked) external {
+        locked = _locked;
+    }
 
     function buyVoucherPOL(uint256 a, uint256) public returns (uint256) {
         balanceOf[msg.sender] += a;
@@ -55,8 +60,10 @@ contract MockValidatorShare {
         return true;
     }
 
-    function sellVoucher_newPOL(uint256, uint256) public {
+    function sellVoucher_newPOL(uint256 _amount, uint256) public {
+        balanceOf[msg.sender] -= _amount;
         unbondNonces[msg.sender]++;
+        reward = 0; // rewards get dropped when selling without restaking first
     }
 
     function addReward(uint256 _reward) public {
