@@ -21,18 +21,16 @@ contract ExchangeRateUpdaterRole is Script {
         console.log("");
 
         // 1. Label the role
-        bytes memory labelCalldata = abi.encodeCall(
-            AccessManager.labelRole, (EXCHANGE_RATE_UPDATER_ROLE, "EXCHANGE_RATE_UPDATER")
-        );
+        bytes memory labelCalldata =
+            abi.encodeCall(AccessManager.labelRole, (EXCHANGE_RATE_UPDATER_ROLE, "EXCHANGE_RATE_UPDATER"));
         console.log("1. labelRole(%d, 'EXCHANGE_RATE_UPDATER')", EXCHANGE_RATE_UPDATER_ROLE);
         console.log("   Calldata:");
         console.logBytes(labelCalldata);
         console.log("");
 
         // 2. Grant role to service EOA
-        bytes memory grantCalldata = abi.encodeCall(
-            AccessManager.grantRole, (EXCHANGE_RATE_UPDATER_ROLE, serviceEOA, 0)
-        );
+        bytes memory grantCalldata =
+            abi.encodeCall(AccessManager.grantRole, (EXCHANGE_RATE_UPDATER_ROLE, serviceEOA, 0));
         console.log("2. grantRole(%d, %s, 0)", EXCHANGE_RATE_UPDATER_ROLE, serviceEOA);
         console.log("   Calldata:");
         console.logBytes(grantCalldata);
@@ -42,10 +40,13 @@ contract ExchangeRateUpdaterRole is Script {
         bytes4[] memory selectors = new bytes4[](2);
         selectors[0] = sPOLMessenger.updateL2ExchangeRate.selector;
         selectors[1] = sPOLMessenger.completeBackfill.selector;
-        bytes memory setRoleCalldata = abi.encodeCall(
-            AccessManager.setTargetFunctionRole, (messengerAddr, selectors, EXCHANGE_RATE_UPDATER_ROLE)
+        bytes memory setRoleCalldata =
+            abi.encodeCall(AccessManager.setTargetFunctionRole, (messengerAddr, selectors, EXCHANGE_RATE_UPDATER_ROLE));
+        console.log(
+            "3. setTargetFunctionRole(%s, [updateL2ExchangeRate, completeBackfill], %d)",
+            messengerAddr,
+            EXCHANGE_RATE_UPDATER_ROLE
         );
-        console.log("3. setTargetFunctionRole(%s, [updateL2ExchangeRate, completeBackfill], %d)", messengerAddr, EXCHANGE_RATE_UPDATER_ROLE);
         console.log("   Calldata:");
         console.logBytes(setRoleCalldata);
         console.log("");
@@ -55,10 +56,13 @@ contract ExchangeRateUpdaterRole is Script {
         //    call them directly. The admin can always re-grant itself the role or reassign the functions
         //    back to ADMIN_ROLE, but granting the role upfront avoids needing an extra tx in emergencies.
         address adminSafe = 0x619D553686958A873A62B336b2DD97C3b25134EA;
-        bytes memory grantAdminCalldata = abi.encodeCall(
-            AccessManager.grantRole, (EXCHANGE_RATE_UPDATER_ROLE, adminSafe, 0)
+        bytes memory grantAdminCalldata =
+            abi.encodeCall(AccessManager.grantRole, (EXCHANGE_RATE_UPDATER_ROLE, adminSafe, 0));
+        console.log(
+            "4. (Optional) grantRole(%d, %s, 0) -- allows admin Safe to also call these functions",
+            EXCHANGE_RATE_UPDATER_ROLE,
+            adminSafe
         );
-        console.log("4. (Optional) grantRole(%d, %s, 0) -- allows admin Safe to also call these functions", EXCHANGE_RATE_UPDATER_ROLE, adminSafe);
         console.log("   Calldata:");
         console.logBytes(grantAdminCalldata);
         console.log("");
