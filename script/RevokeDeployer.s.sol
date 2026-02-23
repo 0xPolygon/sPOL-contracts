@@ -11,9 +11,10 @@ contract RevokeDeployer is Script {
     function run() public {
         uint256 pk = vm.envUint("DEPLOYER_PRIVATE_KEY");
         address deployer = vm.addr(pk);
-        string memory json = vm.readFile("script/deployment.json");
+        string memory json = vm.readFile("script/deployment-mainnet.json");
 
         // --- L1 ---
+        vm.createSelectFork(vm.envString("L1_RPC_URL"));
         address accessManagerL1Addr = vm.parseJsonAddress(json, ".sPOL_L1.accessManagerL1");
         AccessManager accessManagerL1 = AccessManager(accessManagerL1Addr);
 
@@ -21,7 +22,6 @@ contract RevokeDeployer is Script {
         (bool safeIsAdminL1,) = accessManagerL1.hasRole(accessManagerL1.ADMIN_ROLE(), ADMIN_SAFE);
         require(safeIsAdminL1, "Safe is NOT admin on L1 - aborting");
 
-        vm.createSelectFork(vm.envString("L1_RPC_URL"));
         vm.startBroadcast(pk);
         accessManagerL1.renounceRole(accessManagerL1.ADMIN_ROLE(), deployer);
         vm.stopBroadcast();
@@ -31,6 +31,7 @@ contract RevokeDeployer is Script {
         console.log("L1: deployer admin revoked");
 
         // --- L2 ---
+        vm.createSelectFork(vm.envString("L2_RPC_URL"));
         address accessManagerL2Addr = vm.parseJsonAddress(json, ".sPOL_L2.accessManagerL2");
         AccessManager accessManagerL2 = AccessManager(accessManagerL2Addr);
 
@@ -38,7 +39,6 @@ contract RevokeDeployer is Script {
         (bool safeIsAdminL2,) = accessManagerL2.hasRole(accessManagerL2.ADMIN_ROLE(), ADMIN_SAFE);
         require(safeIsAdminL2, "Safe is NOT admin on L2 - aborting");
 
-        vm.createSelectFork(vm.envString("L2_RPC_URL"));
         vm.startBroadcast(pk);
         accessManagerL2.renounceRole(accessManagerL2.ADMIN_ROLE(), deployer);
         vm.stopBroadcast();
