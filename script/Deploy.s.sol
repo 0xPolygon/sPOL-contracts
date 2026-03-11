@@ -189,7 +189,6 @@ contract Deploy is Script, ConfigLoader {
 
         if (_deployer != admin) {
             accessManagerL1.grantRole(accessManagerL1.ADMIN_ROLE(), admin, 0);
-            accessManagerL1.renounceRole(accessManagerL1.ADMIN_ROLE(), _deployer);
         }
         _verifyDeploymentL1();
     }
@@ -212,7 +211,6 @@ contract Deploy is Script, ConfigLoader {
 
         if (_deployer != admin) {
             accessManagerL2.grantRole(accessManagerL2.ADMIN_ROLE(), admin, 0);
-            accessManagerL2.renounceRole(accessManagerL2.ADMIN_ROLE(), _deployer);
         }
         _verifyDeploymentL2();
     }
