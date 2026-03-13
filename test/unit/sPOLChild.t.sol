@@ -1231,4 +1231,317 @@ contract sPOLChildTest is Test, Deploy {
         sPOLChildToken.withdrawPOL();
         assertGt(user.balance, balanceBefore, "User should receive POL even when paused");
     }
+
+    ///////////////////////////////////////
+    ///  Targeted Sell / Withdraw Pause ///
+    ///////////////////////////////////////
+
+    function test_pauseSell_onlyAdmin() public {
+        address nonAdmin = makeAddr("nonAdmin");
+        vm.prank(nonAdmin);
+        vm.expectRevert(abi.encodeWithSignature("AccessManagedUnauthorized(address)", nonAdmin));
+        sPOLChildToken.pauseSell();
+    }
+
+    function test_unpauseSell_onlyAdmin() public {
+        address nonAdmin = makeAddr("nonAdmin");
+        vm.prank(nonAdmin);
+        vm.expectRevert(abi.encodeWithSignature("AccessManagedUnauthorized(address)", nonAdmin));
+        sPOLChildToken.unpauseSell();
+    }
+
+    function test_pauseSell_success() public {
+        vm.startPrank(admin);
+        sPOLChildToken.unpauseSell();
+        assertTrue(sPOLChildToken.sellUnpaused(), "sellUnpaused should be true after unpause");
+
+        sPOLChildToken.pauseSell();
+        assertFalse(sPOLChildToken.sellUnpaused(), "sellUnpaused should be false after pause");
+        vm.stopPrank();
+    }
+
+    function test_unpauseSell_success() public {
+        assertFalse(sPOLChildToken.sellUnpaused(), "sellUnpaused should start false");
+
+        vm.prank(admin);
+        sPOLChildToken.unpauseSell();
+        assertTrue(sPOLChildToken.sellUnpaused(), "sellUnpaused should be true after unpause");
+    }
+
+    function test_pauseWithdraw_onlyAdmin() public {
+        address nonAdmin = makeAddr("nonAdmin");
+        vm.prank(nonAdmin);
+        vm.expectRevert(abi.encodeWithSignature("AccessManagedUnauthorized(address)", nonAdmin));
+        sPOLChildToken.pauseWithdraw();
+    }
+
+    function test_unpauseWithdraw_onlyAdmin() public {
+        address nonAdmin = makeAddr("nonAdmin");
+        vm.prank(nonAdmin);
+        vm.expectRevert(abi.encodeWithSignature("AccessManagedUnauthorized(address)", nonAdmin));
+        sPOLChildToken.unpauseWithdraw();
+    }
+
+    function test_pauseWithdraw_success() public {
+        vm.startPrank(admin);
+        sPOLChildToken.unpauseWithdraw();
+        assertTrue(sPOLChildToken.withdrawUnpaused(), "withdrawUnpaused should be true after unpause");
+
+        sPOLChildToken.pauseWithdraw();
+        assertFalse(sPOLChildToken.withdrawUnpaused(), "withdrawUnpaused should be false after pause");
+        vm.stopPrank();
+    }
+
+    function test_unpauseWithdraw_success() public {
+        assertFalse(sPOLChildToken.withdrawUnpaused(), "withdrawUnpaused should start false");
+
+        vm.prank(admin);
+        sPOLChildToken.unpauseWithdraw();
+        assertTrue(sPOLChildToken.withdrawUnpaused(), "withdrawUnpaused should be true after unpause");
+    }
+
+    function test_sellSPOL_revertsWhenSellPaused() public {
+        _defaultUnpause();
+        address user = makeAddr("user");
+        uint256 polAmount = 10e18;
+        vm.deal(user, polAmount);
+        vm.prank(user);
+        sPOLChildToken.buySPOL{value: polAmount}(polAmount);
+        uint256 sPOLBalance = sPOLChildToken.balanceOf(user);
+
+        // Pause only sell
+        vm.prank(admin);
+        sPOLChildToken.pauseSell();
+
+        vm.prank(user);
+        vm.expectRevert(abi.encodeWithSelector(sPOLChild.FunctionalityPaused.selector));
+        sPOLChildToken.sellSPOL(sPOLBalance);
+    }
+
+    function test_sellSPOL_revertsWhenBothGlobalAndSellPaused() public {
+        _defaultUnpause();
+        address user = makeAddr("user");
+        uint256 polAmount = 10e18;
+        vm.deal(user, polAmount);
+        vm.prank(user);
+        sPOLChildToken.buySPOL{value: polAmount}(polAmount);
+        uint256 sPOLBalance = sPOLChildToken.balanceOf(user);
+
+        // Pause both global and sell
+        vm.startPrank(admin);
+        sPOLChildToken.pauseSell();
+        sPOLChildToken.pauseBuySell();
+        vm.stopPrank();
+
+        // Global pause fires first (whenNotPaused modifier)
+        vm.prank(user);
+        vm.expectRevert(abi.encodeWithSelector(PausableUpgradeable.EnforcedPause.selector));
+        sPOLChildToken.sellSPOL(sPOLBalance);
+    }
+
+    function test_sellSPOL_stillBlockedAfterUnpauseBuySellIfSellPaused() public {
+        _defaultUnpause();
+        address user = makeAddr("user");
+        uint256 polAmount = 10e18;
+        vm.deal(user, polAmount);
+        vm.prank(user);
+        sPOLChildToken.buySPOL{value: polAmount}(polAmount);
+        uint256 sPOLBalance = sPOLChildToken.balanceOf(user);
+
+        // Pause sell, then global pause, then unpause global
+        vm.startPrank(admin);
+        sPOLChildToken.pauseSell();
+        sPOLChildToken.pauseBuySell();
+        sPOLChildToken.unpauseBuySell();
+        vm.stopPrank();
+
+        // sellPaused still active => sell should revert
+        vm.prank(user);
+        vm.expectRevert(abi.encodeWithSelector(sPOLChild.FunctionalityPaused.selector));
+        sPOLChildToken.sellSPOL(sPOLBalance);
+    }
+
+    function test_withdrawPOL_revertsWhenWithdrawPaused() public {
+        _defaultUnpause();
+        address user = makeAddr("user");
+        uint256 polAmount = 10e18;
+        _setupAndSell(user, polAmount);
+
+        // Fund and trigger backfill so withdrawal matures
+        address buyer = makeAddr("buyer");
+        vm.deal(buyer, 100e18);
+        vm.prank(buyer);
+        sPOLChildToken.buySPOL{value: 100e18}(100e18);
+
+        vm.mockCall(
+            address(sPOLChildToken.bridgeHelper()),
+            abi.encodeWithSelector(sPOLChildToken.bridgeHelper().bridgePOLToL1.selector),
+            abi.encode(true)
+        );
+        vm.prank(admin);
+        sPOLChildToken.balanceWithL1();
+
+        // Pause withdrawals
+        vm.prank(admin);
+        sPOLChildToken.pauseWithdraw();
+
+        vm.prank(user);
+        vm.expectRevert(abi.encodeWithSelector(sPOLChild.FunctionalityPaused.selector));
+        sPOLChildToken.withdrawPOL();
+    }
+
+    function test_withdrawPOL_succeedsAfterUnpauseWithdraw() public {
+        _defaultUnpause();
+        address user = makeAddr("user");
+        uint256 polAmount = 10e18;
+        _setupAndSell(user, polAmount);
+
+        // Fund and trigger backfill
+        address buyer = makeAddr("buyer");
+        vm.deal(buyer, 100e18);
+        vm.prank(buyer);
+        sPOLChildToken.buySPOL{value: 100e18}(100e18);
+
+        vm.mockCall(
+            address(sPOLChildToken.bridgeHelper()),
+            abi.encodeWithSelector(sPOLChildToken.bridgeHelper().bridgePOLToL1.selector),
+            abi.encode(true)
+        );
+        vm.prank(admin);
+        sPOLChildToken.balanceWithL1();
+
+        // Pause then unpause withdrawals
+        vm.startPrank(admin);
+        sPOLChildToken.pauseWithdraw();
+        sPOLChildToken.unpauseWithdraw();
+        vm.stopPrank();
+
+        uint256 balanceBefore = user.balance;
+        vm.prank(user);
+        sPOLChildToken.withdrawPOL();
+        assertGt(user.balance, balanceBefore, "User should receive POL after unpause");
+    }
+
+    function test_withdrawPOL_succeedsWhenSellPausedButWithdrawNotPaused() public {
+        _defaultUnpause();
+        address user = makeAddr("user");
+        uint256 polAmount = 10e18;
+        _setupAndSell(user, polAmount);
+
+        // Fund and trigger backfill
+        address buyer = makeAddr("buyer");
+        vm.deal(buyer, 100e18);
+        vm.prank(buyer);
+        sPOLChildToken.buySPOL{value: 100e18}(100e18);
+
+        vm.mockCall(
+            address(sPOLChildToken.bridgeHelper()),
+            abi.encodeWithSelector(sPOLChildToken.bridgeHelper().bridgePOLToL1.selector),
+            abi.encode(true)
+        );
+        vm.prank(admin);
+        sPOLChildToken.balanceWithL1();
+
+        // Now disable sell — withdrawals must still work
+        vm.prank(admin);
+        sPOLChildToken.pauseSell();
+        assertFalse(sPOLChildToken.sellUnpaused());
+
+        uint256 balanceBefore = user.balance;
+        vm.prank(user);
+        sPOLChildToken.withdrawPOL();
+        assertGt(user.balance, balanceBefore, "User should withdraw even when sell is paused");
+    }
+
+    function test_withdrawPOL_succeedsWhenSellAndGlobalPausedButWithdrawNotPaused() public {
+        _defaultUnpause();
+        address user = makeAddr("user");
+        uint256 polAmount = 10e18;
+        _setupAndSell(user, polAmount);
+
+        // Fund and trigger backfill
+        address buyer = makeAddr("buyer");
+        vm.deal(buyer, 100e18);
+        vm.prank(buyer);
+        sPOLChildToken.buySPOL{value: 100e18}(100e18);
+
+        vm.mockCall(
+            address(sPOLChildToken.bridgeHelper()),
+            abi.encodeWithSelector(sPOLChildToken.bridgeHelper().bridgePOLToL1.selector),
+            abi.encode(true)
+        );
+        vm.prank(admin);
+        sPOLChildToken.balanceWithL1();
+
+        // Pause both sell and global — withdraw should still work
+        vm.startPrank(admin);
+        sPOLChildToken.pauseSell();
+        sPOLChildToken.pauseBuySell();
+        vm.stopPrank();
+
+        uint256 balanceBefore = user.balance;
+        vm.prank(user);
+        sPOLChildToken.withdrawPOL();
+        assertGt(user.balance, balanceBefore, "Withdraw works despite sell+global pause");
+    }
+
+    function test_withdrawPOL_revertsWhenWithdrawPausedEvenIfSellUnpaused() public {
+        _defaultUnpause();
+        address user = makeAddr("user");
+        uint256 polAmount = 10e18;
+        _setupAndSell(user, polAmount);
+
+        // Fund and trigger backfill
+        address buyer = makeAddr("buyer");
+        vm.deal(buyer, 100e18);
+        vm.prank(buyer);
+        sPOLChildToken.buySPOL{value: 100e18}(100e18);
+
+        vm.mockCall(
+            address(sPOLChildToken.bridgeHelper()),
+            abi.encodeWithSelector(sPOLChildToken.bridgeHelper().bridgePOLToL1.selector),
+            abi.encode(true)
+        );
+        vm.prank(admin);
+        sPOLChildToken.balanceWithL1();
+
+        // Only pause withdraw, sell remains active
+        vm.prank(admin);
+        sPOLChildToken.pauseWithdraw();
+        assertTrue(sPOLChildToken.sellUnpaused(), "sell should not be paused");
+
+        vm.prank(user);
+        vm.expectRevert(abi.encodeWithSelector(sPOLChild.FunctionalityPaused.selector));
+        sPOLChildToken.withdrawPOL();
+    }
+
+    function test_sellSPOL_revertsAfterDeployWithoutExplicitPause() public {
+        // Unpause only global — sell should still revert because sellUnpaused defaults to false
+        _sendExchangeRateUpdate(INITIAL_L1_SPOL_BALANCE, INITIAL_L1_DPOL_BALANCE);
+        vm.prank(admin);
+        sPOLChildToken.unpauseBuySell();
+
+        assertFalse(sPOLChildToken.sellUnpaused(), "sellUnpaused should default to false after deploy");
+
+        address user = makeAddr("user");
+        vm.prank(user);
+        vm.expectRevert(abi.encodeWithSelector(sPOLChild.FunctionalityPaused.selector));
+        sPOLChildToken.sellSPOL(1);
+    }
+
+    function test_withdrawPOL_revertsAfterDeployWithoutExplicitPause() public {
+        // Unpause global + sell so we can create a withdrawal nonce, but never unpause withdraw
+        _sendExchangeRateUpdate(INITIAL_L1_SPOL_BALANCE, INITIAL_L1_DPOL_BALANCE);
+        vm.startPrank(admin);
+        sPOLChildToken.unpauseBuySell();
+        sPOLChildToken.unpauseSell();
+        vm.stopPrank();
+
+        assertFalse(sPOLChildToken.withdrawUnpaused(), "withdrawUnpaused should default to false after deploy");
+
+        address user = makeAddr("user");
+        vm.prank(user);
+        vm.expectRevert(abi.encodeWithSelector(sPOLChild.FunctionalityPaused.selector));
+        sPOLChildToken.withdrawPOL();
+    }
 }
