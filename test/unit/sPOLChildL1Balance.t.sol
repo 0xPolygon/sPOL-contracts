@@ -42,8 +42,11 @@ contract sPOLChildL1BalanceTest is Test, Deploy {
         bytes memory message = abi.encode(MsgCoder.MsgType.EXCHANGE_UPDATE, abi.encode(1, 1));
         vm.prank(stateSyncerL2);
         sPOLChildToken.onStateReceive(0, message);
-        vm.prank(admin);
+        vm.startPrank(admin);
         sPOLChildToken.unpauseBuySell();
+        sPOLChildToken.unpauseSell();
+        sPOLChildToken.unpauseWithdraw();
+        vm.stopPrank();
     }
 
     function test_balance_only_buy() public {

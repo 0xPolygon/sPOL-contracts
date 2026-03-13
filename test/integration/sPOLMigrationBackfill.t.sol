@@ -153,8 +153,11 @@ contract sPOLMigrationBackfillTest is Test, Deploy {
 
     function _unpauseL2() internal {
         vm.selectFork(networkL2);
-        vm.prank(admin);
+        vm.startPrank(admin);
         child.unpauseBuySell();
+        child.unpauseSell();
+        child.unpauseWithdraw();
+        vm.stopPrank();
     }
 
     function _deployMockMessenger() internal returns (MocksPOLMessenger) {

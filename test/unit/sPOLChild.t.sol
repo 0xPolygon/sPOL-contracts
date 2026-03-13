@@ -45,8 +45,11 @@ contract sPOLChildTest is Test, Deploy {
 
     function _defaultUnpause() internal {
         _sendExchangeRateUpdate(INITIAL_L1_SPOL_BALANCE, INITIAL_L1_DPOL_BALANCE);
-        vm.prank(admin);
+        vm.startPrank(admin);
         sPOLChildToken.unpauseBuySell();
+        sPOLChildToken.unpauseSell();
+        sPOLChildToken.unpauseWithdraw();
+        vm.stopPrank();
     }
 
     function test_exchangeRateUpdate() public {
