@@ -7,7 +7,7 @@ import {sPOLMessenger} from "../src/sPOLMessenger.sol";
 
 /// @notice Outputs calldata for creating the Exchange Rate Updater role via the AccessManager
 contract ExchangeRateUpdaterRole is Script {
-    uint64 constant EXCHANGE_RATE_UPDATER_ROLE = 1;
+    uint64 constant EXCHANGE_RATE_UPDATER_ROLE = 2;
 
     function run() public view {
         string memory json = vm.readFile("script/deployment-mainnet.json");
