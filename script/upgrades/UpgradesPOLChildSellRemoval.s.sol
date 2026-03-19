@@ -7,15 +7,15 @@ import {AccessManager} from "@openzeppelin/contracts/access/manager/AccessManage
 import {ProxyAdmin} from "@openzeppelin/contracts/proxy/transparent/ProxyAdmin.sol";
 import {ITransparentUpgradeableProxy} from "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol";
 
-/// @notice Deploys a new sPOLChild implementation with targeted sell/withdraw pause
+/// @notice Deploys a new sPOLChild implementation with removed sell/withdraw
 ///         functionality and outputs the calldata needed to upgrade via the AccessManager.
 /// @dev    Usage:
-///         forge script script/upgrades/UpgradesPOLChildSellWithdrawPause.s.sol \
+///         forge script script/upgrades/UpgradesPOLChildSellRemoval.s.sol \
 ///             --sig "run(string)" "mainnet" --rpc-url $L2_RPC_URL --broadcast
 ///
 ///         Pass "mainnet" or "testnet" as the argument.
 ///         The script reads the matching deployment-*.json for addresses.
-contract UpgradesPOLChildSellWithdrawPause is Script {
+contract UpgradesPOLChildSellRemoval is Script {
     struct Config {
         address sPOLChildProxy;
         address sPOLChildProxyAdmin;
