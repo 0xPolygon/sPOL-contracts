@@ -50,6 +50,7 @@ contract sPOLControllerCleanupTest is Test, Deploy {
         // Set values
         loadConfigFromJson("ethereum-polygon");
         // Custom config
+        saltPrefix = "mainnet-test-";
 
         //setup L1
         vm.selectFork(networkL1);

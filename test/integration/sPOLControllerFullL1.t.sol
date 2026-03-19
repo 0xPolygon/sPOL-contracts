@@ -72,6 +72,7 @@ contract sPOLControllerFullL1Test is Test, Deploy, CheckpointData {
         // Set values
         loadConfigFromJson("ethereum-polygon");
         // Custom config
+        saltPrefix = "mainnet-test-";
 
         //setup L1
         vm.selectFork(networkL1);

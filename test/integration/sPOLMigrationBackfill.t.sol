@@ -55,6 +55,7 @@ contract sPOLMigrationBackfillTest is Test, Deploy, CheckpointData {
         nonAdmin = makeAddr("nonAdmin");
 
         loadConfigFromJson("ethereum-polygon");
+        saltPrefix = "mainnet-test-";
 
         // Setup L1
         vm.selectFork(networkL1);
