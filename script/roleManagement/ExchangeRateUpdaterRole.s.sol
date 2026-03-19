@@ -3,7 +3,7 @@ pragma solidity ^0.8.0;
 
 import "forge-std/Script.sol";
 import {AccessManager} from "@openzeppelin/contracts/access/manager/AccessManager.sol";
-import {sPOLMessenger} from "../src/sPOLMessenger.sol";
+import {sPOLMessenger} from "../../src/sPOLMessenger.sol";
 
 /// @notice Outputs calldata for creating the Exchange Rate Updater role via the AccessManager
 contract ExchangeRateUpdaterRole is Script {
