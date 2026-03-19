@@ -43,15 +43,6 @@ jobs:
           L1_RPC_URL: ${{ vars.L1_RPC_URL }}
           L2_RPC_URL: ${{ vars.L2_RPC_URL }}
         run: |
-          forge test -vvv
+          forge test -vvv || forge test --rerun -vvvvv
         id: test
-        continue-on-error: true
-
-      - name: Rerun failed tests with full verbosity
-        if: steps.test.outcome == 'failure'
-        env:
-          L1_RPC_URL: ${{ vars.L1_RPC_URL }}
-          L2_RPC_URL: ${{ vars.L2_RPC_URL }}
-        run: |
-          forge test --rerun -vvvvv
 
