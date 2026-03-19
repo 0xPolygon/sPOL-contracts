@@ -38,7 +38,7 @@ contract sPOLChildL1BalanceTest is Test, Deploy {
         vm.prank(stateSyncerL2);
         sPOLChildToken.onStateReceive(0, message);
         vm.prank(admin);
-        sPOLChildToken.unpauseBuySell();
+        sPOLChildToken.unpauseBuy();
     }
 
     function test_balance_only_buy() public {

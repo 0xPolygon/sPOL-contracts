@@ -402,14 +402,14 @@ contract sPOLChild is
         emit MaxExchangeRateDelayChanged(oldDelay, _newDelay);
     }
 
-    /// @notice Pauses buy operations on L2. Withdrawals remain available.
-    function pauseBuySell() external restricted {
+    /// @notice Pauses buy operations on L2
+    function pauseBuy() external restricted {
         _pause();
     }
 
     /// @notice Resumes buy operations on L2
     /// @dev Only succeeds if exchange rate is fresh (within maxExchangeRateUpdateDelay).
-    function unpauseBuySell() external restricted {
+    function unpauseBuy() external restricted {
         require(
             lastExchangeRateUpdate + maxExchangeRateUpdateDelay >= block.timestamp,
             ExchangeRateUpdateTooOld(lastExchangeRateUpdate, maxExchangeRateUpdateDelay, block.timestamp)

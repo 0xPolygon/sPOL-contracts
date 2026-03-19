@@ -42,7 +42,7 @@ contract sPOLChildTest is Test, Deploy {
     function _defaultUnpause() internal {
         _sendExchangeRateUpdate(INITIAL_L1_SPOL_BALANCE, INITIAL_L1_DPOL_BALANCE);
         vm.prank(admin);
-        sPOLChildToken.unpauseBuySell();
+        sPOLChildToken.unpauseBuy();
     }
 
     function test_exchangeRateUpdate() public {
@@ -347,7 +347,7 @@ contract sPOLChildTest is Test, Deploy {
         vm.deal(buyer, polAmount);
 
         vm.prank(admin);
-        sPOLChildToken.pauseBuySell();
+        sPOLChildToken.pauseBuy();
 
         vm.prank(buyer);
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
@@ -656,34 +656,34 @@ contract sPOLChildTest is Test, Deploy {
         sPOLChildToken.setMaxExchangeRateUpdateDelay(7 days);
     }
 
-    function test_pauseBuySell_onlyAdmin() public {
+    function test_pauseBuy_onlyAdmin() public {
         _defaultUnpause();
         address nonAdmin = makeAddr("nonAdmin");
 
         vm.prank(nonAdmin);
         vm.expectRevert(abi.encodeWithSignature("AccessManagedUnauthorized(address)", nonAdmin));
-        sPOLChildToken.pauseBuySell();
+        sPOLChildToken.pauseBuy();
     }
 
-    function test_pauseBuySell_success() public {
+    function test_pauseBuy_success() public {
         _defaultUnpause();
 
         vm.prank(admin);
-        sPOLChildToken.pauseBuySell();
+        sPOLChildToken.pauseBuy();
 
         assertTrue(sPOLChildToken.paused(), "Contract should be paused");
     }
 
-    function test_unpauseBuySell_onlyAdmin() public {
+    function test_unpauseBuy_onlyAdmin() public {
         _sendExchangeRateUpdate(INITIAL_L1_SPOL_BALANCE, INITIAL_L1_DPOL_BALANCE);
         address nonAdmin = makeAddr("nonAdmin");
 
         vm.prank(nonAdmin);
         vm.expectRevert(abi.encodeWithSignature("AccessManagedUnauthorized(address)", nonAdmin));
-        sPOLChildToken.unpauseBuySell();
+        sPOLChildToken.unpauseBuy();
     }
 
-    function test_unpauseBuySell_revertsIfExchangeRateOutdated() public {
+    function test_unpauseBuy_revertsIfExchangeRateOutdated() public {
         _sendExchangeRateUpdate(INITIAL_L1_SPOL_BALANCE, INITIAL_L1_DPOL_BALANCE);
         uint256 timestampBefore = sPOLChildToken.lastExchangeRateUpdate();
 
@@ -696,16 +696,16 @@ contract sPOLChildTest is Test, Deploy {
                 sPOLChild.ExchangeRateUpdateTooOld.selector, timestampBefore, 10 days, timestampBefore + 11 days
             )
         );
-        sPOLChildToken.unpauseBuySell();
+        sPOLChildToken.unpauseBuy();
     }
 
-    function test_unpauseBuySell_success() public {
+    function test_unpauseBuy_success() public {
         _sendExchangeRateUpdate(INITIAL_L1_SPOL_BALANCE, INITIAL_L1_DPOL_BALANCE);
 
         assertTrue(sPOLChildToken.paused(), "Contract should start paused");
 
         vm.prank(admin);
-        sPOLChildToken.unpauseBuySell();
+        sPOLChildToken.unpauseBuy();
 
         assertFalse(sPOLChildToken.paused(), "Contract should be unpaused");
     }
