@@ -18,8 +18,8 @@ import {DoubleEndedQueue} from "@openzeppelin/contracts/utils/structs/DoubleEnde
 
 /// @title sPOL Child
 /// @notice L2 contract for the sPOL liquid staking protocol on Polygon
-/// @dev Handles L2 buy/sell operations using a cached L1 exchange rate. Coordinates migrations
-///      (surplus POL to L1) and backfills (POL needed from L1) to keep L1/L2 balances in sync.
+/// @dev Handles L2 buy operations using a cached L1 exchange rate. Coordinates migrations
+///      (surplus POL to L1) to keep L1/L2 balances in sync.
 ///      Also serves as the sPOL ERC20 token on L2.
 contract sPOLChild is
     Initializable,
@@ -47,14 +47,14 @@ contract sPOLChild is
     // local info
     uint256 public polBalance;
     // These three together should always be equal to the sum of outstanding POL in userOutstandingWithdraw
-    uint256 public missingWithdrawPOLBalance;
-    uint256 public reservedWithdrawPOLBalance;
-    uint256 public requestedWithdrawPOLBalance;
+    uint256 missingWithdrawPOLBalance;
+    uint256 reservedWithdrawPOLBalance;
+    uint256 requestedWithdrawPOLBalance;
 
     // sPOL originating on L2 needs to be locked in the bridge from L1 so it becomes "real"
     uint256 public locallyMintedSPOL;
     // sPOL that was burned on L2 needs to be released from bridge on L1 and also burned there
-    uint256 public locallyToBeBurnedSPOL;
+    uint256 locallyToBeBurnedSPOL;
     // L1 Messenger that needs to receive the sPOL to complete migrations/backfills
     address public l1Messenger;
     // Bridge helper contract, because POL has no withdrawFor function
@@ -64,10 +64,10 @@ contract sPOLChild is
     address public childChainManager;
 
     // Migration and backfill tracking
-    uint256 public backFillCycle;
-    mapping(uint256 => bool) public completedBackfills;
+    uint256 backFillCycle;
+    mapping(uint256 => bool) completedBackfills;
     bool public onGoingMigration;
-    bool public onGoingBackfill;
+    bool onGoingBackfill;
     uint256 public backMigratingSPOL;
 
     struct UserOutstanding {
@@ -82,15 +82,13 @@ contract sPOLChild is
     }
 
     // Nonce to Outstanding
-    mapping(uint256 => UserOutstanding) public userOutstandingWithdraw;
+    mapping(uint256 => UserOutstanding) userOutstandingWithdraw;
     // User to nonces
-    mapping(address => DoubleEndedQueue.Bytes32Deque) public userOutstandingNonces;
-    uint256 public globalWithdrawNonce;
+    mapping(address => DoubleEndedQueue.Bytes32Deque) userOutstandingNonces;
+    uint256 globalWithdrawNonce;
 
-    // Stake/unstake events
+    // Stake event
     event sPOLMinted(address indexed user, uint256 amountPOL, uint256 amountSPOL);
-    event sPOLBurned(address indexed user, uint256 amountSPOL, uint256 amountPOL, uint256 nonce);
-    event POLWithdrawn(address indexed user, uint256 amountPOL, uint256 nonce);
 
     // Exchange rate and operational events
     event ExchangeRateDeclined(
@@ -119,11 +117,9 @@ contract sPOLChild is
     error ExchangeRateUpdateTooOld(uint256 lastUpdate, uint256 maxAge, uint256 currentTime);
     error FeeCannotBeZero();
     error FeeTooHigh(uint16 provided, uint16 maxAllowed);
-    error FunctionalityPaused();
     error IncorrectPOLAmount(uint256 sent, uint256 expected);
     error MigrationAlreadyOngoing();
     error POLAmountMustBeGreaterThanZero();
-    error POLTransferFailed();
     error ZeroAddress();
 
     modifier onlyChildChainManager() {
@@ -171,19 +167,8 @@ contract sPOLChild is
     }
 
     ///////////////////////////////
-    ///  Stake/Unstake          ///
+    ///  Stake                  ///
     ///////////////////////////////
-
-    /// @notice Calculates POL amount received for burning sPOL on L2
-    /// @dev Uses L1 exchange rate cached on L2. No safety fee applied to sells (already worse than L1).
-    /// @param _sPOLAmount Amount of sPOL to convert
-    /// @return Amount of POL that would be redeemed
-    function convertSPOLToPOL(uint256 _sPOLAmount) public view returns (uint256) {
-        if (_sPOLAmount == 0) {
-            return 0;
-        }
-        return (_sPOLAmount * l1DPOLBalance) / l1SPOLBalance;
-    }
 
     /// @notice Calculates sPOL amount received for POL deposit on L2, including safety fee
     /// @dev Applies safety fee to protect against exchange rate lag from L1. Fee benefits all sPOL holders.
@@ -407,8 +392,8 @@ contract sPOLChild is
     }
 
     /// @notice Updates how long the exchange rate remains valid without L1 updates
-    /// @dev If exceeded, buy/sell operations pause automatically. Prevents exchange on stale rates.
-    ///      WARNING: Setting to 0 blocks all buys/sells. Setting too high allows trading on stale rates,
+    /// @dev If exceeded, buy operations pause automatically. Prevents exchange on stale rates.
+    ///      WARNING: Setting to 0 blocks all buys. Setting too high allows trading on stale rates,
     ///      which weakens the safety fee protection. Must be aligned with the service's update frequency.
     /// @param _newDelay New maximum age in seconds for the exchange rate
     function setMaxExchangeRateUpdateDelay(uint256 _newDelay) external restricted {
@@ -417,15 +402,13 @@ contract sPOLChild is
         emit MaxExchangeRateDelayChanged(oldDelay, _newDelay);
     }
 
-    /// @notice Pauses buy and sell operations on L2. Withdrawals remain available.
+    /// @notice Pauses buy operations on L2. Withdrawals remain available.
     function pauseBuySell() external restricted {
         _pause();
     }
 
-    /// @notice Resumes buy and sell operations on L2
+    /// @notice Resumes buy operations on L2
     /// @dev Only succeeds if exchange rate is fresh (within maxExchangeRateUpdateDelay).
-    ///      This does not override targeted flags: if sell was paused via `pauseSell`,
-    ///      `unpauseSell` is still required. Withdrawals remain available unless paused via `pauseWithdraw`.
     function unpauseBuySell() external restricted {
         require(
             lastExchangeRateUpdate + maxExchangeRateUpdateDelay >= block.timestamp,
