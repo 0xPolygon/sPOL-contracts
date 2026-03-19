@@ -70,10 +70,6 @@ contract sPOLChild is
     bool public onGoingBackfill;
     uint256 public backMigratingSPOL;
 
-    // Pause flags for specific functionalities (default false = paused)
-    bool public sellUnpaused;
-    bool public withdrawUnpaused;
-
     struct UserOutstanding {
         uint256 outstandingPOL;
         uint256 backFillCycle;
@@ -225,7 +221,6 @@ contract sPOLChild is
     ///      Reverts if exchange rate is stale.
     /// @param _sPOLAmount Amount of sPOL to burn
     function sellSPOL(uint256 _sPOLAmount) external whenNotPaused nonReentrant {
-        require(sellUnpaused, FunctionalityPaused());
         require(
             lastExchangeRateUpdate + maxExchangeRateUpdateDelay >= block.timestamp,
             ExchangeRateUpdateTooOld(lastExchangeRateUpdate, maxExchangeRateUpdateDelay, block.timestamp)
@@ -267,7 +262,6 @@ contract sPOLChild is
     /// @notice Claims all matured POL withdrawals for the caller on L2
     /// @dev Processes all nonces whose backfill cycle has completed. Transfers native POL to caller.
     function withdrawPOL() external nonReentrant {
-        require(withdrawUnpaused, FunctionalityPaused());
         DoubleEndedQueue.Bytes32Deque storage outstandingNonces = userOutstandingNonces[msg.sender];
         uint256 totalToWithdraw;
         while (!outstandingNonces.empty()) {
@@ -506,31 +500,6 @@ contract sPOLChild is
             ExchangeRateUpdateTooOld(lastExchangeRateUpdate, maxExchangeRateUpdateDelay, block.timestamp)
         );
         _unpause();
-    }
-
-    /// @notice Pauses only the sell operation on L2
-    /// @dev Prevents calls to `sellSPOL` while keeping buy and withdraw paths available.
-    function pauseSell() external restricted {
-        sellUnpaused = false;
-    }
-
-    /// @notice Resumes the sell operation on L2
-    /// @dev Re-enables calls to `sellSPOL` after a targeted sell pause.
-    ///      If global buy/sell pause is active, `unpauseBuySell` must also be called.
-    function unpauseSell() external restricted {
-        sellUnpaused = true;
-    }
-
-    /// @notice Pauses POL withdrawal claims on L2
-    /// @dev Prevents calls to `withdrawPOL` while preserving buy/sell behavior. Should not be used if active withdraw nonces exist.
-    function pauseWithdraw() external restricted {
-        withdrawUnpaused = false;
-    }
-
-    /// @notice Resumes POL withdrawal claims on L2
-    /// @dev Re-enables calls to `withdrawPOL` for matured withdrawal nonces.
-    function unpauseWithdraw() external restricted {
-        withdrawUnpaused = true;
     }
 
     /////////////////////////////////
