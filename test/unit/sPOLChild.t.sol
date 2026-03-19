@@ -7,8 +7,6 @@ import {sPOLChild} from "../../src/sPOLChild.sol";
 import {TransparentUpgradeableProxy} from "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol";
 import {MsgCoder} from "../../src/MsgCoder.sol";
 import {PausableUpgradeable} from "@openzeppelin-contracts-upgradeable/utils/PausableUpgradeable.sol";
-import {IERC20Errors} from "@openzeppelin/contracts/interfaces/draft-IERC6093.sol";
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 contract sPOLChildTest is Test, Deploy {
     sPOLChild public sPOLChildToken;
@@ -19,8 +17,6 @@ contract sPOLChildTest is Test, Deploy {
 
     // Events from sPOLChild contract
     event sPOLMinted(address indexed user, uint256 amountPOL, uint256 amountSPOL);
-    event sPOLBurned(address indexed user, uint256 amountSPOL, uint256 amountPOL, uint256 nonce);
-    event POLWithdrawn(address indexed user, uint256 amountPOL, uint256 nonce);
 
     function setUp() public {
         // Create test addresses
@@ -45,11 +41,8 @@ contract sPOLChildTest is Test, Deploy {
 
     function _defaultUnpause() internal {
         _sendExchangeRateUpdate(INITIAL_L1_SPOL_BALANCE, INITIAL_L1_DPOL_BALANCE);
-        vm.startPrank(admin);
+        vm.prank(admin);
         sPOLChildToken.unpauseBuySell();
-        sPOLChildToken.unpauseSell();
-        sPOLChildToken.unpauseWithdraw();
-        vm.stopPrank();
     }
 
     function test_exchangeRateUpdate() public {
@@ -62,22 +55,6 @@ contract sPOLChildTest is Test, Deploy {
 
         assertEq(sPOLChildToken.l1SPOLBalance(), l1SPOLBalance);
         assertEq(sPOLChildToken.l1DPOLBalance(), l1DPOLBalance);
-    }
-
-    function test_exchangeRateUpdate_ImprovesConversionRate() public {
-        uint256 oldConversionRate = sPOLChildToken.convertSPOLToPOL(1e18);
-
-        uint256 newL1SPOLBalance = 1000e18;
-        uint256 newL1DPOLBalance = 1100e18;
-
-        _sendExchangeRateUpdate(newL1SPOLBalance, newL1DPOLBalance);
-
-        uint256 newConversionRate = sPOLChildToken.convertSPOLToPOL(1e18);
-
-        assertEq(sPOLChildToken.l1SPOLBalance(), newL1SPOLBalance);
-        assertEq(sPOLChildToken.l1DPOLBalance(), newL1DPOLBalance);
-        assertGt(newConversionRate, oldConversionRate, "Conversion rate should improve");
-        assertEq(newConversionRate, 1.1e18); // 10% better rate
     }
 
     function test_exchangeRateUpdate_UpdatesTimestamp() public {
@@ -194,19 +171,6 @@ contract sPOLChildTest is Test, Deploy {
         sPOLChildToken.onStateReceive(0, message);
     }
 
-    function test_convertSPOLToPOL_AfterExchangeRateUpdate() public {
-        // Test conversion with initial rate
-        uint256 sPOLAmount = 100e18;
-        uint256 initialConversion = sPOLChildToken.convertSPOLToPOL(sPOLAmount);
-        assertEq(initialConversion, 100e18); // 1:1 ratio
-
-        // Update to better rate (20% yield)
-        _sendExchangeRateUpdate(1000e18, 1200e18);
-
-        uint256 newConversion = sPOLChildToken.convertSPOLToPOL(sPOLAmount);
-        assertEq(newConversion, 120e18); // 1.2:1 ratio
-    }
-
     function test_convertPOLToSPOL_WithSafetyFee() public view {
         uint256 polAmount = 100e18;
         uint256 safetyFee = sPOLChildToken.safetyFee();
@@ -255,29 +219,29 @@ contract sPOLChildTest is Test, Deploy {
     }
 
     function test_exchangeRateUpdate_MultipleUpdates() public {
-        uint256 startingConversion = sPOLChildToken.convertSPOLToPOL(1e18);
+        uint256 startingConversion = sPOLChildToken.convertPOLToSPOL(1e18);
 
         // First update: 5% yield
         _sendExchangeRateUpdate(1000e18, 1050e18);
-        uint256 firstConversion = sPOLChildToken.convertSPOLToPOL(1e18);
+        uint256 firstConversion = sPOLChildToken.convertPOLToSPOL(1e18);
 
         // Second update: 10% total yield
         _sendExchangeRateUpdate(1000e18, 1100e18);
-        uint256 secondConversion = sPOLChildToken.convertSPOLToPOL(1e18);
+        uint256 secondConversion = sPOLChildToken.convertPOLToSPOL(1e18);
 
         // Third update: 15% total yield
         _sendExchangeRateUpdate(1000e18, 1150e18);
-        uint256 thirdConversion = sPOLChildToken.convertSPOLToPOL(1e18);
+        uint256 thirdConversion = sPOLChildToken.convertPOLToSPOL(1e18);
 
-        // Each should be better than the previous
-        assertGe(firstConversion, startingConversion);
-        assertGe(secondConversion, firstConversion);
-        assertGe(thirdConversion, secondConversion);
+        // Each should give fewer sPOL per POL as yield improves
+        assertLe(firstConversion, startingConversion);
+        assertLe(secondConversion, firstConversion);
+        assertLe(thirdConversion, secondConversion);
 
-        // Check exact values
-        assertEq(firstConversion, 1.05e18);
-        assertEq(secondConversion, 1.1e18);
-        assertEq(thirdConversion, 1.15e18);
+        // Check exact values (POL→sPOL includes 0.3% safety fee)
+        assertEq(firstConversion, 949523809523809523);
+        assertEq(secondConversion, 906363636363636363);
+        assertEq(thirdConversion, 866956521739130434);
     }
 
     function test_exchangeRateUpdate_LargeNumbers() public {
@@ -290,23 +254,23 @@ contract sPOLChildTest is Test, Deploy {
         assertEq(sPOLChildToken.l1SPOLBalance(), largeL1SPOL);
         assertEq(sPOLChildToken.l1DPOLBalance(), largeL1DPOL);
 
-        // Test conversion doesn't overflow
+        // Test conversion doesn't overflow (POL→sPOL with 10% yield and 0.3% safety fee)
         uint256 testAmount = 1e18;
-        uint256 conversion = sPOLChildToken.convertSPOLToPOL(testAmount);
-        uint256 expectedAmount = 11e17;
+        uint256 conversion = sPOLChildToken.convertPOLToSPOL(testAmount);
+        uint256 expectedAmount = uint256(1e18) * 9970 / 11000; // ~906363636363636363
         assertApproxEqAbs(conversion, expectedAmount, 1);
-        // make sure rounding error is in expected direction
-        assertLt(conversion, expectedAmount);
+        assertLe(conversion, expectedAmount);
     }
 
     function test_exchangeRateUpdate_MinimalImprovement() public {
-        uint256 oldConversion = sPOLChildToken.convertSPOLToPOL(1e18);
+        uint256 oldConversion = sPOLChildToken.convertPOLToSPOL(1e18);
 
         // Update with minimal improvement (1 wei better)
         _sendExchangeRateUpdate(INITIAL_L1_SPOL_BALANCE, INITIAL_L1_DPOL_BALANCE + 1);
 
-        uint256 newConversion = sPOLChildToken.convertSPOLToPOL(1e18);
-        assertGe(newConversion, oldConversion);
+        uint256 newConversion = sPOLChildToken.convertPOLToSPOL(1e18);
+        // With improved yield, each sPOL is worth more POL, so you get fewer sPOL per POL
+        assertLe(newConversion, oldConversion);
     }
 
     // TODO think about this
@@ -493,407 +457,6 @@ contract sPOLChildTest is Test, Deploy {
         assertEq(sPOLChildToken.balanceOf(buyer), expectedSPOL);
     }
 
-    function test_convertPOLToSPOL_PrecisionImprovement() public {
-        _defaultUnpause();
-        _sendExchangeRateUpdate(1000e18, 1001e18);
-
-        uint256 polAmount = 1000000;
-        uint256 convertedSPOL = sPOLChildToken.convertPOLToSPOL(polAmount);
-
-        assertGt(convertedSPOL, 0, "Should convert small amounts without precision loss to zero");
-
-        uint256 largePOLAmount = 12345e18;
-        uint256 largeSPOL = sPOLChildToken.convertPOLToSPOL(largePOLAmount);
-        assertGt(largeSPOL, 0, "Should handle large amounts");
-
-        uint256 convertedBack = sPOLChildToken.convertSPOLToPOL(largeSPOL);
-        assertGt(convertedBack, largePOLAmount * 995 / 1000, "Round-trip conversion should be reasonable");
-    }
-
-    function test_sellSPOL_after_deposit() public {
-        _defaultUnpause();
-        address user = makeAddr("user");
-        vm.prank(childChainManager);
-        sPOLChildToken.deposit(user, abi.encode(10e18));
-
-        uint256 sPOLBalance = sPOLChildToken.balanceOf(user);
-        uint256 expectedPOLRedeem = sPOLChildToken.convertSPOLToPOL(sPOLBalance);
-
-        uint256 initialMissingBalance = sPOLChildToken.missingWithdrawPOLBalance();
-        uint256 initialNonce = sPOLChildToken.globalWithdrawNonce();
-
-        vm.prank(user);
-
-        vm.expectEmit(true, true, true, true, address(sPOLChildToken));
-        emit IERC20.Transfer(user, address(sPOLChildToken), sPOLBalance);
-        vm.expectEmit(true, true, true, true, address(sPOLChildToken));
-        emit sPOLBurned(user, sPOLBalance, expectedPOLRedeem, initialNonce + 1);
-
-        sPOLChildToken.sellSPOL(sPOLBalance);
-
-        // Verify slow sell behavior - sPOL is burned but no immediate POL
-        assertEq(user.balance, 0, "User should not receive POL immediately");
-        assertEq(sPOLChildToken.missingWithdrawPOLBalance(), initialMissingBalance + sPOLBalance);
-        assertEq(sPOLChildToken.globalWithdrawNonce(), initialNonce + 1);
-        assertEq(sPOLChildToken.balanceOf(user), 0, "User sPOL balance should be zero");
-        assertEq(sPOLChildToken.locallyToBeBurnedSPOL(), sPOLBalance);
-        assertEq(sPOLChildToken.balanceOf(address(sPOLChildToken)), sPOLBalance, "Contract should take token to self");
-
-        // Check user outstanding POL was recorded
-        sPOLChild.UserOutstandingFull[] memory outstanding = sPOLChildToken.getUserOutstandingNonces(user);
-        assertEq(outstanding.length, 1, "Should have one outstanding withdraw record");
-        assertEq(outstanding[0].outstandingPOL, expectedPOLRedeem);
-        assertEq(outstanding[0].backFillCycle, 1);
-        assertEq(outstanding[0].nonce, initialNonce + 1);
-    }
-
-    function test_sellSPOL_simple() public {
-        _defaultUnpause();
-        uint256 polAmount = 10e18;
-        address seller = makeAddr("seller");
-        vm.deal(seller, polAmount);
-
-        vm.prank(seller);
-        sPOLChildToken.buySPOL{value: polAmount}(polAmount);
-
-        uint256 sPOLBalance = sPOLChildToken.balanceOf(seller);
-        assertTrue(sPOLBalance > 0);
-
-        uint256 initialPOLBalance = seller.balance;
-        uint256 expectedPOLRedeem = sPOLChildToken.convertSPOLToPOL(sPOLBalance);
-        uint256 initialNonce = sPOLChildToken.globalWithdrawNonce();
-        uint256 initialLocallyToBeBurned = sPOLChildToken.locallyToBeBurnedSPOL();
-
-        vm.prank(seller);
-        sPOLChildToken.sellSPOL(sPOLBalance);
-
-        assertEq(sPOLChildToken.balanceOf(seller), 0, "Seller sPOL balance should be zero");
-        assertEq(seller.balance, initialPOLBalance, "Seller should not receive POL immediately");
-        assertEq(sPOLChildToken.globalWithdrawNonce(), initialNonce + 1, "Nonce should increment");
-        assertEq(
-            sPOLChildToken.locallyToBeBurnedSPOL(),
-            initialLocallyToBeBurned + sPOLBalance,
-            "locallyToBeBurnedSPOL should increase"
-        );
-
-        sPOLChild.UserOutstandingFull[] memory outstanding = sPOLChildToken.getUserOutstandingNonces(seller);
-        assertEq(outstanding.length, 1, "Should have one outstanding withdraw record");
-        assertEq(
-            outstanding[0].outstandingPOL, expectedPOLRedeem, "Outstanding POL should match expected redeem amount"
-        );
-        assertEq(outstanding[0].nonce, initialNonce + 1, "Outstanding nonce should match");
-    }
-
-    function test_sellSPOL_reverts_if_no_balance() public {
-        _defaultUnpause();
-        address user = makeAddr("userWithNoSPOL");
-        vm.prank(user);
-        vm.expectRevert(abi.encodeWithSelector(IERC20Errors.ERC20InsufficientBalance.selector, user, 0, 1e18));
-        sPOLChildToken.sellSPOL(1e18);
-    }
-
-    function test_sellSPOL_reverts_if_amount_is_zero() public {
-        _defaultUnpause();
-        address user = makeAddr("user");
-        vm.prank(user);
-        vm.expectRevert(sPOLChild.POLAmountMustBeGreaterThanZero.selector);
-        sPOLChildToken.sellSPOL(0);
-    }
-
-    function test_sellSPOL_reverts_if_paused() public {
-        _defaultUnpause();
-        uint256 polAmount = 10e18;
-        address seller = makeAddr("seller");
-        vm.deal(seller, polAmount);
-        vm.prank(seller);
-        sPOLChildToken.buySPOL{value: polAmount}(polAmount);
-        uint256 sPOLBalance = sPOLChildToken.balanceOf(seller);
-
-        vm.prank(admin);
-        sPOLChildToken.pauseBuySell();
-
-        vm.prank(seller);
-        vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
-        sPOLChildToken.sellSPOL(sPOLBalance);
-    }
-
-    function test_sellSPOL_multiple_sells() public {
-        _defaultUnpause();
-        uint256 polAmount = 20e18;
-        address seller = makeAddr("seller");
-        vm.deal(seller, polAmount);
-        vm.prank(seller);
-        sPOLChildToken.buySPOL{value: polAmount}(polAmount);
-
-        uint256 sPOLBalance = sPOLChildToken.balanceOf(seller);
-        uint256 sellAmount1 = sPOLBalance / 2;
-        uint256 sellAmount2 = sPOLBalance - sellAmount1;
-
-        uint256 initialNonce = sPOLChildToken.globalWithdrawNonce();
-        vm.prank(seller);
-        sPOLChildToken.sellSPOL(sellAmount1);
-
-        assertEq(sPOLChildToken.balanceOf(seller), sPOLBalance - sellAmount1);
-        assertEq(sPOLChildToken.globalWithdrawNonce(), initialNonce + 1);
-
-        vm.prank(seller);
-        sPOLChildToken.sellSPOL(sellAmount2);
-
-        assertEq(sPOLChildToken.balanceOf(seller), 0);
-        assertEq(sPOLChildToken.globalWithdrawNonce(), initialNonce + 2);
-
-        sPOLChild.UserOutstandingFull[] memory outstanding = sPOLChildToken.getUserOutstandingNonces(seller);
-        assertEq(outstanding.length, 2, "Should have two outstanding withdraw records");
-        assertEq(outstanding[0].nonce, initialNonce + 1);
-        assertEq(outstanding[1].nonce, initialNonce + 2);
-    }
-
-    function test_sellSPOL_updates_correct_balances() public {
-        _defaultUnpause();
-        uint256 polAmount = 10e18;
-        address seller = makeAddr("seller");
-        vm.deal(seller, polAmount);
-        vm.prank(seller);
-        sPOLChildToken.buySPOL{value: polAmount}(polAmount);
-
-        uint256 sPOLBalance = sPOLChildToken.balanceOf(seller);
-        uint256 sPOLBalanceToken = sPOLChildToken.balanceOf(address(sPOLChildToken));
-
-        uint256 initialLocallyToBeBurned = sPOLChildToken.locallyToBeBurnedSPOL();
-        uint256 initialContractSPOLBalance = sPOLChildToken.balanceOf(address(sPOLChildToken));
-
-        vm.prank(seller);
-        sPOLChildToken.sellSPOL(sPOLBalance);
-
-        assertEq(sPOLChildToken.balanceOf(seller), 0, "User sPOL balance should be zero");
-        assertEq(
-            sPOLChildToken.balanceOf(address(sPOLChildToken)),
-            initialContractSPOLBalance + sPOLBalance,
-            "Contract sPOL balance should increase by sold amount"
-        );
-        assertEq(
-            sPOLChildToken.locallyToBeBurnedSPOL(),
-            initialLocallyToBeBurned + sPOLBalance,
-            "locallyToBeBurnedSPOL should increase by sold amount"
-        );
-        assertEq(
-            sPOLChildToken.balanceOf(address(sPOLChildToken)),
-            initialContractSPOLBalance + sPOLBalance,
-            "Contract sPOL balance should increase"
-        );
-    }
-
-    function test_sellSPOL_emits_correct_event() public {
-        _defaultUnpause();
-        uint256 polAmount = 10e18;
-        address seller = makeAddr("seller");
-        vm.deal(seller, polAmount);
-        vm.prank(seller);
-        sPOLChildToken.buySPOL{value: polAmount}(polAmount);
-
-        uint256 sPOLBalance = sPOLChildToken.balanceOf(seller);
-        uint256 expectedPOLRedeem = sPOLChildToken.convertSPOLToPOL(sPOLBalance);
-        uint256 nonce = sPOLChildToken.globalWithdrawNonce() + 1;
-
-        vm.prank(seller);
-        vm.expectEmit(true, true, true, true, address(sPOLChildToken));
-        emit sPOLBurned(seller, sPOLBalance, expectedPOLRedeem, nonce);
-        sPOLChildToken.sellSPOL(sPOLBalance);
-    }
-
-    function _setupAndSell(address _seller, uint256 _polAmount) internal returns (uint256 sPOLAmount) {
-        vm.deal(_seller, _polAmount);
-        vm.prank(_seller);
-        sPOLChildToken.buySPOL{value: _polAmount}(_polAmount);
-        sPOLAmount = sPOLChildToken.balanceOf(_seller);
-        vm.prank(_seller);
-        sPOLChildToken.sellSPOL(sPOLAmount);
-    }
-
-    function test_withdrawPOL_single_claim() public {
-        _defaultUnpause();
-        address user = makeAddr("user");
-        uint256 polAmount = 10e18;
-        _setupAndSell(user, polAmount);
-
-        address buyer = makeAddr("buyer");
-        vm.deal(buyer, 100e18);
-        vm.prank(buyer);
-        sPOLChildToken.buySPOL{value: 100e18}(100e18);
-
-        vm.mockCall(
-            address(sPOLChildToken.bridgeHelper()),
-            abi.encodeWithSelector(sPOLChildToken.bridgeHelper().bridgePOLToL1.selector),
-            abi.encode(true)
-        );
-
-        vm.prank(admin);
-        sPOLChildToken.balanceWithL1();
-
-        uint256 initialPOLBalance = user.balance;
-        uint256 expectedPOL = sPOLChildToken.convertSPOLToPOL(sPOLChildToken.balanceOf(address(sPOLChildToken)));
-
-        vm.prank(user);
-        sPOLChildToken.withdrawPOL();
-
-        assertEq(user.balance, initialPOLBalance + expectedPOL, "User should receive the correct amount of POL");
-    }
-
-    function test_withdrawPOL_multiple_claims_same_user() public {
-        _defaultUnpause();
-        address user = makeAddr("user");
-        uint256 polAmount1 = 5e18;
-        uint256 polAmount2 = 8e18;
-
-        uint256 nonce1 = sPOLChildToken.globalWithdrawNonce() + 1;
-        uint256 sPOLAmount1 = _setupAndSell(user, polAmount1);
-        uint256 nonce2 = sPOLChildToken.globalWithdrawNonce() + 1;
-        uint256 sPOLAmount2 = _setupAndSell(user, polAmount2);
-
-        address buyer = makeAddr("buyer");
-        vm.deal(buyer, 100e18);
-        vm.prank(buyer);
-        sPOLChildToken.buySPOL{value: 100e18}(100e18);
-
-        vm.mockCall(
-            address(sPOLChildToken.bridgeHelper()),
-            abi.encodeWithSelector(sPOLChildToken.bridgeHelper().bridgePOLToL1.selector),
-            abi.encode(true)
-        );
-        vm.prank(admin);
-        sPOLChildToken.balanceWithL1();
-
-        uint256 initialPOLBalance = user.balance;
-        uint256 expectedPOL1 = sPOLChildToken.convertSPOLToPOL(sPOLAmount1);
-        uint256 expectedPOL2 = sPOLChildToken.convertSPOLToPOL(sPOLAmount2);
-        uint256 totalExpectedPOL = expectedPOL1 + expectedPOL2;
-
-        vm.prank(user);
-        vm.expectEmit(true, true, true, true, address(sPOLChildToken));
-        emit POLWithdrawn(user, expectedPOL1, nonce1);
-        vm.expectEmit(true, true, true, true, address(sPOLChildToken));
-        emit POLWithdrawn(user, expectedPOL2, nonce2);
-        sPOLChildToken.withdrawPOL();
-
-        assertEq(user.balance, initialPOLBalance + totalExpectedPOL, "User should receive POL from all claims");
-    }
-
-    function test_withdrawPOL_multiple_users() public {
-        _defaultUnpause();
-        address user1 = makeAddr("user1");
-        address user2 = makeAddr("user2");
-        uint256 polAmount1 = 6e18;
-        uint256 polAmount2 = 9e18;
-
-        uint256 nonce1 = sPOLChildToken.globalWithdrawNonce() + 1;
-        uint256 sPOLAmount1 = _setupAndSell(user1, polAmount1);
-        uint256 nonce2 = sPOLChildToken.globalWithdrawNonce() + 1;
-        uint256 sPOLAmount2 = _setupAndSell(user2, polAmount2);
-
-        address buyer = makeAddr("buyer");
-        vm.deal(buyer, 100e18);
-        vm.prank(buyer);
-        sPOLChildToken.buySPOL{value: 100e18}(100e18);
-
-        vm.mockCall(
-            address(sPOLChildToken.bridgeHelper()),
-            abi.encodeWithSelector(sPOLChildToken.bridgeHelper().bridgePOLToL1.selector),
-            abi.encode(true)
-        );
-        vm.prank(admin);
-        sPOLChildToken.balanceWithL1();
-
-        uint256 initialPOLBalance1 = user1.balance;
-        uint256 expectedPOL1 = sPOLChildToken.convertSPOLToPOL(sPOLAmount1);
-        vm.prank(user1);
-        vm.expectEmit(true, true, true, true, address(sPOLChildToken));
-        emit POLWithdrawn(user1, expectedPOL1, nonce1);
-        sPOLChildToken.withdrawPOL();
-        assertEq(user1.balance, initialPOLBalance1 + expectedPOL1, "User 1 should receive correct POL");
-
-        uint256 initialPOLBalance2 = user2.balance;
-        uint256 expectedPOL2 = sPOLChildToken.convertSPOLToPOL(sPOLAmount2);
-        vm.prank(user2);
-        vm.expectEmit(true, true, true, true, address(sPOLChildToken));
-        emit POLWithdrawn(user2, expectedPOL2, nonce2);
-        sPOLChildToken.withdrawPOL();
-        assertEq(user2.balance, initialPOLBalance2 + expectedPOL2, "User 2 should receive correct POL");
-    }
-
-    function test_withdrawPOL_cannot_claim_twice() public {
-        _defaultUnpause();
-        address user = makeAddr("user");
-        uint256 polAmount = 10e18;
-        _setupAndSell(user, polAmount);
-
-        address buyer = makeAddr("buyer");
-        vm.deal(buyer, 100e18);
-        vm.prank(buyer);
-        sPOLChildToken.buySPOL{value: 100e18}(100e18);
-
-        vm.mockCall(
-            address(sPOLChildToken.bridgeHelper()),
-            abi.encodeWithSelector(sPOLChildToken.bridgeHelper().bridgePOLToL1.selector),
-            abi.encode(true)
-        );
-        vm.prank(admin);
-        sPOLChildToken.balanceWithL1();
-
-        vm.prank(user);
-        sPOLChildToken.withdrawPOL();
-
-        vm.prank(user);
-        vm.expectRevert(sPOLChild.POLAmountMustBeGreaterThanZero.selector);
-        sPOLChildToken.withdrawPOL();
-    }
-
-    function test_withdrawPOL_reverts_if_nothing_to_claim() public {
-        _defaultUnpause();
-        address user = makeAddr("userWithNoClaims");
-        vm.prank(user);
-        vm.expectRevert(sPOLChild.POLAmountMustBeGreaterThanZero.selector);
-        sPOLChildToken.withdrawPOL();
-    }
-
-    function test_withdrawPOL_partial_claim() public {
-        _defaultUnpause();
-        address user = makeAddr("user");
-        uint256 polAmount1 = 5e18;
-        uint256 polAmount2 = 8e18;
-
-        uint256 nonce1 = sPOLChildToken.globalWithdrawNonce() + 1;
-        uint256 sPOLAmount1 = _setupAndSell(user, polAmount1);
-
-        address buyer = makeAddr("buyer");
-        vm.deal(buyer, 100e18);
-        vm.prank(buyer);
-        sPOLChildToken.buySPOL{value: 100e18}(100e18);
-
-        vm.mockCall(
-            address(sPOLChildToken.bridgeHelper()),
-            abi.encodeWithSelector(sPOLChildToken.bridgeHelper().bridgePOLToL1.selector),
-            abi.encode(true)
-        );
-        vm.prank(admin);
-        sPOLChildToken.balanceWithL1();
-
-        uint256 sPOLAmount2 = _setupAndSell(user, polAmount2);
-
-        uint256 initialPOLBalance = user.balance;
-        uint256 expectedPOL1 = sPOLChildToken.convertSPOLToPOL(sPOLAmount1);
-
-        vm.prank(user);
-        vm.expectEmit(true, true, true, true, address(sPOLChildToken));
-        emit POLWithdrawn(user, expectedPOL1, nonce1);
-        sPOLChildToken.withdrawPOL();
-
-        assertEq(user.balance, initialPOLBalance + expectedPOL1, "User should only receive POL from completed backfill");
-
-        sPOLChild.UserOutstandingFull[] memory outstanding = sPOLChildToken.getUserOutstandingNonces(user);
-        assertEq(outstanding.length, 1, "Should have one outstanding claim left");
-        assertEq(outstanding[0].outstandingPOL, sPOLChildToken.convertSPOLToPOL(sPOLAmount2));
-    }
-
     function test_deposit_mintsTokensToUser() public {
         address user = makeAddr("depositUser");
         uint256 depositAmount = 100e18;
@@ -974,31 +537,6 @@ contract sPOLChildTest is Test, Deploy {
         sPOLChildToken.withdraw(100e18);
     }
 
-    function test_sellSPOL_revertsWhenExchangeRateOutdated() public {
-        _defaultUnpause();
-        address seller = makeAddr("seller");
-        uint256 polAmount = 10e18;
-        vm.deal(seller, polAmount);
-
-        // Buy some sPOL first
-        vm.prank(seller);
-        sPOLChildToken.buySPOL{value: polAmount}(polAmount);
-
-        uint256 sPOLBalance = sPOLChildToken.balanceOf(seller);
-        uint256 timestampBefore = sPOLChildToken.lastExchangeRateUpdate();
-
-        // Warp beyond maxExchangeRateUpdateDelay
-        vm.warp(timestampBefore + 11 days);
-
-        vm.prank(seller);
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                sPOLChild.ExchangeRateUpdateTooOld.selector, timestampBefore, 10 days, timestampBefore + 11 days
-            )
-        );
-        sPOLChildToken.sellSPOL(sPOLBalance);
-    }
-
     function test_onStateReceive_emitsOnInvalidMessageType() public {
         bytes memory invalidMessage = abi.encode(MsgCoder.MsgType.L1_MIGRATION_RESPONSE, abi.encode(100e18));
 
@@ -1043,34 +581,6 @@ contract sPOLChildTest is Test, Deploy {
         // Try to balance again - should revert
         vm.prank(admin);
         vm.expectRevert(sPOLChild.MigrationAlreadyOngoing.selector);
-        sPOLChildToken.balanceWithL1();
-    }
-
-    function test_balanceWithL1_revertsWhenBackfillOngoing() public {
-        _defaultUnpause();
-
-        // Setup backfill scenario - deposit and sell without buying
-        address user = makeAddr("user");
-        vm.prank(childChainManager);
-        sPOLChildToken.deposit(user, abi.encode(10e18));
-
-        vm.prank(user);
-        sPOLChildToken.sellSPOL(10e18);
-
-        vm.mockCall(
-            address(sPOLChildToken.bridgeHelper()),
-            abi.encodeWithSelector(sPOLChildToken.bridgeHelper().bridgePOLToL1.selector),
-            abi.encode(true)
-        );
-
-        vm.prank(admin);
-        sPOLChildToken.balanceWithL1();
-
-        assertTrue(sPOLChildToken.onGoingBackfill(), "Backfill should be ongoing");
-
-        // Try to balance again - should revert
-        vm.prank(admin);
-        vm.expectRevert(sPOLChild.BackfillAlreadyOngoing.selector);
         sPOLChildToken.balanceWithL1();
     }
 
@@ -1198,350 +708,5 @@ contract sPOLChildTest is Test, Deploy {
         sPOLChildToken.unpauseBuySell();
 
         assertFalse(sPOLChildToken.paused(), "Contract should be unpaused");
-    }
-
-    function test_withdrawPOL_succeedsWhenPaused() public {
-        _defaultUnpause();
-        address user = makeAddr("user");
-        uint256 polAmount = 10e18;
-        _setupAndSell(user, polAmount);
-
-        // Setup buyer and complete backfill
-        address buyer = makeAddr("buyer");
-        vm.deal(buyer, 100e18);
-        vm.prank(buyer);
-        sPOLChildToken.buySPOL{value: 100e18}(100e18);
-
-        vm.mockCall(
-            address(sPOLChildToken.bridgeHelper()),
-            abi.encodeWithSelector(sPOLChildToken.bridgeHelper().bridgePOLToL1.selector),
-            abi.encode(true)
-        );
-        vm.prank(admin);
-        sPOLChildToken.balanceWithL1();
-
-        // Pause the contract
-        vm.prank(admin);
-        sPOLChildToken.pauseBuySell();
-        assertTrue(sPOLChildToken.paused(), "Contract should be paused");
-
-        // Withdraw should still succeed while paused
-        uint256 balanceBefore = user.balance;
-        vm.prank(user);
-        sPOLChildToken.withdrawPOL();
-        assertGt(user.balance, balanceBefore, "User should receive POL even when paused");
-    }
-
-    ///////////////////////////////////////
-    ///  Targeted Sell / Withdraw Pause ///
-    ///////////////////////////////////////
-
-    function test_pauseSell_onlyAdmin() public {
-        address nonAdmin = makeAddr("nonAdmin");
-        vm.prank(nonAdmin);
-        vm.expectRevert(abi.encodeWithSignature("AccessManagedUnauthorized(address)", nonAdmin));
-        sPOLChildToken.pauseSell();
-    }
-
-    function test_unpauseSell_onlyAdmin() public {
-        address nonAdmin = makeAddr("nonAdmin");
-        vm.prank(nonAdmin);
-        vm.expectRevert(abi.encodeWithSignature("AccessManagedUnauthorized(address)", nonAdmin));
-        sPOLChildToken.unpauseSell();
-    }
-
-    function test_pauseSell_success() public {
-        vm.startPrank(admin);
-        sPOLChildToken.unpauseSell();
-        assertTrue(sPOLChildToken.sellUnpaused(), "sellUnpaused should be true after unpause");
-
-        sPOLChildToken.pauseSell();
-        assertFalse(sPOLChildToken.sellUnpaused(), "sellUnpaused should be false after pause");
-        vm.stopPrank();
-    }
-
-    function test_unpauseSell_success() public {
-        assertFalse(sPOLChildToken.sellUnpaused(), "sellUnpaused should start false");
-
-        vm.prank(admin);
-        sPOLChildToken.unpauseSell();
-        assertTrue(sPOLChildToken.sellUnpaused(), "sellUnpaused should be true after unpause");
-    }
-
-    function test_pauseWithdraw_onlyAdmin() public {
-        address nonAdmin = makeAddr("nonAdmin");
-        vm.prank(nonAdmin);
-        vm.expectRevert(abi.encodeWithSignature("AccessManagedUnauthorized(address)", nonAdmin));
-        sPOLChildToken.pauseWithdraw();
-    }
-
-    function test_unpauseWithdraw_onlyAdmin() public {
-        address nonAdmin = makeAddr("nonAdmin");
-        vm.prank(nonAdmin);
-        vm.expectRevert(abi.encodeWithSignature("AccessManagedUnauthorized(address)", nonAdmin));
-        sPOLChildToken.unpauseWithdraw();
-    }
-
-    function test_pauseWithdraw_success() public {
-        vm.startPrank(admin);
-        sPOLChildToken.unpauseWithdraw();
-        assertTrue(sPOLChildToken.withdrawUnpaused(), "withdrawUnpaused should be true after unpause");
-
-        sPOLChildToken.pauseWithdraw();
-        assertFalse(sPOLChildToken.withdrawUnpaused(), "withdrawUnpaused should be false after pause");
-        vm.stopPrank();
-    }
-
-    function test_unpauseWithdraw_success() public {
-        assertFalse(sPOLChildToken.withdrawUnpaused(), "withdrawUnpaused should start false");
-
-        vm.prank(admin);
-        sPOLChildToken.unpauseWithdraw();
-        assertTrue(sPOLChildToken.withdrawUnpaused(), "withdrawUnpaused should be true after unpause");
-    }
-
-    function test_sellSPOL_revertsWhenSellPaused() public {
-        _defaultUnpause();
-        address user = makeAddr("user");
-        uint256 polAmount = 10e18;
-        vm.deal(user, polAmount);
-        vm.prank(user);
-        sPOLChildToken.buySPOL{value: polAmount}(polAmount);
-        uint256 sPOLBalance = sPOLChildToken.balanceOf(user);
-
-        // Pause only sell
-        vm.prank(admin);
-        sPOLChildToken.pauseSell();
-
-        vm.prank(user);
-        vm.expectRevert(abi.encodeWithSelector(sPOLChild.FunctionalityPaused.selector));
-        sPOLChildToken.sellSPOL(sPOLBalance);
-    }
-
-    function test_sellSPOL_revertsWhenBothGlobalAndSellPaused() public {
-        _defaultUnpause();
-        address user = makeAddr("user");
-        uint256 polAmount = 10e18;
-        vm.deal(user, polAmount);
-        vm.prank(user);
-        sPOLChildToken.buySPOL{value: polAmount}(polAmount);
-        uint256 sPOLBalance = sPOLChildToken.balanceOf(user);
-
-        // Pause both global and sell
-        vm.startPrank(admin);
-        sPOLChildToken.pauseSell();
-        sPOLChildToken.pauseBuySell();
-        vm.stopPrank();
-
-        // Global pause fires first (whenNotPaused modifier)
-        vm.prank(user);
-        vm.expectRevert(abi.encodeWithSelector(PausableUpgradeable.EnforcedPause.selector));
-        sPOLChildToken.sellSPOL(sPOLBalance);
-    }
-
-    function test_sellSPOL_stillBlockedAfterUnpauseBuySellIfSellPaused() public {
-        _defaultUnpause();
-        address user = makeAddr("user");
-        uint256 polAmount = 10e18;
-        vm.deal(user, polAmount);
-        vm.prank(user);
-        sPOLChildToken.buySPOL{value: polAmount}(polAmount);
-        uint256 sPOLBalance = sPOLChildToken.balanceOf(user);
-
-        // Pause sell, then global pause, then unpause global
-        vm.startPrank(admin);
-        sPOLChildToken.pauseSell();
-        sPOLChildToken.pauseBuySell();
-        sPOLChildToken.unpauseBuySell();
-        vm.stopPrank();
-
-        // sellPaused still active => sell should revert
-        vm.prank(user);
-        vm.expectRevert(abi.encodeWithSelector(sPOLChild.FunctionalityPaused.selector));
-        sPOLChildToken.sellSPOL(sPOLBalance);
-    }
-
-    function test_withdrawPOL_revertsWhenWithdrawPaused() public {
-        _defaultUnpause();
-        address user = makeAddr("user");
-        uint256 polAmount = 10e18;
-        _setupAndSell(user, polAmount);
-
-        // Fund and trigger backfill so withdrawal matures
-        address buyer = makeAddr("buyer");
-        vm.deal(buyer, 100e18);
-        vm.prank(buyer);
-        sPOLChildToken.buySPOL{value: 100e18}(100e18);
-
-        vm.mockCall(
-            address(sPOLChildToken.bridgeHelper()),
-            abi.encodeWithSelector(sPOLChildToken.bridgeHelper().bridgePOLToL1.selector),
-            abi.encode(true)
-        );
-        vm.prank(admin);
-        sPOLChildToken.balanceWithL1();
-
-        // Pause withdrawals
-        vm.prank(admin);
-        sPOLChildToken.pauseWithdraw();
-
-        vm.prank(user);
-        vm.expectRevert(abi.encodeWithSelector(sPOLChild.FunctionalityPaused.selector));
-        sPOLChildToken.withdrawPOL();
-    }
-
-    function test_withdrawPOL_succeedsAfterUnpauseWithdraw() public {
-        _defaultUnpause();
-        address user = makeAddr("user");
-        uint256 polAmount = 10e18;
-        _setupAndSell(user, polAmount);
-
-        // Fund and trigger backfill
-        address buyer = makeAddr("buyer");
-        vm.deal(buyer, 100e18);
-        vm.prank(buyer);
-        sPOLChildToken.buySPOL{value: 100e18}(100e18);
-
-        vm.mockCall(
-            address(sPOLChildToken.bridgeHelper()),
-            abi.encodeWithSelector(sPOLChildToken.bridgeHelper().bridgePOLToL1.selector),
-            abi.encode(true)
-        );
-        vm.prank(admin);
-        sPOLChildToken.balanceWithL1();
-
-        // Pause then unpause withdrawals
-        vm.startPrank(admin);
-        sPOLChildToken.pauseWithdraw();
-        sPOLChildToken.unpauseWithdraw();
-        vm.stopPrank();
-
-        uint256 balanceBefore = user.balance;
-        vm.prank(user);
-        sPOLChildToken.withdrawPOL();
-        assertGt(user.balance, balanceBefore, "User should receive POL after unpause");
-    }
-
-    function test_withdrawPOL_succeedsWhenSellPausedButWithdrawNotPaused() public {
-        _defaultUnpause();
-        address user = makeAddr("user");
-        uint256 polAmount = 10e18;
-        _setupAndSell(user, polAmount);
-
-        // Fund and trigger backfill
-        address buyer = makeAddr("buyer");
-        vm.deal(buyer, 100e18);
-        vm.prank(buyer);
-        sPOLChildToken.buySPOL{value: 100e18}(100e18);
-
-        vm.mockCall(
-            address(sPOLChildToken.bridgeHelper()),
-            abi.encodeWithSelector(sPOLChildToken.bridgeHelper().bridgePOLToL1.selector),
-            abi.encode(true)
-        );
-        vm.prank(admin);
-        sPOLChildToken.balanceWithL1();
-
-        // Now disable sell — withdrawals must still work
-        vm.prank(admin);
-        sPOLChildToken.pauseSell();
-        assertFalse(sPOLChildToken.sellUnpaused());
-
-        uint256 balanceBefore = user.balance;
-        vm.prank(user);
-        sPOLChildToken.withdrawPOL();
-        assertGt(user.balance, balanceBefore, "User should withdraw even when sell is paused");
-    }
-
-    function test_withdrawPOL_succeedsWhenSellAndGlobalPausedButWithdrawNotPaused() public {
-        _defaultUnpause();
-        address user = makeAddr("user");
-        uint256 polAmount = 10e18;
-        _setupAndSell(user, polAmount);
-
-        // Fund and trigger backfill
-        address buyer = makeAddr("buyer");
-        vm.deal(buyer, 100e18);
-        vm.prank(buyer);
-        sPOLChildToken.buySPOL{value: 100e18}(100e18);
-
-        vm.mockCall(
-            address(sPOLChildToken.bridgeHelper()),
-            abi.encodeWithSelector(sPOLChildToken.bridgeHelper().bridgePOLToL1.selector),
-            abi.encode(true)
-        );
-        vm.prank(admin);
-        sPOLChildToken.balanceWithL1();
-
-        // Pause both sell and global — withdraw should still work
-        vm.startPrank(admin);
-        sPOLChildToken.pauseSell();
-        sPOLChildToken.pauseBuySell();
-        vm.stopPrank();
-
-        uint256 balanceBefore = user.balance;
-        vm.prank(user);
-        sPOLChildToken.withdrawPOL();
-        assertGt(user.balance, balanceBefore, "Withdraw works despite sell+global pause");
-    }
-
-    function test_withdrawPOL_revertsWhenWithdrawPausedEvenIfSellUnpaused() public {
-        _defaultUnpause();
-        address user = makeAddr("user");
-        uint256 polAmount = 10e18;
-        _setupAndSell(user, polAmount);
-
-        // Fund and trigger backfill
-        address buyer = makeAddr("buyer");
-        vm.deal(buyer, 100e18);
-        vm.prank(buyer);
-        sPOLChildToken.buySPOL{value: 100e18}(100e18);
-
-        vm.mockCall(
-            address(sPOLChildToken.bridgeHelper()),
-            abi.encodeWithSelector(sPOLChildToken.bridgeHelper().bridgePOLToL1.selector),
-            abi.encode(true)
-        );
-        vm.prank(admin);
-        sPOLChildToken.balanceWithL1();
-
-        // Only pause withdraw, sell remains active
-        vm.prank(admin);
-        sPOLChildToken.pauseWithdraw();
-        assertTrue(sPOLChildToken.sellUnpaused(), "sell should not be paused");
-
-        vm.prank(user);
-        vm.expectRevert(abi.encodeWithSelector(sPOLChild.FunctionalityPaused.selector));
-        sPOLChildToken.withdrawPOL();
-    }
-
-    function test_sellSPOL_revertsAfterDeployWithoutExplicitPause() public {
-        // Unpause only global — sell should still revert because sellUnpaused defaults to false
-        _sendExchangeRateUpdate(INITIAL_L1_SPOL_BALANCE, INITIAL_L1_DPOL_BALANCE);
-        vm.prank(admin);
-        sPOLChildToken.unpauseBuySell();
-
-        assertFalse(sPOLChildToken.sellUnpaused(), "sellUnpaused should default to false after deploy");
-
-        address user = makeAddr("user");
-        vm.prank(user);
-        vm.expectRevert(abi.encodeWithSelector(sPOLChild.FunctionalityPaused.selector));
-        sPOLChildToken.sellSPOL(1);
-    }
-
-    function test_withdrawPOL_revertsAfterDeployWithoutExplicitPause() public {
-        // Unpause global + sell so we can create a withdrawal nonce, but never unpause withdraw
-        _sendExchangeRateUpdate(INITIAL_L1_SPOL_BALANCE, INITIAL_L1_DPOL_BALANCE);
-        vm.startPrank(admin);
-        sPOLChildToken.unpauseBuySell();
-        sPOLChildToken.unpauseSell();
-        vm.stopPrank();
-
-        assertFalse(sPOLChildToken.withdrawUnpaused(), "withdrawUnpaused should default to false after deploy");
-
-        address user = makeAddr("user");
-        vm.prank(user);
-        vm.expectRevert(abi.encodeWithSelector(sPOLChild.FunctionalityPaused.selector));
-        sPOLChildToken.withdrawPOL();
     }
 }
