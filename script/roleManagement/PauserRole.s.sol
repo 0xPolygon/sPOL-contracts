@@ -94,12 +94,12 @@ contract PauserRole is Script {
         console.logBytes(grantCalldata); // same encoding as L1
         console.log("");
 
-        // 8. Assign sPOLChild pauseBuySell to the role
+        // 8. Assign sPOLChild pauseBuy to the role
         bytes4[] memory childSelectors = new bytes4[](1);
-        childSelectors[0] = sPOLChild.pauseBuySell.selector;
+        childSelectors[0] = sPOLChild.pauseBuy.selector;
         bytes memory childRoleCalldata =
             abi.encodeCall(AccessManager.setTargetFunctionRole, (childAddr, childSelectors, SPOL_PAUSER_ROLE));
-        console.log("8. setTargetFunctionRole(%s, [pauseBuySell], %d)", childAddr, SPOL_PAUSER_ROLE);
+        console.log("8. setTargetFunctionRole(%s, [pauseBuy], %d)", childAddr, SPOL_PAUSER_ROLE);
         console.log("   Calldata:");
         console.logBytes(childRoleCalldata);
         console.log("");
