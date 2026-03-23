@@ -37,13 +37,12 @@ contract ExchangeRateUpdaterRole is Script {
         console.log("");
 
         // 3. Assign messenger functions to the role
-        bytes4[] memory selectors = new bytes4[](2);
+        bytes4[] memory selectors = new bytes4[](1);
         selectors[0] = sPOLMessenger.updateL2ExchangeRate.selector;
-        selectors[1] = sPOLMessenger.completeBackfill.selector;
         bytes memory setRoleCalldata =
             abi.encodeCall(AccessManager.setTargetFunctionRole, (messengerAddr, selectors, EXCHANGE_RATE_UPDATER_ROLE));
         console.log(
-            "3. setTargetFunctionRole(%s, [updateL2ExchangeRate, completeBackfill], %d)",
+            "3. setTargetFunctionRole(%s, [updateL2ExchangeRate], %d)",
             messengerAddr,
             EXCHANGE_RATE_UPDATER_ROLE
         );
