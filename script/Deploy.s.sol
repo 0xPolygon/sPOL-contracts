@@ -201,9 +201,7 @@ contract Deploy is Script, ConfigLoader {
             (
                 ITransparentUpgradeableProxy(address(sPOLChildProxy)),
                 address(sPOLChildImpl),
-                abi.encodeCall(
-                    sPOLChild.initialize, (address(accessManagerL2), address(polBridger), childChainManager)
-                )
+                abi.encodeCall(sPOLChild.initialize, (address(accessManagerL2), address(polBridger), childChainManager))
             )
         );
         accessManagerL2.execute(address(sPOLChildproxyAdmin), upgradeAndCalldata);
