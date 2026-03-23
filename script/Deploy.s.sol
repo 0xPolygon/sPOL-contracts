@@ -202,8 +202,7 @@ contract Deploy is Script, ConfigLoader {
                 ITransparentUpgradeableProxy(address(sPOLChildProxy)),
                 address(sPOLChildImpl),
                 abi.encodeCall(
-                    sPOLChild.initialize,
-                    (address(accessManagerL2), address(sPOLMessengerProxy), address(polBridger), childChainManager)
+                    sPOLChild.initialize, (address(accessManagerL2), address(polBridger), childChainManager)
                 )
             )
         );
@@ -286,7 +285,6 @@ contract Deploy is Script, ConfigLoader {
         require(address(child.bridgeHelper()) == address(polBridger), "sPOLChild bridger incorrect");
         require(child.authority() == address(accessManagerL2), "sPOLChild admin incorrect");
         require(child.childChainManager() == childChainManager, "sPOLChild child chain manager incorrect");
-        require(child.l1Messenger() == address(sPOLMessengerProxy), "sPOLChild messenger incorrect");
         require(
             vm.load(address(child), hex"360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc")
                 == bytes32(uint256(uint160(address(sPOLChildImpl)))),
