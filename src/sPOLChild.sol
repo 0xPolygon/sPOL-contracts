@@ -30,8 +30,6 @@ contract sPOLChild is
     BaseChildTunnel,
     MsgCoder
 {
-    using DoubleEndedQueue for DoubleEndedQueue.Bytes32Deque;
-
     // exchange info
     uint256 public l1SPOLBalance;
     uint256 public l1DPOLBalance;
@@ -73,12 +71,6 @@ contract sPOLChild is
     struct UserOutstanding {
         uint256 outstandingPOL;
         uint256 backFillCycle;
-    }
-
-    struct UserOutstandingFull {
-        uint256 outstandingPOL;
-        uint256 backFillCycle;
-        uint256 nonce;
     }
 
     // Nonce to Outstanding
