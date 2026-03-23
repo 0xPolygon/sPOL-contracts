@@ -6,6 +6,7 @@ import {Deploy} from "../../script/Deploy.s.sol";
 import {sPOLChild} from "../../src/sPOLChild.sol";
 import {TransparentUpgradeableProxy} from "@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol";
 import {MsgCoder} from "../../src/MsgCoder.sol";
+import {BaseChildTunnel} from "../../src/msg/BaseChildTunnel.sol";
 import {PausableUpgradeable} from "@openzeppelin-contracts-upgradeable/utils/PausableUpgradeable.sol";
 
 contract sPOLChildTest is Test, Deploy {
@@ -51,6 +52,8 @@ contract sPOLChildTest is Test, Deploy {
         bytes memory message = abi.encode(MsgCoder.MsgType.EXCHANGE_UPDATE, abi.encode(l1SPOLBalance, l1DPOLBalance));
 
         vm.prank(stateSyncerL2);
+        vm.expectEmit(true, true, true, true, address(sPOLChildToken));
+        emit sPOLChild.BalancedOnlyLocally();
         sPOLChildToken.onStateReceive(0, message);
 
         assertEq(sPOLChildToken.l1SPOLBalance(), l1SPOLBalance);
@@ -116,6 +119,21 @@ contract sPOLChildTest is Test, Deploy {
         vm.prank(buyer);
         sPOLChildToken.buySPOL{value: 1e18}(1e18);
         assertGt(sPOLChildToken.balanceOf(buyer), 0);
+    }
+
+    function test_exchangeRateUpdate_ImprovesConversionRate() public {
+        uint256 oldConversionRate = sPOLChildToken.convertPOLToSPOL(1e18);
+
+        uint256 newL1SPOLBalance = 1000e18;
+        uint256 newL1DPOLBalance = 1100e18;
+
+        _sendExchangeRateUpdate(newL1SPOLBalance, newL1DPOLBalance);
+
+        uint256 newConversionRate = sPOLChildToken.convertPOLToSPOL(1e18);
+
+        assertEq(sPOLChildToken.l1SPOLBalance(), newL1SPOLBalance);
+        assertEq(sPOLChildToken.l1DPOLBalance(), newL1DPOLBalance);
+        assertLt(newConversionRate, oldConversionRate, "Conversion rate should improve");
     }
 
     function test_exchangeRateUpdate_DecliningRateDoesNotRefreshTimestamp() public {
@@ -443,6 +461,18 @@ contract sPOLChildTest is Test, Deploy {
         assertEq(sPOLChildToken.balanceOf(buyer), expectedSPOL);
     }
 
+    function test_buySPOL_OneWeiRoundsToZeroSPOL() public {
+        _defaultUnpause();
+        address buyer = makeAddr("buyer");
+        vm.deal(buyer, 1);
+
+        vm.prank(buyer);
+        sPOLChildToken.buySPOL{value: 1}(1);
+
+        assertEq(sPOLChildToken.balanceOf(buyer), 0, "1 wei POL should round to 0 sPOL");
+        assertEq(sPOLChildToken.polBalance(), 1, "POL balance should still increase");
+    }
+
     function test_buySPOL_SmallAmount() public {
         _defaultUnpause();
         uint256 polAmount = 1000; // Very small amount
@@ -455,6 +485,24 @@ contract sPOLChildTest is Test, Deploy {
         sPOLChildToken.buySPOL{value: polAmount}(polAmount);
 
         assertEq(sPOLChildToken.balanceOf(buyer), expectedSPOL);
+    }
+
+    function test_convertPOLToSPOL_ZeroAmount() public view {
+        assertEq(sPOLChildToken.convertPOLToSPOL(0), 0);
+    }
+
+    function test_convertPOLToSPOL_PrecisionImprovement() public {
+        _defaultUnpause();
+        _sendExchangeRateUpdate(1000e18, 1001e18);
+
+        uint256 polAmount = 1000000;
+        uint256 convertedSPOL = sPOLChildToken.convertPOLToSPOL(polAmount);
+
+        assertGt(convertedSPOL, 0, "Should convert small amounts without precision loss to zero");
+
+        uint256 largePOLAmount = 12345e18;
+        uint256 largeSPOL = sPOLChildToken.convertPOLToSPOL(largePOLAmount);
+        assertGt(largeSPOL, 0, "Should handle large amounts");
     }
 
     function test_deposit_mintsTokensToUser() public {
@@ -582,6 +630,36 @@ contract sPOLChildTest is Test, Deploy {
         vm.prank(admin);
         vm.expectRevert(sPOLChild.MigrationAlreadyOngoing.selector);
         sPOLChildToken.balanceWithL1();
+    }
+
+    function test_balanceWithL1_onlyBuy() public {
+        _defaultUnpause();
+        uint256 polAmount = 10e18;
+        address buyer = makeAddr("buyer");
+        vm.deal(buyer, polAmount);
+
+        vm.prank(buyer);
+        sPOLChildToken.buySPOL{value: polAmount}(polAmount);
+        uint256 expectedSPOL = sPOLChildToken.convertPOLToSPOL(polAmount);
+
+        vm.mockCall(
+            address(sPOLChildToken.bridgeHelper()),
+            abi.encodeWithSelector(sPOLChildToken.bridgeHelper().bridgePOLToL1.selector),
+            abi.encode(true)
+        );
+
+        vm.prank(admin);
+
+        vm.expectEmit(true, false, false, false, address(sPOLChildToken));
+        emit BaseChildTunnel.MessageSent("");
+        vm.expectEmit(true, true, true, true, address(sPOLChildToken));
+        emit sPOLChild.MigrationRequested(polAmount, expectedSPOL);
+
+        vm.recordLogs();
+        sPOLChildToken.balanceWithL1();
+
+        assertEq(vm.getRecordedLogs().length, 2, "Should emit exactly 2 events");
+        assertTrue(sPOLChildToken.onGoingMigration(), "Migration should be marked as ongoing");
     }
 
     function test_balanceWithL1_onlyAdmin() public {
