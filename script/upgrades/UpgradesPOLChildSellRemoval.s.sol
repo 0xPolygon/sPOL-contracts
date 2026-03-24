@@ -29,7 +29,7 @@ contract UpgradesPOLChildSellRemoval is Script {
         Config memory cfg = _loadConfig(_network);
 
         // --- deploy new implementation (CREATE2) ---
-        vm.startBroadcast();
+        vm.startBroadcast(vm.envUint("DEPLOYER_PRIVATE_KEY"));
         sPOLChild newImpl = new sPOLChild{salt: cfg.salt}(cfg.stateSyncerL2);
         vm.stopBroadcast();
 
