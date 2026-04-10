@@ -14,12 +14,11 @@ import {
     ERC20PermitUpgradeable
 } from "@openzeppelin-contracts-upgradeable/token/ERC20/extensions/ERC20PermitUpgradeable.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
-import {DoubleEndedQueue} from "@openzeppelin/contracts/utils/structs/DoubleEndedQueue.sol";
 
 /// @title sPOL Child
 /// @notice L2 contract for the sPOL liquid staking protocol on Polygon
-/// @dev Handles L2 buy/sell operations using a cached L1 exchange rate. Coordinates migrations
-///      (surplus POL to L1) and backfills (POL needed from L1) to keep L1/L2 balances in sync.
+/// @dev Handles L2 buy operations using a cached L1 exchange rate. Coordinates migrations
+///      (surplus POL to L1) to keep L1/L2 balances in sync.
 ///      Also serves as the sPOL ERC20 token on L2.
 contract sPOLChild is
     Initializable,
@@ -30,8 +29,6 @@ contract sPOLChild is
     BaseChildTunnel,
     MsgCoder
 {
-    using DoubleEndedQueue for DoubleEndedQueue.Bytes32Deque;
-
     // exchange info
     uint256 public l1SPOLBalance;
     uint256 public l1DPOLBalance;
@@ -46,51 +43,29 @@ contract sPOLChild is
 
     // local info
     uint256 public polBalance;
-    // These three together should always be equal to the sum of outstanding POL in userOutstandingWithdraw
-    uint256 public missingWithdrawPOLBalance;
-    uint256 public reservedWithdrawPOLBalance;
-    uint256 public requestedWithdrawPOLBalance;
+    // Deprecated slots, that have always been zero
+    uint256 deprecated_missingWithdrawPOLBalance;
+    uint256 deprecated_reservedWithdrawPOLBalance;
+    uint256 deprecated_requestedWithdrawPOLBalance;
 
     // sPOL originating on L2 needs to be locked in the bridge from L1 so it becomes "real"
     uint256 public locallyMintedSPOL;
-    // sPOL that was burned on L2 needs to be released from bridge on L1 and also burned there
-    uint256 public locallyToBeBurnedSPOL;
-    // L1 Messenger that needs to receive the sPOL to complete migrations/backfills
-    address public l1Messenger;
+    // Deprecated slot, that has always been zero
+    uint256 deprecated_locallyBurnedSPOL;
+    // Deprecated slot, not zero
+    address deprecated_l1Messenger;
     // Bridge helper contract, because POL has no withdrawFor function
     PolBridger public bridgeHelper;
 
     // Depositor bridge contract of sPOL
     address public childChainManager;
 
-    // Migration and backfill tracking
-    uint256 public backFillCycle;
-    mapping(uint256 => bool) public completedBackfills;
+    // Migration tracking
     bool public onGoingMigration;
-    bool public onGoingBackfill;
     uint256 public backMigratingSPOL;
 
-    struct UserOutstanding {
-        uint256 outstandingPOL;
-        uint256 backFillCycle;
-    }
-
-    struct UserOutstandingFull {
-        uint256 outstandingPOL;
-        uint256 backFillCycle;
-        uint256 nonce;
-    }
-
-    // Nonce to Outstanding
-    mapping(uint256 => UserOutstanding) public userOutstandingWithdraw;
-    // User to nonces
-    mapping(address => DoubleEndedQueue.Bytes32Deque) public userOutstandingNonces;
-    uint256 public globalWithdrawNonce;
-
-    // Stake/unstake events
+    // Stake event
     event sPOLMinted(address indexed user, uint256 amountPOL, uint256 amountSPOL);
-    event sPOLBurned(address indexed user, uint256 amountSPOL, uint256 amountPOL, uint256 nonce);
-    event POLWithdrawn(address indexed user, uint256 amountPOL, uint256 nonce);
 
     // Exchange rate and operational events
     event ExchangeRateDeclined(
@@ -103,26 +78,19 @@ contract sPOLChild is
     event SafetyFeeChanged(uint16 oldFee, uint16 newFee);
     event MaxExchangeRateDelayChanged(uint256 oldDelay, uint256 newDelay);
 
-    // Migration and backfill events
-    event BackfillCompleted(uint256 returnedPOL, uint256 backfillCycle);
-    event BackfillLocalCompleted(uint256 reservedPOL, uint256 backfillCycle);
-    event BackfillRequested(uint256 backfillPOLAmount, uint256 toBeBurnedSPOL, uint256 backfillCycle);
-    event BackfillStarted(uint256 backfillPOLAmount, uint256 backfillCycle);
+    // Migration events
     event BalancedOnlyLocally();
     event BalancingAlreadyOngoing();
     event MigrationCompleted(uint256 backMigratingSPOL);
     event MigrationRequested(uint256 migratingPOLAmount, uint256 bridgeMissingSPOL);
 
     error AddressUnauthorized(address caller);
-    error BackfillAlreadyOngoing();
-    error BackfillCycleMismatch(uint256 expected, uint256 received);
     error ExchangeRateUpdateTooOld(uint256 lastUpdate, uint256 maxAge, uint256 currentTime);
     error FeeCannotBeZero();
     error FeeTooHigh(uint16 provided, uint16 maxAllowed);
     error IncorrectPOLAmount(uint256 sent, uint256 expected);
     error MigrationAlreadyOngoing();
     error POLAmountMustBeGreaterThanZero();
-    error POLTransferFailed();
     error ZeroAddress();
 
     modifier onlyChildChainManager() {
@@ -139,15 +107,10 @@ contract sPOLChild is
     /// @notice Initializes the L2 sPOL contract with bridge and access control settings
     /// @dev Starts paused until exchange rate is received from L1. Sets initial safety fee.
     /// @param _authority AccessManager contract for restricted function access
-    /// @param _l1Messenger L1 messenger address for sPOL migration/backfill operations
     /// @param _bridgeHelper Helper contract for bridging POL back to L1
     /// @param _childChainManager Polygon PoS bridge deposit manager
-    function initialize(address _authority, address _l1Messenger, address _bridgeHelper, address _childChainManager)
-        external
-        initializer
-    {
+    function initialize(address _authority, address _bridgeHelper, address _childChainManager) external initializer {
         require(_authority != address(0), ZeroAddress());
-        require(_l1Messenger != address(0), ZeroAddress());
         require(_bridgeHelper != address(0), ZeroAddress());
         require(_childChainManager != address(0), ZeroAddress());
 
@@ -158,7 +121,6 @@ contract sPOLChild is
 
         maxExchangeRateUpdateDelay = 10 days;
         safetyFee = 30; // 0.3%
-        l1Messenger = _l1Messenger;
         bridgeHelper = PolBridger(_bridgeHelper);
         childChainManager = _childChainManager;
 
@@ -170,19 +132,8 @@ contract sPOLChild is
     }
 
     ///////////////////////////////
-    ///  Stake/Unstake          ///
+    ///  Stake                  ///
     ///////////////////////////////
-
-    /// @notice Calculates POL amount received for burning sPOL on L2
-    /// @dev Uses L1 exchange rate cached on L2. No safety fee applied to sells (already worse than L1).
-    /// @param _sPOLAmount Amount of sPOL to convert
-    /// @return Amount of POL that would be redeemed
-    function convertSPOLToPOL(uint256 _sPOLAmount) public view returns (uint256) {
-        if (_sPOLAmount == 0) {
-            return 0;
-        }
-        return (_sPOLAmount * l1DPOLBalance) / l1SPOLBalance;
-    }
 
     /// @notice Calculates sPOL amount received for POL deposit on L2, including safety fee
     /// @dev Applies safety fee to protect against exchange rate lag from L1. Fee benefits all sPOL holders.
@@ -213,74 +164,6 @@ contract sPOLChild is
         polBalance += _polAmount;
         _mint(msg.sender, spolToMint);
         emit sPOLMinted(msg.sender, _polAmount, spolToMint);
-    }
-
-    /// @notice Burns sPOL to initiate POL redemption on L2
-    /// @dev Creates a withdrawal nonce tied to the next backfill cycle. POL is claimable after backfill completes.
-    ///      Reverts if exchange rate is stale.
-    /// @param _sPOLAmount Amount of sPOL to burn
-    function sellSPOL(uint256 _sPOLAmount) external whenNotPaused nonReentrant {
-        require(
-            lastExchangeRateUpdate + maxExchangeRateUpdateDelay >= block.timestamp,
-            ExchangeRateUpdateTooOld(lastExchangeRateUpdate, maxExchangeRateUpdateDelay, block.timestamp)
-        );
-        require(_sPOLAmount > 0, POLAmountMustBeGreaterThanZero());
-        _transfer(msg.sender, address(this), _sPOLAmount);
-        locallyToBeBurnedSPOL += _sPOLAmount;
-        uint256 polToReturn = convertSPOLToPOL(_sPOLAmount);
-        missingWithdrawPOLBalance += polToReturn;
-
-        UserOutstanding memory userOutstanding =
-            UserOutstanding({outstandingPOL: polToReturn, backFillCycle: backFillCycle + 1});
-        uint256 currentNonce = ++globalWithdrawNonce;
-        userOutstandingWithdraw[currentNonce] = userOutstanding;
-        userOutstandingNonces[msg.sender].pushBack(bytes32(currentNonce));
-        emit sPOLBurned(msg.sender, _sPOLAmount, polToReturn, currentNonce);
-    }
-
-    /// @notice Returns all pending withdrawal nonces for a user on L2
-    /// @dev Each nonce has a backfillCycle. Withdrawable when corresponding backfill is completed.
-    /// @param _user Address to query open withdrawals for
-    /// @return Array of withdrawal details including POL amount, backfill cycle, and nonce
-    function getUserOutstandingNonces(address _user) external view returns (UserOutstandingFull[] memory) {
-        DoubleEndedQueue.Bytes32Deque storage outstandingNonces = userOutstandingNonces[_user];
-        uint256 length = outstandingNonces.length();
-        UserOutstandingFull[] memory userOutstandings = new UserOutstandingFull[](length);
-        for (uint256 i = 0; i < length; i++) {
-            uint256 nonce = uint256(outstandingNonces.at(i));
-            UserOutstanding storage currentOutstanding = userOutstandingWithdraw[nonce];
-            userOutstandings[i] = UserOutstandingFull({
-                outstandingPOL: currentOutstanding.outstandingPOL,
-                backFillCycle: currentOutstanding.backFillCycle,
-                nonce: nonce
-            });
-        }
-        return userOutstandings;
-    }
-
-    /// @notice Claims all matured POL withdrawals for the caller on L2
-    /// @dev Processes all nonces whose backfill cycle has completed. Transfers native POL to caller.
-    function withdrawPOL() external nonReentrant {
-        DoubleEndedQueue.Bytes32Deque storage outstandingNonces = userOutstandingNonces[msg.sender];
-        uint256 totalToWithdraw;
-        while (!outstandingNonces.empty()) {
-            uint256 currentNonce = uint256(outstandingNonces.front());
-            UserOutstanding storage currentOutstanding = userOutstandingWithdraw[currentNonce];
-            if (completedBackfills[currentOutstanding.backFillCycle]) {
-                uint256 outstandingPOL = currentOutstanding.outstandingPOL;
-                totalToWithdraw += outstandingPOL;
-                emit POLWithdrawn(msg.sender, outstandingPOL, currentNonce);
-                delete userOutstandingWithdraw[currentNonce];
-                outstandingNonces.popFront();
-            } else {
-                break;
-            }
-        }
-        require(totalToWithdraw > 0, POLAmountMustBeGreaterThanZero());
-        reservedWithdrawPOLBalance -= totalToWithdraw;
-        polBalance -= totalToWithdraw;
-        (bool success,) = payable(msg.sender).call{value: totalToWithdraw}("");
-        require(success, POLTransferFailed());
     }
 
     /////////////////////////////////
@@ -321,8 +204,6 @@ contract sPOLChild is
         (MsgType msgType, bytes memory actualMessage) = abi.decode(message, (MsgType, bytes));
         if (msgType == MsgType.EXCHANGE_UPDATE) {
             _handleExchangeRateUpdate(actualMessage);
-        } else if (msgType == MsgType.L1_BACKFILL_RESPONSE) {
-            _handleBackfillResponse(actualMessage);
         } else {
             emit InvalidMessageType(uint8(msgType));
             return;
@@ -335,7 +216,7 @@ contract sPOLChild is
             emit ExchangeRateDeclined(l1SPOLBalance, l1DPOLBalance, updatedl1SPOLBalance, updatedl1DPOLBalance);
             return;
         }
-        if (onGoingMigration || onGoingBackfill) {
+        if (onGoingMigration) {
             emit BalancingAlreadyOngoing();
             return;
         }
@@ -348,26 +229,8 @@ contract sPOLChild is
         emit ExchangeRateUpdated(oldSPOLBalance, oldDPOLBalance, updatedl1SPOLBalance, updatedl1DPOLBalance);
     }
 
-    //////////////////////////////
-    ///  Migration/Backfill    ///
-    //////////////////////////////
-
-    function _handleBackfillResponse(bytes memory _msg) internal {
-        (uint256 returnedPOL, uint256 returnedBackFillCycle) = _decodeL1BackfillResponseMessage(_msg);
-        require(returnedBackFillCycle == backFillCycle, BackfillCycleMismatch(backFillCycle, returnedBackFillCycle));
-        require(
-            returnedPOL == requestedWithdrawPOLBalance, IncorrectPOLAmount(returnedPOL, requestedWithdrawPOLBalance)
-        );
-        reservedWithdrawPOLBalance += returnedPOL;
-        requestedWithdrawPOLBalance = 0;
-        polBalance += returnedPOL;
-        _completeBackfill(returnedPOL, returnedBackFillCycle);
-    }
-
-    receive() external payable {}
-
     /// @notice Triggers L1/L2 balance synchronization
-    /// @dev Initiates either migration (surplus POL to L1), backfill request (need POL from L1) or local balancing only.
+    /// @dev Initiates either migration (surplus POL to L1) or local balancing only.
     ///      Automatically called during exchange rate updates. Can be called manually if needed.
     function balanceWithL1() external restricted nonReentrant {
         _balanceWithL1();
@@ -375,42 +238,13 @@ contract sPOLChild is
 
     function _balanceWithL1() internal {
         require(!onGoingMigration, MigrationAlreadyOngoing());
-        require(!onGoingBackfill, BackfillAlreadyOngoing());
 
-        uint256 surplusPOL = polBalance - reservedWithdrawPOLBalance;
-        // more surplus than missing withdraw balance -> full local backfill possible
-        if (surplusPOL >= missingWithdrawPOLBalance) {
-            if (missingWithdrawPOLBalance > 0) {
-                _startBackfill(missingWithdrawPOLBalance);
-                surplusPOL -= missingWithdrawPOLBalance;
-                _localBackfill(missingWithdrawPOLBalance);
-                _completeBackfill(0, backFillCycle);
-            }
-            if (surplusPOL > 0) {
-                if (locallyMintedSPOL >= locallyToBeBurnedSPOL) {
-                    uint256 sPOLToBeMinted = locallyMintedSPOL - locallyToBeBurnedSPOL;
-                    locallyMintedSPOL = 0;
-                    locallyToBeBurnedSPOL = 0;
-                    _requestMigration(surplusPOL, sPOLToBeMinted);
-                } else {
-                    // special case where the safety fee surplus is also expressed as extra sPOL to be burned
-                    emit BalancedOnlyLocally();
-                }
-            } else {
-                // surplus matched exactly the missing withdraw balance, or both were zero
-                emit BalancedOnlyLocally();
-            }
-        } else {
-            // not enough surplus, so request backfill
-            _startBackfill(missingWithdrawPOLBalance);
-            if (surplusPOL > 0) {
-                _localBackfill(surplusPOL);
-            }
-            uint256 sPOLToBeBurned = locallyToBeBurnedSPOL - locallyMintedSPOL;
-            locallyToBeBurnedSPOL = 0;
+        if (polBalance > 0) {
+            uint256 sPOLToBeMinted = locallyMintedSPOL;
             locallyMintedSPOL = 0;
-            _requestBackfill(missingWithdrawPOLBalance, sPOLToBeBurned);
-            missingWithdrawPOLBalance = 0;
+            _requestMigration(polBalance, sPOLToBeMinted);
+        } else {
+            emit BalancedOnlyLocally();
         }
     }
 
@@ -424,36 +258,6 @@ contract sPOLChild is
             abi.encode(MsgType.L2_MIGRATION_REQUEST, _encodeL2MigrationRequestMessage(_polToMigrate, _spolToMint))
         );
         emit MigrationRequested(_polToMigrate, _spolToMint);
-    }
-
-    function _startBackfill(uint256 _polToBackfill) internal {
-        onGoingBackfill = true;
-        backFillCycle += 1;
-        emit BackfillStarted(_polToBackfill, backFillCycle);
-    }
-
-    function _localBackfill(uint256 _polBackfilled) internal {
-        missingWithdrawPOLBalance -= _polBackfilled;
-        reservedWithdrawPOLBalance += _polBackfilled;
-        emit BackfillLocalCompleted(_polBackfilled, backFillCycle);
-    }
-
-    function _requestBackfill(uint256 _polToBackfill, uint256 _spolToSell) internal {
-        requestedWithdrawPOLBalance += _polToBackfill;
-
-        _burnSPOLForMessenger(_spolToSell);
-        _sendMessageToRoot(
-            abi.encode(
-                MsgType.L2_BACKFILL_REQUEST, _encodeL2BackfillRequestMessage(_polToBackfill, _spolToSell, backFillCycle)
-            )
-        );
-        emit BackfillRequested(_polToBackfill, _spolToSell, backFillCycle);
-    }
-
-    function _completeBackfill(uint256 _returnedPOL, uint256 _completedBackFillCycle) internal {
-        completedBackfills[_completedBackFillCycle] = true;
-        onGoingBackfill = false;
-        emit BackfillCompleted(_returnedPOL, _completedBackFillCycle);
     }
 
     ///////////////////////////////
@@ -474,8 +278,8 @@ contract sPOLChild is
     }
 
     /// @notice Updates how long the exchange rate remains valid without L1 updates
-    /// @dev If exceeded, buy/sell operations pause automatically. Prevents exchange on stale rates.
-    ///      WARNING: Setting to 0 blocks all buys/sells. Setting too high allows trading on stale rates,
+    /// @dev If exceeded, buy operations pause automatically. Prevents exchange on stale rates.
+    ///      WARNING: Setting to 0 blocks all buys. Setting too high allows trading on stale rates,
     ///      which weakens the safety fee protection. Must be aligned with the service's update frequency.
     /// @param _newDelay New maximum age in seconds for the exchange rate
     function setMaxExchangeRateUpdateDelay(uint256 _newDelay) external restricted {
@@ -484,14 +288,14 @@ contract sPOLChild is
         emit MaxExchangeRateDelayChanged(oldDelay, _newDelay);
     }
 
-    /// @notice Pauses buy and sell operations on L2. Withdrawals remain available.
-    function pauseBuySell() external restricted {
+    /// @notice Pauses buy operations on L2
+    function pauseBuy() external restricted {
         _pause();
     }
 
-    /// @notice Resumes buy and sell operations on L2
+    /// @notice Resumes buy operations on L2
     /// @dev Only succeeds if exchange rate is fresh (within maxExchangeRateUpdateDelay).
-    function unpauseBuySell() external restricted {
+    function unpauseBuy() external restricted {
         require(
             lastExchangeRateUpdate + maxExchangeRateUpdateDelay >= block.timestamp,
             ExchangeRateUpdateTooOld(lastExchangeRateUpdate, maxExchangeRateUpdateDelay, block.timestamp)
@@ -502,12 +306,6 @@ contract sPOLChild is
     /////////////////////////////////
     ///  Internal Helpers       ///
     /////////////////////////////////
-
-    function _burnSPOLForMessenger(uint256 _sPOLAmount) internal {
-        address messenger = l1Messenger;
-        _transfer(address(this), messenger, _sPOLAmount);
-        _burn(messenger, _sPOLAmount);
-    }
 
     function _exitPOLforMessenger(uint256 _polAmount) internal {
         bridgeHelper.bridgePOLToL1{value: _polAmount}(_polAmount);
