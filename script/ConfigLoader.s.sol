@@ -100,6 +100,39 @@ contract ConfigLoader is Script {
         console.log("Loaded configuration for scenario:", scenarioName);
     }
 
+    /// @notice Load deployment configuration from SPOL_* environment variables.
+    /// Used by the kurtosis devnet deployer where addresses are discovered at runtime.
+    /// Devnet-specific substitutions:
+    ///   - polTokenL1 = maticTokenL1 (no separate POL token in devnet)
+    ///   - rootChainManager = deployed MockRootChainManager
+    ///   - polygonMigration = deployed MockPolygonMigration
+    function loadConfigFromEnv() public {
+        scenarioName = "kurtosis-devnet";
+        saltPrefix = vm.envString("SPOL_SALT_PREFIX");
+        chainIdL1 = vm.envUint("SPOL_CHAIN_ID_L1");
+        chainIdL2 = vm.envUint("SPOL_CHAIN_ID_L2");
+        polTokenL1 = vm.envAddress("SPOL_POL_TOKEN_L1");
+        polTokenL2 = vm.envAddress("SPOL_POL_TOKEN_L2");
+        maticTokenL1 = vm.envAddress("SPOL_MATIC_TOKEN_L1");
+        polygonMigration = vm.envAddress("SPOL_POLYGON_MIGRATION");
+        stakeManager = vm.envAddress("SPOL_STAKE_MANAGER");
+        admin = vm.envAddress("SPOL_ADMIN");
+        feeReceiver = vm.envAddress("SPOL_FEE_RECEIVER");
+        rewardFee = uint8(vm.envUint("SPOL_REWARD_FEE"));
+        maxDivergence = uint8(vm.envUint("SPOL_MAX_DIVERGENCE"));
+        withdrawManager = vm.envAddress("SPOL_WITHDRAW_MANAGER");
+        erc20predicate = vm.envAddress("SPOL_ERC20_PREDICATE");
+        childChainManager = vm.envAddress("SPOL_CHILD_CHAIN_MANAGER");
+        rootChainManager = vm.envAddress("SPOL_ROOT_CHAIN_MANAGER");
+        rcmERC20Predicate = vm.envAddress("SPOL_RCM_ERC20_PREDICATE");
+        depositManager = vm.envAddress("SPOL_DEPOSIT_MANAGER");
+        stateSenderL1 = vm.envAddress("SPOL_STATE_SENDER_L1");
+        checkpointManager = vm.envAddress("SPOL_CHECKPOINT_MANAGER");
+        stateSyncerL2 = vm.envAddress("SPOL_STATE_SYNCER_L2");
+        validateConfig();
+        console.log("Loaded configuration from environment variables for kurtosis devnet");
+    }
+
     function validateConfig() public view {
         require(bytes(scenarioName).length != 0, "Scenario name is empty");
         require(bytes(saltPrefix).length != 0, "Salt prefix is empty");

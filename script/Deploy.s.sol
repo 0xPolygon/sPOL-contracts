@@ -80,6 +80,33 @@ contract Deploy is Script, ConfigLoader {
         deployContractsL2(_deployer);
     }
 
+    /// @notice Deploy both L1 and L2 contracts reading config from SPOL_* env vars.
+    /// Used by the kurtosis devnet deployer.
+    function runFromEnv() public {
+        uint256 pk = vm.envUint("DEPLOYER_PRIVATE_KEY");
+        address deployer = vm.addr(pk);
+        loadConfigFromEnv();
+        vm.createSelectFork(vm.envString("L1_RPC_URL"));
+        vm.startBroadcast(pk);
+        deployContractsL1(deployer);
+        vm.stopBroadcast();
+        vm.createSelectFork(vm.envString("L2_RPC_URL"));
+        vm.startBroadcast(pk);
+        deployContractsL2(deployer);
+        vm.stopBroadcast();
+        writeDeploymentInfoToJSON();
+    }
+
+    function deployL1FromEnvConfig(address _deployer) public {
+        loadConfigFromEnv();
+        deployContractsL1(_deployer);
+    }
+
+    function deployL2FromEnvConfig(address _deployer) public {
+        loadConfigFromEnv();
+        deployContractsL2(_deployer);
+    }
+
     function deployContractsL1(address _deployer) public {
         dummyImplL1 = address(new DummyImpl{salt: getSalt("dummy-impl")}());
 
