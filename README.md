@@ -1,4 +1,4 @@
-# sPOL
+# sPOL Contracts
 
 Liquid staking protocol for POL on Ethereum. Users deposit POL and receive sPOL, a transferable ERC-20 that represents a share of the staked pool. The protocol delegates across a managed set of validators, compounds rewards, and exposes the token on both Ethereum (L1) and Polygon (L2) via Polygon's state-sync bridge.
 
