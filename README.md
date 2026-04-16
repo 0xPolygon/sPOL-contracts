@@ -17,11 +17,13 @@ Liquid staking protocol for POL on Polygon PoS. Users deposit POL and receive sP
 
 Requires [Foundry](https://book.getfoundry.sh/getting-started/installation).
 
-```sh
-# Install dependencies
-forge soldeer install
 
-# Build
+Install dependencies
+```sh
+forge soldeer install
+```
+Build
+```sh
 forge build
 ```
 
@@ -38,11 +40,12 @@ You will need:
 
 ## Testing
 
+Unit and integration tests
 ```sh
-# Unit and integration tests
 forge test
-
-# Coverage (excludes scripts, mocks, messaging libs, and integration tests)
+```
+Coverage (excludes scripts, mocks, messaging libs, and integration tests)
+```sh
 forge coverage --no-match-coverage "(script|mocks|msg|integration)"
 ```
 
