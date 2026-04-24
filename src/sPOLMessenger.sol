@@ -26,17 +26,18 @@ contract sPOLMessenger is Initializable, AccessManagedUpgradeable, ReentrancyGua
     IRootChainManager public immutable rootChainManager;
     IDepositManager public immutable depositManager;
     IsPOLController public immutable sPOLController;
-    PolBridger public immutable polBridger;
 
     mapping(uint256 => bool) public completedBackfill;
     mapping(uint256 => uint256) public backfillAmounts;
     uint256 public currentActiveBackfillCycle;
+    PolBridger public bridgeHelper;
 
     event BackfillCompleted(uint256 indexed backfillCycle, uint256 totalWithdraw);
     event BackfillStarted(uint256 indexed backfillCycle, uint256 polAmount, uint256 sPOLAmount);
     event ExchangeRateUpdateSent(uint256 totalsPOLBalance, uint256 totaldPOLBalance);
     event InvalidMessageType(uint8 msgType);
     event MigrationProcessed(uint256 polAmount, uint256 mintedSPOL);
+    event BridgeHelperUpdated(address indexed oldBridger, address indexed newBridger);
 
     error BackfillAlreadyCompleted(uint256 backfillCycle);
     error BackfillAlreadyOngoing(uint256 backfillCycle);
@@ -53,8 +54,7 @@ contract sPOLMessenger is Initializable, AccessManagedUpgradeable, ReentrancyGua
         address _depositManager,
         address _stateSender,
         address _checkpointManager,
-        address _childTunnel,
-        address _polBridger
+        address _childTunnel
     ) BaseRootTunnel(_stateSender, _checkpointManager, _childTunnel) {
         require(_polToken != address(0), ZeroAddress());
         require(_sPOLToken != address(0), ZeroAddress());
@@ -64,27 +64,29 @@ contract sPOLMessenger is Initializable, AccessManagedUpgradeable, ReentrancyGua
         require(_stateSender != address(0), ZeroAddress());
         require(_checkpointManager != address(0), ZeroAddress());
         require(_childTunnel != address(0), ZeroAddress());
-        require(_polBridger != address(0), ZeroAddress());
 
         polToken = IERC20(_polToken);
         sPOLToken = IERC20(_sPOLToken);
         sPOLController = IsPOLController(_sPOLController);
         rootChainManager = IRootChainManager(_rootChainManager);
         depositManager = IDepositManager(_depositManager);
-        polBridger = PolBridger(_polBridger);
 
         _disableInitializers();
     }
 
-    /// @notice Initializes the messenger with access control and token approvals
+    /// @notice Initializes the messenger with access control, bridge helper wiring, and token approvals
     /// @dev Sets up approvals for sPOLController (POL staking) and bridge contracts (POL/sPOL transfers).
     /// @param _authority AccessManager contract for restricted function access
     /// @param _rcmERC20Predicate RootChainManager ERC20 predicate for sPOL bridge deposits
-    function initialize(address _authority, address _rcmERC20Predicate) external initializer {
+    /// @param _bridgeHelper PolBridger proxy used to process L2 migration POL exits
+    function initialize(address _authority, address _rcmERC20Predicate, address _bridgeHelper) external initializer {
         require(_authority != address(0), ZeroAddress());
         require(_rcmERC20Predicate != address(0), ZeroAddress());
+        require(_bridgeHelper != address(0), ZeroAddress());
 
         __AccessManaged_init(_authority);
+
+        bridgeHelper = PolBridger(_bridgeHelper);
 
         polToken.approve(address(sPOLController), type(uint256).max);
         polToken.approve(address(depositManager), type(uint256).max);
@@ -105,7 +107,7 @@ contract sPOLMessenger is Initializable, AccessManagedUpgradeable, ReentrancyGua
 
     function _handleMigration(bytes memory _msg) internal {
         (uint256 _polAmount, uint256 _mintedSPOL) = _decodeL2MigrationRequestMessage(_msg);
-        polBridger.takePOLL1(_polAmount);
+        bridgeHelper.takePOLL1(_polAmount);
         uint256 polBalance = polToken.balanceOf(address(this));
         require(polBalance >= _polAmount, NotEnoughPOLInMessenger(_polAmount, polBalance));
 
@@ -179,5 +181,14 @@ contract sPOLMessenger is Initializable, AccessManagedUpgradeable, ReentrancyGua
             abi.encode(MsgType.EXCHANGE_UPDATE, _encodeExchangeUpdateMessage(totalsPOLBalance, totaldPOLBalance))
         );
         emit ExchangeRateUpdateSent(totalsPOLBalance, totaldPOLBalance);
+    }
+
+    /// @notice Sets or updates the BridgeHelper address
+    /// @dev Restricted to AccessManager.
+    /// @param _bridgeHelper New BridgeHelper address
+    function setBridgeHelper(address _bridgeHelper) external restricted {
+        require(_bridgeHelper != address(0), ZeroAddress());
+        emit BridgeHelperUpdated(address(bridgeHelper), _bridgeHelper);
+        bridgeHelper = PolBridger(_bridgeHelper);
     }
 }

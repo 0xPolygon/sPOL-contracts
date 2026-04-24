@@ -77,6 +77,7 @@ contract sPOLChild is
     event InvalidMessageType(uint8 msgType);
     event SafetyFeeChanged(uint16 oldFee, uint16 newFee);
     event MaxExchangeRateDelayChanged(uint256 oldDelay, uint256 newDelay);
+    event BridgeHelperUpdated(address indexed oldBridgeHelper, address indexed newBridgeHelper);
 
     // Migration events
     event BalancedOnlyLocally();
@@ -286,6 +287,15 @@ contract sPOLChild is
         uint256 oldDelay = maxExchangeRateUpdateDelay;
         maxExchangeRateUpdateDelay = _newDelay;
         emit MaxExchangeRateDelayChanged(oldDelay, _newDelay);
+    }
+
+    /// @notice Sets or updates the PolBridger (bridge helper) address
+    /// @dev Restricted to AccessManager.
+    /// @param _bridgeHelper New PolBridger address
+    function setBridgeHelper(address _bridgeHelper) external restricted {
+        require(_bridgeHelper != address(0), ZeroAddress());
+        emit BridgeHelperUpdated(address(bridgeHelper), _bridgeHelper);
+        bridgeHelper = PolBridger(_bridgeHelper);
     }
 
     /// @notice Pauses buy operations on L2
