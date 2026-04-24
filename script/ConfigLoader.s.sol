@@ -12,8 +12,7 @@ contract ConfigLoader is Script {
     uint256 public chainIdL2;
     address public polTokenL1;
     address public polTokenL2;
-    address public withdrawManager;
-    address public erc20predicate;
+    address public registry;
     address public childChainManager;
     address public rootChainManager;
     address public rcmERC20Predicate;
@@ -46,8 +45,7 @@ contract ConfigLoader is Script {
         feeReceiver = makeAddr("feeReceiver");
         rewardFee = 100; // 10%
         maxDivergence = 10; // 10%
-        withdrawManager = makeAddr("withdrawManager");
-        erc20predicate = makeAddr("erc20predicate");
+        registry = makeAddr("registry");
         childChainManager = makeAddr("childChainManager");
         rootChainManager = makeAddr("rootChainManager");
         rcmERC20Predicate = makeAddr("rcmERC20Predicate");
@@ -86,8 +84,7 @@ contract ConfigLoader is Script {
         feeReceiver = vm.parseJsonAddress(json, string.concat(scenarioName, ".feeReceiver"));
         rewardFee = uint8(vm.parseJsonUint(json, string.concat(scenarioName, ".rewardFee")));
         maxDivergence = uint8(vm.parseJsonUint(json, string.concat(scenarioName, ".maxDivergence")));
-        withdrawManager = vm.parseJsonAddress(json, string.concat(scenarioName, ".withdrawManager"));
-        erc20predicate = vm.parseJsonAddress(json, string.concat(scenarioName, ".erc20predicate"));
+        registry = vm.parseJsonAddress(json, string.concat(scenarioName, ".registry"));
         childChainManager = vm.parseJsonAddress(json, string.concat(scenarioName, ".childChainManager"));
         rootChainManager = vm.parseJsonAddress(json, string.concat(scenarioName, ".rootChainManager"));
         rcmERC20Predicate = vm.parseJsonAddress(json, string.concat(scenarioName, ".rcmERC20Predicate"));
@@ -113,8 +110,6 @@ contract ConfigLoader is Script {
         require(feeReceiver != address(0), "Fee Receiver address is zero");
         require(rewardFee <= 1000, "Reward fee exceeds 1000 (10%)");
         require(maxDivergence <= 100, "Max divergence exceeds 100 (10%)");
-        require(withdrawManager != address(0), "Withdraw Manager address is zero");
-        require(erc20predicate != address(0), "ERC20 Predicate address is zero");
         require(childChainManager != address(0), "Child Chain Manager address is zero");
         require(rootChainManager != address(0), "Root Chain Manager address is zero");
         require(rcmERC20Predicate != address(0), "RCM ERC20 Predicate address is zero");
