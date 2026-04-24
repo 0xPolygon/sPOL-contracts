@@ -330,6 +330,11 @@ contract Deploy is Script, ConfigLoader {
             polBridgerProxyAdmin.owner() == address(accessManagerL1),
             "PolBridger L1 ProxyAdmin not owned by AccessManager"
         );
+
+        // Verify the final admin multisig has ADMIN_ROLE on the AccessManager.
+        (bool adminHasRoleL1,) = accessManagerL1.hasRole(accessManagerL1.ADMIN_ROLE(), admin);
+        require(adminHasRoleL1, "admin (multisig) not granted ADMIN_ROLE on AccessManager L1");
+
         console.log("All verifications passed!");
     }
 
@@ -354,15 +359,20 @@ contract Deploy is Script, ConfigLoader {
         require(bridger.sPOLMessengerL1() == address(sPOLMessengerProxy), "PolBridger sPOLMessengerL1 incorrect");
         require(bridger.sPOLMessengerL2() == address(sPOLChildProxy), "PolBridger sPOLMessengerL2 incorrect");
 
-        // Verify AccessManager is the admin of every L2 proxy.
+        // Verify AccessManager is the admin of every L2 proxy. L2 only has two: sPOLChild
+        // and polBridger (the messenger/controller/sPOL live on L1). So four admin checks
+        // (authority + ProxyAdmin.owner, once per proxy) covers every L2 contract.
         require(
-            sPOLChildproxyAdmin.owner() == address(accessManagerL2),
-            "sPOLChild ProxyAdmin not owned by AccessManager"
+            sPOLChildproxyAdmin.owner() == address(accessManagerL2), "sPOLChild ProxyAdmin not owned by AccessManager"
         );
         require(
             polBridgerProxyAdmin.owner() == address(accessManagerL2),
             "PolBridger L2 ProxyAdmin not owned by AccessManager"
         );
+
+        // Verify the final admin multisig has ADMIN_ROLE on the AccessManager.
+        (bool adminHasRoleL2,) = accessManagerL2.hasRole(accessManagerL2.ADMIN_ROLE(), admin);
+        require(adminHasRoleL2, "admin (multisig) not granted ADMIN_ROLE on AccessManager L2");
 
         // If L1 was deployed then cross-chain invariants should hold.
         if (address(accessManagerL1) != address(0)) {
