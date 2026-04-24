@@ -341,7 +341,7 @@ contract UpgradePolBridgerToProxy is Script {
         bytes memory polBridgerExec =
             abi.encodeCall(AccessManager.execute, (d1.polBridgerProxyAdmin, polBridgerUpgrade));
 
-        // 2. Upgrade messenger (no call — setPolBridger is restricted so the delegatecall-from-
+        // 2. Upgrade messenger (no call — updateBridgeHelper is restricted so the delegatecall-from-
         //    ProxyAdmin path would fail the AccessManager check; we do it in a separate execute).
         bytes memory messengerUpgrade = abi.encodeCall(
             ProxyAdmin.upgradeAndCall, (ITransparentUpgradeableProxy(cfg.sPOLMessengerProxy), d1.sPOLMessengerImpl, "")
@@ -349,7 +349,7 @@ contract UpgradePolBridgerToProxy is Script {
         bytes memory messengerUpgradeExec =
             abi.encodeCall(AccessManager.execute, (cfg.sPOLMessengerProxyAdmin, messengerUpgrade));
 
-        // 3. setPolBridger on the messenger — msg.sender inside the call is AccessManager,
+        // 3. updateBridgeHelper on the messenger — msg.sender inside the call is AccessManager,
         //    which the OZ AccessManager treats as authorised.
         bytes memory setBridgerCall = abi.encodeCall(sPOLMessenger.updateBridgeHelper, (d1.polBridgerProxy));
         bytes memory messengerSetExec = abi.encodeCall(AccessManager.execute, (cfg.sPOLMessengerProxy, setBridgerCall));
@@ -368,7 +368,7 @@ contract UpgradePolBridgerToProxy is Script {
         console.log("  Calldata:");
         console.logBytes(messengerUpgradeExec);
         console.log("");
-        console.log("Step 3: setPolBridger on messenger");
+        console.log("Step 3: updateBridgeHelper on messenger");
         console.log("  Target:   %s (AccessManager L1)", cfg.accessManagerL1);
         console.log("  Inner target: %s (sPOLMessenger proxy)", cfg.sPOLMessengerProxy);
         console.log("  Calldata:");
@@ -391,7 +391,7 @@ contract UpgradePolBridgerToProxy is Script {
         );
         bytes memory childUpgradeExec = abi.encodeCall(AccessManager.execute, (cfg.sPOLChildProxyAdmin, childUpgrade));
 
-        bytes memory setHelperCall = abi.encodeCall(sPOLChild.setBridgeHelper, (d2.polBridgerProxy));
+        bytes memory setHelperCall = abi.encodeCall(sPOLChild.updateBridgeHelper, (d2.polBridgerProxy));
         bytes memory childSetExec = abi.encodeCall(AccessManager.execute, (cfg.sPOLChildProxy, setHelperCall));
 
         console.log("--- L2 Admin calldata (execute from AccessManager %s) ---", cfg.accessManagerL2);
@@ -408,7 +408,7 @@ contract UpgradePolBridgerToProxy is Script {
         console.log("  Calldata:");
         console.logBytes(childUpgradeExec);
         console.log("");
-        console.log("Step 3: setBridgeHelper on child");
+        console.log("Step 3: updateBridgeHelper on child");
         console.log("  Target:   %s (AccessManager L2)", cfg.accessManagerL2);
         console.log("  Inner target: %s (sPOLChild proxy)", cfg.sPOLChildProxy);
         console.log("  Calldata:");

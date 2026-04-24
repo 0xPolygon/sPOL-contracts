@@ -306,7 +306,7 @@ contract Deploy is Script, ConfigLoader {
 
         // Verify messenger
         require(messenger.authority() == address(accessManagerL1), "Messenger authority incorrect");
-        require(address(messenger.polBridger()) == address(polBridgerProxy), "Messenger polBridger incorrect");
+        require(address(messenger.bridgeHelper()) == address(polBridgerProxy), "Messenger polBridger incorrect");
 
         // Verify PolBridger (L1 side)
         require(bridger.authority() == address(accessManagerL1), "PolBridger L1 authority incorrect");

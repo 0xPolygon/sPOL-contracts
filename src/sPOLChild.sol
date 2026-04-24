@@ -292,7 +292,7 @@ contract sPOLChild is
     /// @notice Sets or updates the PolBridger (bridge helper) address
     /// @dev Restricted to AccessManager.
     /// @param _bridgeHelper New PolBridger address
-    function setBridgeHelper(address _bridgeHelper) external restricted {
+    function updateBridgeHelper(address _bridgeHelper) external restricted {
         require(_bridgeHelper != address(0), ZeroAddress());
         emit BridgeHelperUpdated(address(bridgeHelper), _bridgeHelper);
         bridgeHelper = PolBridger(_bridgeHelper);
