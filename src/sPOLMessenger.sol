@@ -186,7 +186,7 @@ contract sPOLMessenger is Initializable, AccessManagedUpgradeable, ReentrancyGua
     /// @notice Sets or updates the BridgeHelper address
     /// @dev Restricted to AccessManager.
     /// @param _bridgeHelper New BridgeHelper address
-    function setBridgeHelper(address _bridgeHelper) external restricted {
+    function updateBridgeHelper(address _bridgeHelper) external restricted {
         require(_bridgeHelper != address(0), ZeroAddress());
         emit BridgeHelperUpdated(address(bridgeHelper), _bridgeHelper);
         bridgeHelper = PolBridger(_bridgeHelper);
