@@ -122,6 +122,169 @@ contract UpgradePolBridgerToProxy is Script {
         _printL2(_network, cfg, d2, predictedL1Proxy);
     }
 
+    bytes32 internal constant ERC1967_IMPL_SLOT = hex"360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc";
+
+    /// @notice Post-upgrade verification for L1. Computes every expected CREATE2 address from
+    ///         the config (so operator passes no impl addresses), checks each has code, then
+    ///         verifies proxy impl slots, authority, wiring, ProxyAdmin ownership, PolBridger
+    ///         immutables, and the messenger's bridgeHelper pointer. Mirrors the spirit of
+    ///         Deploy.s.sol::_verifyDeploymentL1 for the newly-initialized contracts.
+    /// @dev    Usage: forge script script/upgrades/UpgradePolBridgerToProxy.s.sol \
+    ///                   --sig "verifyL1(string)" "mainnet" --rpc-url $L1_RPC_URL
+    function verifyL1(string calldata _network) external view {
+        Config memory cfg = _loadConfig(_network);
+
+        // 1. Impl deployments: all four CREATE2 targets must have code at their predicted address.
+        address expectedDummy = _computeCreate2(
+            _salt(cfg.saltPrefix, "pol-bridger-upgrade-dummy-v1.2"), type(DummyImpl).creationCode
+        );
+        address expectedPolBridgerImpl = _computeCreate2(
+            _salt(cfg.saltPrefix, "pol-bridger-impl-v1.2"),
+            abi.encodePacked(
+                type(PolBridger).creationCode,
+                abi.encode(
+                    cfg.polTokenL1, cfg.polTokenL2, cfg.maticTokenL1, cfg.chainIdL1, cfg.chainIdL2, cfg.registry
+                )
+            )
+        );
+        address expectedPolBridgerProxy = _computeCreate2(
+            _salt(cfg.saltPrefix, "pol-bridger-proxy-v1.2"),
+            abi.encodePacked(
+                type(TransparentUpgradeableProxy).creationCode,
+                abi.encode(expectedDummy, cfg.accessManagerL1, "")
+            )
+        );
+        address expectedMessengerImpl = _expectedMessengerImplAddress(cfg);
+
+        require(expectedDummy.code.length > 0, "upgrade dummy impl not deployed on L1");
+        require(expectedPolBridgerImpl.code.length > 0, "PolBridger impl not deployed on L1");
+        require(expectedPolBridgerProxy.code.length > 0, "PolBridger proxy not deployed on L1");
+        require(expectedMessengerImpl.code.length > 0, "sPOLMessenger new impl not deployed on L1");
+
+        // 2. Proxy impl slots point at the newly-deployed impls.
+        require(_implOf(expectedPolBridgerProxy) == expectedPolBridgerImpl, "PolBridger proxy impl slot wrong");
+        require(_implOf(cfg.sPOLMessengerProxy) == expectedMessengerImpl, "sPOLMessenger proxy impl slot wrong");
+
+        // 3. PolBridger state + wiring.
+        PolBridger bridger = PolBridger(expectedPolBridgerProxy);
+        require(bridger.authority() == cfg.accessManagerL1, "PolBridger L1 authority incorrect");
+        require(bridger.sPOLMessengerL1() == cfg.sPOLMessengerProxy, "PolBridger sPOLMessengerL1 incorrect");
+        require(bridger.sPOLMessengerL2() == cfg.sPOLChildProxy, "PolBridger sPOLMessengerL2 (child proxy) incorrect");
+        require(bridger.polTokenL1() == cfg.polTokenL1, "PolBridger polTokenL1 immutable incorrect");
+        require(bridger.polTokenL2() == cfg.polTokenL2, "PolBridger polTokenL2 immutable incorrect");
+        require(bridger.maticTokenL1() == cfg.maticTokenL1, "PolBridger maticTokenL1 immutable incorrect");
+        require(bridger.chainIDL1() == cfg.chainIdL1, "PolBridger chainIDL1 immutable incorrect");
+        require(bridger.chainIDL2() == cfg.chainIdL2, "PolBridger chainIDL2 immutable incorrect");
+        require(address(bridger.registry()) == cfg.registry, "PolBridger registry immutable incorrect");
+        require(!bridger.paused(), "PolBridger should not be paused post-upgrade");
+
+        // 4. ProxyAdmin ownership.
+        address proxyAdmin = _getProxyAdmin(expectedPolBridgerProxy);
+        require(
+            ProxyAdmin(proxyAdmin).owner() == cfg.accessManagerL1,
+            "PolBridger L1 ProxyAdmin not owned by AccessManager"
+        );
+
+        // 5. Messenger pointer.
+        require(
+            address(sPOLMessenger(cfg.sPOLMessengerProxy).bridgeHelper()) == expectedPolBridgerProxy,
+            "Messenger bridgeHelper not pointing at new PolBridger proxy"
+        );
+
+        console.log("L1 verification passed.");
+        console.log("  PolBridger impl:        %s", expectedPolBridgerImpl);
+        console.log("  PolBridger proxy:       %s", expectedPolBridgerProxy);
+        console.log("  sPOLMessenger new impl: %s", expectedMessengerImpl);
+    }
+
+    /// @notice Post-upgrade verification for L2.
+    /// @dev    Usage: forge script script/upgrades/UpgradePolBridgerToProxy.s.sol \
+    ///                   --sig "verifyL2(string)" "mainnet" --rpc-url $L2_RPC_URL
+    function verifyL2(string calldata _network) external view {
+        Config memory cfg = _loadConfig(_network);
+
+        address expectedDummy = _computeCreate2(
+            _salt(cfg.saltPrefix, "pol-bridger-upgrade-dummy-v1.2"), type(DummyImpl).creationCode
+        );
+        address expectedPolBridgerImpl = _computeCreate2(
+            _salt(cfg.saltPrefix, "pol-bridger-impl-v1.2"),
+            abi.encodePacked(
+                type(PolBridger).creationCode,
+                abi.encode(
+                    cfg.polTokenL1, cfg.polTokenL2, cfg.maticTokenL1, cfg.chainIdL1, cfg.chainIdL2, cfg.registry
+                )
+            )
+        );
+        address expectedPolBridgerProxy = _computeCreate2(
+            _salt(cfg.saltPrefix, "pol-bridger-proxy-v1.2"),
+            abi.encodePacked(
+                type(TransparentUpgradeableProxy).creationCode,
+                abi.encode(expectedDummy, cfg.accessManagerL2, "")
+            )
+        );
+        address expectedChildImpl = _computeCreate2(
+            _salt(cfg.saltPrefix, "spol-child-impl-v1.2"),
+            abi.encodePacked(type(sPOLChild).creationCode, abi.encode(cfg.stateSyncerL2))
+        );
+
+        require(expectedDummy.code.length > 0, "upgrade dummy impl not deployed on L2");
+        require(expectedPolBridgerImpl.code.length > 0, "PolBridger impl not deployed on L2");
+        require(expectedPolBridgerProxy.code.length > 0, "PolBridger proxy not deployed on L2");
+        require(expectedChildImpl.code.length > 0, "sPOLChild new impl not deployed on L2");
+
+        require(_implOf(expectedPolBridgerProxy) == expectedPolBridgerImpl, "PolBridger proxy impl slot wrong");
+        require(_implOf(cfg.sPOLChildProxy) == expectedChildImpl, "sPOLChild proxy impl slot wrong");
+
+        PolBridger bridger = PolBridger(expectedPolBridgerProxy);
+        require(bridger.authority() == cfg.accessManagerL2, "PolBridger L2 authority incorrect");
+        require(bridger.sPOLMessengerL1() == cfg.sPOLMessengerProxy, "PolBridger sPOLMessengerL1 incorrect");
+        require(bridger.sPOLMessengerL2() == cfg.sPOLChildProxy, "PolBridger sPOLMessengerL2 (child proxy) incorrect");
+        require(bridger.polTokenL1() == cfg.polTokenL1, "PolBridger polTokenL1 immutable incorrect");
+        require(bridger.polTokenL2() == cfg.polTokenL2, "PolBridger polTokenL2 immutable incorrect");
+        require(bridger.maticTokenL1() == cfg.maticTokenL1, "PolBridger maticTokenL1 immutable incorrect");
+        require(bridger.chainIDL1() == cfg.chainIdL1, "PolBridger chainIDL1 immutable incorrect");
+        require(bridger.chainIDL2() == cfg.chainIdL2, "PolBridger chainIDL2 immutable incorrect");
+        require(!bridger.paused(), "PolBridger should not be paused post-upgrade");
+
+        address proxyAdmin = _getProxyAdmin(expectedPolBridgerProxy);
+        require(
+            ProxyAdmin(proxyAdmin).owner() == cfg.accessManagerL2,
+            "PolBridger L2 ProxyAdmin not owned by AccessManager"
+        );
+
+        require(
+            address(sPOLChild(payable(cfg.sPOLChildProxy)).bridgeHelper()) == expectedPolBridgerProxy,
+            "Child bridgeHelper not pointing at new PolBridger proxy"
+        );
+
+        console.log("L2 verification passed.");
+        console.log("  PolBridger impl:    %s", expectedPolBridgerImpl);
+        console.log("  PolBridger proxy:   %s", expectedPolBridgerProxy);
+        console.log("  sPOLChild new impl: %s", expectedChildImpl);
+    }
+
+    function _expectedMessengerImplAddress(Config memory cfg) internal pure returns (address) {
+        bytes32 salt = _salt(cfg.saltPrefix, "spol-messenger-impl-v1.2");
+        bytes memory initCode = abi.encodePacked(
+            type(sPOLMessenger).creationCode,
+            abi.encode(
+                cfg.polTokenL1,
+                cfg.sPOLProxy,
+                cfg.sPOLControllerProxy,
+                cfg.rootChainManager,
+                cfg.depositManager,
+                cfg.stateSenderL1,
+                cfg.checkpointManager,
+                cfg.sPOLChildProxy
+            )
+        );
+        return _computeCreate2(salt, initCode);
+    }
+
+    function _implOf(address proxy) internal view returns (address) {
+        return address(uint160(uint256(vm.load(proxy, ERC1967_IMPL_SLOT))));
+    }
+
     function _deployL1(Config memory cfg) internal returns (DeployedL1 memory d) {
         bytes32 dummySalt = _salt(cfg.saltPrefix, "pol-bridger-upgrade-dummy-v1.2");
         address predictedDummy = _computeCreate2(dummySalt, type(DummyImpl).creationCode);
