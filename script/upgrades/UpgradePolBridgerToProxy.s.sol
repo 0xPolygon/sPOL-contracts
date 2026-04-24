@@ -15,18 +15,24 @@ import {ProxyAdmin} from "@openzeppelin/contracts/proxy/transparent/ProxyAdmin.s
 import {AccessManager} from "@openzeppelin/contracts/access/manager/AccessManager.sol";
 
 /// @notice Migrates PolBridger from non-proxy to proxy and points the existing messenger/child
-///         at the new proxy. Flow:
-///           1. On L1: deploy upgrade dummy impl, PolBridger impl, PolBridger proxy, new sPOLMessenger impl.
-///           2. On L2: deploy upgrade dummy impl, PolBridger impl, PolBridger proxy, new sPOLChild impl.
-///           3. Assert the proxy address is identical on both chains (Plasma bridge requirement).
-///           4. Print the AccessManager calldata for the admin (Safe) to execute. No admin action is
-///              broadcast by this script.
+///         at the new proxy. The deployer autonomously sets up the new PolBridger proxy
+///         (deploy + atomically upgrade-and-initialise + transfer ProxyAdmin ownership to the
+///         AccessManager), then prints a 2-step multisig plan per chain — 4 Safe txs total.
+///
+///         Flow on each chain:
+///           1. Deploy upgrade dummy impl, PolBridger impl, and PolBridger proxy (deployer is
+///              the ProxyAdmin's initial owner so it can self-drive the next two steps).
+///           2. `proxyAdmin.upgradeAndCall(proxy, polBridgerImpl, initialize(...))` — swaps
+///              the dummy impl for the real one and runs initialize in one call.
+///           3. `proxyAdmin.transferOwnership(accessManager)` — hands over upgrade rights.
+///           4. Deploy new sPOLMessenger impl (L1) / new sPOLChild impl (L2) via CREATE2.
+///           5. Assert the PolBridger proxy address matches across L1/L2 (Plasma requirement).
+///           6. Print the remaining multisig calldata: upgrade messenger/child + updateBridgeHelper.
 ///
 /// @dev    Usage:
 ///         forge script script/upgrades/UpgradePolBridgerToProxy.s.sol \
-///             --sig "run(string)" "mainnet" --rpc-url $L1_RPC_URL --broadcast
-///         Then re-run with --rpc-url $L2_RPC_URL --broadcast for L2.
-///         Or use the combined entrypoint runBoth() which forks both RPCs itself.
+///             --sig "runBoth(string)" "mainnet" --broadcast
+///         (forks both RPCs from L1_RPC_URL / L2_RPC_URL)
 ///
 ///         Pass "mainnet" or "testnet" as the argument.
 contract UpgradePolBridgerToProxy is Script {
@@ -76,15 +82,16 @@ contract UpgradePolBridgerToProxy is Script {
     function runBoth(string calldata _network) external {
         Config memory cfg = _loadConfig(_network);
         uint256 pk = vm.envUint("DEPLOYER_PRIVATE_KEY");
+        address deployer = vm.addr(pk);
 
         vm.createSelectFork(vm.envString("L1_RPC_URL"));
         vm.startBroadcast(pk);
-        DeployedL1 memory d1 = _deployL1(cfg);
+        DeployedL1 memory d1 = _deployL1(cfg, deployer);
         vm.stopBroadcast();
 
         vm.createSelectFork(vm.envString("L2_RPC_URL"));
         vm.startBroadcast(pk);
-        DeployedL2 memory d2 = _deployL2(cfg);
+        DeployedL2 memory d2 = _deployL2(cfg, deployer);
         vm.stopBroadcast();
 
         require(d1.polBridgerProxy == d2.polBridgerProxy, "PolBridger proxy address mismatch between chains");
@@ -96,12 +103,13 @@ contract UpgradePolBridgerToProxy is Script {
     function runL1(string calldata _network) external {
         Config memory cfg = _loadConfig(_network);
         uint256 pk = vm.envUint("DEPLOYER_PRIVATE_KEY");
+        address deployer = vm.addr(pk);
 
         vm.startBroadcast(pk);
-        DeployedL1 memory d1 = _deployL1(cfg);
+        DeployedL1 memory d1 = _deployL1(cfg, deployer);
         vm.stopBroadcast();
 
-        address predictedL2Proxy = _predictProxyAddress(cfg.saltPrefix, cfg.accessManagerL2, d1.dummy);
+        address predictedL2Proxy = _predictProxyAddress(cfg.saltPrefix, deployer, d1.dummy);
         require(d1.polBridgerProxy == predictedL2Proxy, "PolBridger proxy L1 address != predicted L2 address");
 
         _printL1(_network, cfg, d1, predictedL2Proxy);
@@ -111,12 +119,13 @@ contract UpgradePolBridgerToProxy is Script {
     function runL2(string calldata _network) external {
         Config memory cfg = _loadConfig(_network);
         uint256 pk = vm.envUint("DEPLOYER_PRIVATE_KEY");
+        address deployer = vm.addr(pk);
 
         vm.startBroadcast(pk);
-        DeployedL2 memory d2 = _deployL2(cfg);
+        DeployedL2 memory d2 = _deployL2(cfg, deployer);
         vm.stopBroadcast();
 
-        address predictedL1Proxy = _predictProxyAddress(cfg.saltPrefix, cfg.accessManagerL1, d2.dummy);
+        address predictedL1Proxy = _predictProxyAddress(cfg.saltPrefix, deployer, d2.dummy);
         require(d2.polBridgerProxy == predictedL1Proxy, "PolBridger proxy L2 address != predicted L1 address");
 
         _printL2(_network, cfg, d2, predictedL1Proxy);
@@ -130,30 +139,24 @@ contract UpgradePolBridgerToProxy is Script {
     ///         immutables, and the messenger's bridgeHelper pointer. Mirrors the spirit of
     ///         Deploy.s.sol::_verifyDeploymentL1 for the newly-initialized contracts.
     /// @dev    Usage: forge script script/upgrades/UpgradePolBridgerToProxy.s.sol \
-    ///                   --sig "verifyL1(string)" "mainnet" --rpc-url $L1_RPC_URL
-    function verifyL1(string calldata _network) external view {
+    ///                   --sig "verifyL1(string,address)" "mainnet" <polBridgerProxy> \
+    ///                   --rpc-url $L1_RPC_URL
+    ///         Pass the polBridgerProxy address printed by `runBoth`/`runL1`.
+    function verifyL1(string calldata _network, address polBridgerProxyAddr) external view {
         Config memory cfg = _loadConfig(_network);
 
-        // 1. Impl deployments: all four CREATE2 targets must have code at their predicted address.
-        address expectedDummy = _computeCreate2(
-            _salt(cfg.saltPrefix, "pol-bridger-upgrade-dummy-v1.2"), type(DummyImpl).creationCode
-        );
+        // 1. Impl deployments: dummy, PolBridger impl, and sPOLMessenger impl must be at their
+        //    predicted CREATE2 addresses. The proxy address is passed in.
+        address expectedDummy =
+            _computeCreate2(_salt(cfg.saltPrefix, "pol-bridger-upgrade-dummy-v1.2"), type(DummyImpl).creationCode);
         address expectedPolBridgerImpl = _computeCreate2(
             _salt(cfg.saltPrefix, "pol-bridger-impl-v1.2"),
             abi.encodePacked(
                 type(PolBridger).creationCode,
-                abi.encode(
-                    cfg.polTokenL1, cfg.polTokenL2, cfg.maticTokenL1, cfg.chainIdL1, cfg.chainIdL2, cfg.registry
-                )
+                abi.encode(cfg.polTokenL1, cfg.polTokenL2, cfg.maticTokenL1, cfg.chainIdL1, cfg.chainIdL2, cfg.registry)
             )
         );
-        address expectedPolBridgerProxy = _computeCreate2(
-            _salt(cfg.saltPrefix, "pol-bridger-proxy-v1.2"),
-            abi.encodePacked(
-                type(TransparentUpgradeableProxy).creationCode,
-                abi.encode(expectedDummy, cfg.accessManagerL1, "")
-            )
-        );
+        address expectedPolBridgerProxy = polBridgerProxyAddr;
         address expectedMessengerImpl = _expectedMessengerImplAddress(cfg);
 
         require(expectedDummy.code.length > 0, "upgrade dummy impl not deployed on L1");
@@ -181,8 +184,7 @@ contract UpgradePolBridgerToProxy is Script {
         // 4. ProxyAdmin ownership.
         address proxyAdmin = _getProxyAdmin(expectedPolBridgerProxy);
         require(
-            ProxyAdmin(proxyAdmin).owner() == cfg.accessManagerL1,
-            "PolBridger L1 ProxyAdmin not owned by AccessManager"
+            ProxyAdmin(proxyAdmin).owner() == cfg.accessManagerL1, "PolBridger L1 ProxyAdmin not owned by AccessManager"
         );
 
         // 5. Messenger pointer.
@@ -199,29 +201,21 @@ contract UpgradePolBridgerToProxy is Script {
 
     /// @notice Post-upgrade verification for L2.
     /// @dev    Usage: forge script script/upgrades/UpgradePolBridgerToProxy.s.sol \
-    ///                   --sig "verifyL2(string)" "mainnet" --rpc-url $L2_RPC_URL
-    function verifyL2(string calldata _network) external view {
+    ///                   --sig "verifyL2(string,address)" "mainnet" <polBridgerProxy> \
+    ///                   --rpc-url $L2_RPC_URL
+    function verifyL2(string calldata _network, address polBridgerProxyAddr) external view {
         Config memory cfg = _loadConfig(_network);
 
-        address expectedDummy = _computeCreate2(
-            _salt(cfg.saltPrefix, "pol-bridger-upgrade-dummy-v1.2"), type(DummyImpl).creationCode
-        );
+        address expectedDummy =
+            _computeCreate2(_salt(cfg.saltPrefix, "pol-bridger-upgrade-dummy-v1.2"), type(DummyImpl).creationCode);
         address expectedPolBridgerImpl = _computeCreate2(
             _salt(cfg.saltPrefix, "pol-bridger-impl-v1.2"),
             abi.encodePacked(
                 type(PolBridger).creationCode,
-                abi.encode(
-                    cfg.polTokenL1, cfg.polTokenL2, cfg.maticTokenL1, cfg.chainIdL1, cfg.chainIdL2, cfg.registry
-                )
+                abi.encode(cfg.polTokenL1, cfg.polTokenL2, cfg.maticTokenL1, cfg.chainIdL1, cfg.chainIdL2, cfg.registry)
             )
         );
-        address expectedPolBridgerProxy = _computeCreate2(
-            _salt(cfg.saltPrefix, "pol-bridger-proxy-v1.2"),
-            abi.encodePacked(
-                type(TransparentUpgradeableProxy).creationCode,
-                abi.encode(expectedDummy, cfg.accessManagerL2, "")
-            )
-        );
+        address expectedPolBridgerProxy = polBridgerProxyAddr;
         address expectedChildImpl = _computeCreate2(
             _salt(cfg.saltPrefix, "spol-child-impl-v1.2"),
             abi.encodePacked(type(sPOLChild).creationCode, abi.encode(cfg.stateSyncerL2))
@@ -248,8 +242,7 @@ contract UpgradePolBridgerToProxy is Script {
 
         address proxyAdmin = _getProxyAdmin(expectedPolBridgerProxy);
         require(
-            ProxyAdmin(proxyAdmin).owner() == cfg.accessManagerL2,
-            "PolBridger L2 ProxyAdmin not owned by AccessManager"
+            ProxyAdmin(proxyAdmin).owner() == cfg.accessManagerL2, "PolBridger L2 ProxyAdmin not owned by AccessManager"
         );
 
         require(
@@ -285,46 +278,16 @@ contract UpgradePolBridgerToProxy is Script {
         return address(uint160(uint256(vm.load(proxy, ERC1967_IMPL_SLOT))));
     }
 
-    function _deployL1(Config memory cfg) internal returns (DeployedL1 memory d) {
-        bytes32 dummySalt = _salt(cfg.saltPrefix, "pol-bridger-upgrade-dummy-v1.2");
-        address predictedDummy = _computeCreate2(dummySalt, type(DummyImpl).creationCode);
-        if (predictedDummy.code.length > 0) {
-            console.log("  [reuse] upgrade dummy impl at", predictedDummy);
-            d.dummy = predictedDummy;
-        } else {
-            d.dummy = address(new DummyImpl{salt: dummySalt}());
-        }
-
-        bytes32 implSalt = _salt(cfg.saltPrefix, "pol-bridger-impl-v1.2");
-        bytes memory implInitCode = abi.encodePacked(
-            type(PolBridger).creationCode,
-            abi.encode(cfg.polTokenL1, cfg.polTokenL2, cfg.maticTokenL1, cfg.chainIdL1, cfg.chainIdL2, cfg.registry)
-        );
-        address predictedImpl = _computeCreate2(implSalt, implInitCode);
-        if (predictedImpl.code.length > 0) {
-            console.log("  [reuse] PolBridger impl (L1) at", predictedImpl);
-            d.polBridgerImpl = predictedImpl;
-        } else {
-            d.polBridgerImpl = address(
-                new PolBridger{salt: implSalt}(
-                    cfg.polTokenL1, cfg.polTokenL2, cfg.maticTokenL1, cfg.chainIdL1, cfg.chainIdL2, cfg.registry
-                )
-            );
-        }
-
-        bytes32 proxySalt = _salt(cfg.saltPrefix, "pol-bridger-proxy-v1.2");
-        bytes memory proxyInitCode = abi.encodePacked(
-            type(TransparentUpgradeableProxy).creationCode, abi.encode(d.dummy, cfg.accessManagerL1, "")
-        );
-        address predictedProxy = _computeCreate2(proxySalt, proxyInitCode);
-        if (predictedProxy.code.length > 0) {
-            console.log("  [reuse] PolBridger proxy (L1) at", predictedProxy);
-            d.polBridgerProxy = predictedProxy;
-        } else {
-            d.polBridgerProxy =
-                address(new TransparentUpgradeableProxy{salt: proxySalt}(d.dummy, cfg.accessManagerL1, ""));
-        }
+    function _deployL1(Config memory cfg, address deployer) internal returns (DeployedL1 memory d) {
+        d.dummy = _deployOrReuseDummy(cfg);
+        d.polBridgerImpl = _deployOrReusePolBridgerImpl(cfg);
+        d.polBridgerProxy = _deployOrReusePolBridgerProxy(cfg, deployer, d.dummy);
         d.polBridgerProxyAdmin = _getProxyAdmin(d.polBridgerProxy);
+
+        // Deployer owns the ProxyAdmin. Atomically upgrade dummy -> real impl + initialize,
+        // then hand the ProxyAdmin to the AccessManager. Multisig only has to deal with the
+        // messenger impl swap + bridgeHelper pointer afterwards.
+        _finaliseBridger(d.polBridgerProxy, d.polBridgerProxyAdmin, d.polBridgerImpl, cfg.accessManagerL1, cfg.sPOLMessengerProxy, cfg.sPOLChildProxy);
 
         d.sPOLMessengerImpl = _deployMessengerImpl(cfg);
     }
@@ -363,46 +326,13 @@ contract UpgradePolBridgerToProxy is Script {
         );
     }
 
-    function _deployL2(Config memory cfg) internal returns (DeployedL2 memory d) {
-        bytes32 dummySalt = _salt(cfg.saltPrefix, "pol-bridger-upgrade-dummy-v1.2");
-        address predictedDummy = _computeCreate2(dummySalt, type(DummyImpl).creationCode);
-        if (predictedDummy.code.length > 0) {
-            console.log("  [reuse] upgrade dummy impl at", predictedDummy);
-            d.dummy = predictedDummy;
-        } else {
-            d.dummy = address(new DummyImpl{salt: dummySalt}());
-        }
-
-        bytes32 implSalt = _salt(cfg.saltPrefix, "pol-bridger-impl-v1.2");
-        bytes memory implInitCode = abi.encodePacked(
-            type(PolBridger).creationCode,
-            abi.encode(cfg.polTokenL1, cfg.polTokenL2, cfg.maticTokenL1, cfg.chainIdL1, cfg.chainIdL2, cfg.registry)
-        );
-        address predictedImpl = _computeCreate2(implSalt, implInitCode);
-        if (predictedImpl.code.length > 0) {
-            console.log("  [reuse] PolBridger impl (L2) at", predictedImpl);
-            d.polBridgerImpl = predictedImpl;
-        } else {
-            d.polBridgerImpl = address(
-                new PolBridger{salt: implSalt}(
-                    cfg.polTokenL1, cfg.polTokenL2, cfg.maticTokenL1, cfg.chainIdL1, cfg.chainIdL2, cfg.registry
-                )
-            );
-        }
-
-        bytes32 proxySalt = _salt(cfg.saltPrefix, "pol-bridger-proxy-v1.2");
-        bytes memory proxyInitCode = abi.encodePacked(
-            type(TransparentUpgradeableProxy).creationCode, abi.encode(d.dummy, cfg.accessManagerL2, "")
-        );
-        address predictedProxy = _computeCreate2(proxySalt, proxyInitCode);
-        if (predictedProxy.code.length > 0) {
-            console.log("  [reuse] PolBridger proxy (L2) at", predictedProxy);
-            d.polBridgerProxy = predictedProxy;
-        } else {
-            d.polBridgerProxy =
-                address(new TransparentUpgradeableProxy{salt: proxySalt}(d.dummy, cfg.accessManagerL2, ""));
-        }
+    function _deployL2(Config memory cfg, address deployer) internal returns (DeployedL2 memory d) {
+        d.dummy = _deployOrReuseDummy(cfg);
+        d.polBridgerImpl = _deployOrReusePolBridgerImpl(cfg);
+        d.polBridgerProxy = _deployOrReusePolBridgerProxy(cfg, deployer, d.dummy);
         d.polBridgerProxyAdmin = _getProxyAdmin(d.polBridgerProxy);
+
+        _finaliseBridger(d.polBridgerProxy, d.polBridgerProxyAdmin, d.polBridgerImpl, cfg.accessManagerL2, cfg.sPOLMessengerProxy, cfg.sPOLChildProxy);
 
         bytes32 childSalt = _salt(cfg.saltPrefix, "spol-child-impl-v1.2");
         bytes memory childInitCode = abi.encodePacked(type(sPOLChild).creationCode, abi.encode(cfg.stateSyncerL2));
@@ -415,6 +345,82 @@ contract UpgradePolBridgerToProxy is Script {
         }
     }
 
+    function _deployOrReuseDummy(Config memory cfg) internal returns (address) {
+        bytes32 dummySalt = _salt(cfg.saltPrefix, "pol-bridger-upgrade-dummy-v1.2");
+        address predicted = _computeCreate2(dummySalt, type(DummyImpl).creationCode);
+        if (predicted.code.length > 0) {
+            console.log("  [reuse] upgrade dummy impl at", predicted);
+            return predicted;
+        }
+        return address(new DummyImpl{salt: dummySalt}());
+    }
+
+    function _deployOrReusePolBridgerImpl(Config memory cfg) internal returns (address) {
+        bytes32 salt = _salt(cfg.saltPrefix, "pol-bridger-impl-v1.2");
+        bytes memory initCode = abi.encodePacked(
+            type(PolBridger).creationCode,
+            abi.encode(cfg.polTokenL1, cfg.polTokenL2, cfg.maticTokenL1, cfg.chainIdL1, cfg.chainIdL2, cfg.registry)
+        );
+        address predicted = _computeCreate2(salt, initCode);
+        if (predicted.code.length > 0) {
+            console.log("  [reuse] PolBridger impl at", predicted);
+            return predicted;
+        }
+        return address(
+            new PolBridger{salt: salt}(
+                cfg.polTokenL1, cfg.polTokenL2, cfg.maticTokenL1, cfg.chainIdL1, cfg.chainIdL2, cfg.registry
+            )
+        );
+    }
+
+    function _deployOrReusePolBridgerProxy(Config memory cfg, address deployer, address dummy)
+        internal
+        returns (address)
+    {
+        bytes32 salt = _salt(cfg.saltPrefix, "pol-bridger-proxy-v1.2");
+        bytes memory initCode = abi.encodePacked(
+            type(TransparentUpgradeableProxy).creationCode, abi.encode(dummy, deployer, "")
+        );
+        address predicted = _computeCreate2(salt, initCode);
+        if (predicted.code.length > 0) {
+            console.log("  [reuse] PolBridger proxy at", predicted);
+            return predicted;
+        }
+        return address(new TransparentUpgradeableProxy{salt: salt}(dummy, deployer, ""));
+    }
+
+    /// @dev Upgrade (from dummy to real impl) + initialize the PolBridger proxy in one call,
+    ///      then transfer the ProxyAdmin ownership to the AccessManager. Idempotent — checks
+    ///      state before each step so reruns after a partial first run just finish what's left.
+    function _finaliseBridger(
+        address polBridgerProxy,
+        address proxyAdmin,
+        address polBridgerImpl,
+        address accessManager,
+        address messengerProxy,
+        address childProxy
+    ) internal {
+        address currentImpl = address(uint160(uint256(vm.load(polBridgerProxy, ERC1967_IMPL_SLOT))));
+        if (currentImpl != polBridgerImpl) {
+            ProxyAdmin(proxyAdmin).upgradeAndCall(
+                ITransparentUpgradeableProxy(polBridgerProxy),
+                polBridgerImpl,
+                abi.encodeCall(PolBridger.initialize, (accessManager, messengerProxy, childProxy))
+            );
+            console.log("  PolBridger proxy upgraded + initialized.");
+        } else {
+            console.log("  [skip] PolBridger proxy impl already up to date.");
+        }
+
+        address currentOwner = ProxyAdmin(proxyAdmin).owner();
+        if (currentOwner != accessManager) {
+            ProxyAdmin(proxyAdmin).transferOwnership(accessManager);
+            console.log("  PolBridger ProxyAdmin ownership transferred to AccessManager.");
+        } else {
+            console.log("  [skip] PolBridger ProxyAdmin already owned by AccessManager.");
+        }
+    }
+
     function _computeCreate2(bytes32 salt, bytes memory initCode) internal pure returns (address) {
         bytes32 initCodeHash = keccak256(initCode);
         // Arachnid CREATE2 deployer — same one foundry's `{salt:}` syntax uses.
@@ -422,18 +428,21 @@ contract UpgradePolBridgerToProxy is Script {
         return address(uint160(uint256(keccak256(abi.encodePacked(hex"ff", deployer, salt, initCodeHash)))));
     }
 
-    function _predictProxyAddress(string memory saltPrefix, address accessManager, address dummy)
+    /// @dev Predict the PolBridger proxy CREATE2 address. `initialOwner` is whatever was passed
+    ///      to the TransparentUpgradeableProxy ctor as the ProxyAdmin's initial owner — for the
+    ///      v1.2 flow, that's the deployer EOA (which then transfers ownership to AccessManager).
+    function _predictProxyAddress(string memory saltPrefix, address initialOwner, address dummy)
         internal
         pure
         returns (address)
     {
         bytes32 initCodeHash = keccak256(
-            abi.encodePacked(type(TransparentUpgradeableProxy).creationCode, abi.encode(dummy, accessManager, ""))
+            abi.encodePacked(type(TransparentUpgradeableProxy).creationCode, abi.encode(dummy, initialOwner, ""))
         );
         bytes32 salt = _salt(saltPrefix, "pol-bridger-proxy-v1.2");
         // Arachnid CREATE2 deployer address used by foundry's {salt:} syntax
-        address deployer = 0x4e59b44847b379578588920cA78FbF26c0B4956C;
-        return address(uint160(uint256(keccak256(abi.encodePacked(hex"ff", deployer, salt, initCodeHash)))));
+        address create2Deployer = 0x4e59b44847b379578588920cA78FbF26c0B4956C;
+        return address(uint160(uint256(keccak256(abi.encodePacked(hex"ff", create2Deployer, salt, initCodeHash)))));
     }
 
     function _printOutput(string calldata _network, Config memory cfg, DeployedL1 memory d1, DeployedL2 memory d2)
@@ -491,92 +500,97 @@ contract UpgradePolBridgerToProxy is Script {
         _printL2Calldata(cfg, d2);
     }
 
+    /// @notice One admin-multisig action. `target`/`data` is the call the Safe should make.
+    ///         When `viaAccessManager` is true (required for ProxyAdmin upgrades, since the
+    ///         ProxyAdmin is `onlyOwner`-gated by the AccessManager), the Safe sends
+    ///         `AccessManager.execute(target, data)` — `target` is then the *inner* target
+    ///         (the ProxyAdmin). When false, the Safe calls `target.data` directly — admin
+    ///         has ADMIN_ROLE so `canCall` passes without the extra hop.
+    struct AdminStep {
+        address target;
+        bytes data;
+        string label;
+        bool viaAccessManager;
+    }
+
+    /// @dev Builds the two-step admin plan for L1. Consumed by both the print path and the
+    ///      fork tests so a change in the plan can't desync the two.
+    function _buildL1AdminPlan(Config memory cfg, DeployedL1 memory d1)
+        internal
+        pure
+        returns (AdminStep[] memory steps)
+    {
+        // The PolBridger proxy is fully configured by the deployer before the multisig acts
+        // (upgrade-from-dummy + initialize + ProxyAdmin ownership transfer). The multisig's
+        // only job is the 2-step wiring on the existing messenger proxy.
+        steps = new AdminStep[](2);
+        // 1. Upgrade messenger impl (ProxyAdmin is onlyOwner-gated by the AccessManager → execute).
+        steps[0] = AdminStep({
+            target: cfg.sPOLMessengerProxyAdmin,
+            data: abi.encodeCall(
+                ProxyAdmin.upgradeAndCall,
+                (ITransparentUpgradeableProxy(cfg.sPOLMessengerProxy), d1.sPOLMessengerImpl, "")
+            ),
+            label: "upgrade sPOLMessenger",
+            viaAccessManager: true
+        });
+        // 2. Direct admin call (`restricted` check passes because admin has ADMIN_ROLE).
+        steps[1] = AdminStep({
+            target: cfg.sPOLMessengerProxy,
+            data: abi.encodeCall(sPOLMessenger.updateBridgeHelper, (d1.polBridgerProxy)),
+            label: "updateBridgeHelper on messenger",
+            viaAccessManager: false
+        });
+    }
+
+    function _buildL2AdminPlan(Config memory cfg, DeployedL2 memory d2)
+        internal
+        pure
+        returns (AdminStep[] memory steps)
+    {
+        steps = new AdminStep[](2);
+        steps[0] = AdminStep({
+            target: cfg.sPOLChildProxyAdmin,
+            data: abi.encodeCall(
+                ProxyAdmin.upgradeAndCall, (ITransparentUpgradeableProxy(cfg.sPOLChildProxy), d2.sPOLChildImpl, "")
+            ),
+            label: "upgrade sPOLChild",
+            viaAccessManager: true
+        });
+        steps[1] = AdminStep({
+            target: cfg.sPOLChildProxy,
+            data: abi.encodeCall(sPOLChild.updateBridgeHelper, (d2.polBridgerProxy)),
+            label: "updateBridgeHelper on child",
+            viaAccessManager: false
+        });
+    }
+
     function _printL1Calldata(Config memory cfg, DeployedL1 memory d1) internal pure {
-        // 1. Upgrade + initialize PolBridger proxy L1. `initialize` is an initializer (not
-        //    restricted), so upgradeAndCall is safe: the access check is inside the initializer
-        //    modifier, not the AccessManager.
-        bytes memory polBridgerInitCall =
-            abi.encodeCall(PolBridger.initialize, (cfg.accessManagerL1, cfg.sPOLMessengerProxy, cfg.sPOLChildProxy));
-        bytes memory polBridgerUpgrade = abi.encodeCall(
-            ProxyAdmin.upgradeAndCall,
-            (ITransparentUpgradeableProxy(d1.polBridgerProxy), d1.polBridgerImpl, polBridgerInitCall)
-        );
-        bytes memory polBridgerExec =
-            abi.encodeCall(AccessManager.execute, (d1.polBridgerProxyAdmin, polBridgerUpgrade));
-
-        // 2. Upgrade messenger (no call — updateBridgeHelper is restricted so the delegatecall-from-
-        //    ProxyAdmin path would fail the AccessManager check; we do it in a separate execute).
-        bytes memory messengerUpgrade = abi.encodeCall(
-            ProxyAdmin.upgradeAndCall, (ITransparentUpgradeableProxy(cfg.sPOLMessengerProxy), d1.sPOLMessengerImpl, "")
-        );
-        bytes memory messengerUpgradeExec =
-            abi.encodeCall(AccessManager.execute, (cfg.sPOLMessengerProxyAdmin, messengerUpgrade));
-
-        // 3. updateBridgeHelper on the messenger — msg.sender inside the call is AccessManager,
-        //    which the OZ AccessManager treats as authorised.
-        bytes memory setBridgerCall = abi.encodeCall(sPOLMessenger.updateBridgeHelper, (d1.polBridgerProxy));
-        bytes memory messengerSetExec = abi.encodeCall(AccessManager.execute, (cfg.sPOLMessengerProxy, setBridgerCall));
-
-        console.log("--- L1 Admin calldata (execute from AccessManager %s) ---", cfg.accessManagerL1);
-        console.log("");
-        console.log("Step 1: upgrade + initialize PolBridger proxy");
-        console.log("  Target:   %s (AccessManager L1)", cfg.accessManagerL1);
-        console.log("  ProxyAdmin inner target: %s", d1.polBridgerProxyAdmin);
-        console.log("  Calldata:");
-        console.logBytes(polBridgerExec);
-        console.log("");
-        console.log("Step 2: upgrade sPOLMessenger (no call)");
-        console.log("  Target:   %s (AccessManager L1)", cfg.accessManagerL1);
-        console.log("  ProxyAdmin inner target: %s", cfg.sPOLMessengerProxyAdmin);
-        console.log("  Calldata:");
-        console.logBytes(messengerUpgradeExec);
-        console.log("");
-        console.log("Step 3: updateBridgeHelper on messenger");
-        console.log("  Target:   %s (AccessManager L1)", cfg.accessManagerL1);
-        console.log("  Inner target: %s (sPOLMessenger proxy)", cfg.sPOLMessengerProxy);
-        console.log("  Calldata:");
-        console.logBytes(messengerSetExec);
-        console.log("");
+        _printAdminPlan("L1", cfg.accessManagerL1, _buildL1AdminPlan(cfg, d1));
     }
 
     function _printL2Calldata(Config memory cfg, DeployedL2 memory d2) internal pure {
-        bytes memory polBridgerInitCall =
-            abi.encodeCall(PolBridger.initialize, (cfg.accessManagerL2, cfg.sPOLMessengerProxy, cfg.sPOLChildProxy));
-        bytes memory polBridgerUpgrade = abi.encodeCall(
-            ProxyAdmin.upgradeAndCall,
-            (ITransparentUpgradeableProxy(d2.polBridgerProxy), d2.polBridgerImpl, polBridgerInitCall)
-        );
-        bytes memory polBridgerExec =
-            abi.encodeCall(AccessManager.execute, (d2.polBridgerProxyAdmin, polBridgerUpgrade));
+        _printAdminPlan("L2", cfg.accessManagerL2, _buildL2AdminPlan(cfg, d2));
+    }
 
-        bytes memory childUpgrade = abi.encodeCall(
-            ProxyAdmin.upgradeAndCall, (ITransparentUpgradeableProxy(cfg.sPOLChildProxy), d2.sPOLChildImpl, "")
-        );
-        bytes memory childUpgradeExec = abi.encodeCall(AccessManager.execute, (cfg.sPOLChildProxyAdmin, childUpgrade));
-
-        bytes memory setHelperCall = abi.encodeCall(sPOLChild.updateBridgeHelper, (d2.polBridgerProxy));
-        bytes memory childSetExec = abi.encodeCall(AccessManager.execute, (cfg.sPOLChildProxy, setHelperCall));
-
-        console.log("--- L2 Admin calldata (execute from AccessManager %s) ---", cfg.accessManagerL2);
+    function _printAdminPlan(string memory chainLabel, address accessManager, AdminStep[] memory steps) internal pure {
+        console.log(string.concat("--- ", chainLabel, " Admin calldata ---"));
+        console.log("  AccessManager (for steps that need it): %s", accessManager);
         console.log("");
-        console.log("Step 1: upgrade + initialize PolBridger proxy");
-        console.log("  Target:   %s (AccessManager L2)", cfg.accessManagerL2);
-        console.log("  ProxyAdmin inner target: %s", d2.polBridgerProxyAdmin);
-        console.log("  Calldata:");
-        console.logBytes(polBridgerExec);
-        console.log("");
-        console.log("Step 2: upgrade sPOLChild (no call)");
-        console.log("  Target:   %s (AccessManager L2)", cfg.accessManagerL2);
-        console.log("  ProxyAdmin inner target: %s", cfg.sPOLChildProxyAdmin);
-        console.log("  Calldata:");
-        console.logBytes(childUpgradeExec);
-        console.log("");
-        console.log("Step 3: updateBridgeHelper on child");
-        console.log("  Target:   %s (AccessManager L2)", cfg.accessManagerL2);
-        console.log("  Inner target: %s (sPOLChild proxy)", cfg.sPOLChildProxy);
-        console.log("  Calldata:");
-        console.logBytes(childSetExec);
-        console.log("");
+        for (uint256 i = 0; i < steps.length; i++) {
+            console.log("Step %s: %s", i + 1, steps[i].label);
+            if (steps[i].viaAccessManager) {
+                console.log("  Safe tx target: %s (AccessManager)", accessManager);
+                console.log("  Inner target:   %s (ProxyAdmin)", steps[i].target);
+                console.log("  Safe tx calldata (AccessManager.execute(target, data)):");
+                console.logBytes(abi.encodeCall(AccessManager.execute, (steps[i].target, steps[i].data)));
+            } else {
+                console.log("  Safe tx target: %s", steps[i].target);
+                console.log("  Safe tx calldata (direct admin call, no AccessManager wrap):");
+                console.logBytes(steps[i].data);
+            }
+            console.log("");
+        }
     }
 
     function _loadConfig(string memory _network) internal view returns (Config memory cfg) {
