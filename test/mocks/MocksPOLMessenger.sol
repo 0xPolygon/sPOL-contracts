@@ -12,8 +12,7 @@ contract MocksPOLMessenger is sPOLMessenger {
         address _depositManager,
         address _stateSender,
         address _checkpointManager,
-        address _childTunnel,
-        address _polBridger
+        address _childTunnel
     )
         sPOLMessenger(
             _polToken,
@@ -23,8 +22,7 @@ contract MocksPOLMessenger is sPOLMessenger {
             _depositManager,
             _stateSender,
             _checkpointManager,
-            _childTunnel,
-            _polBridger
+            _childTunnel
         )
     {}
 
