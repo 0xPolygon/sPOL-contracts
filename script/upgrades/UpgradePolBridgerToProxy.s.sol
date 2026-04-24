@@ -97,6 +97,8 @@ contract UpgradePolBridgerToProxy is Script {
         require(d1.polBridgerProxy == d2.polBridgerProxy, "PolBridger proxy address mismatch between chains");
 
         _printOutput(_network, cfg, d1, d2);
+        _recordDeploymentJsonL1(_network, d1);
+        _recordDeploymentJsonL2(_network, d2);
     }
 
     /// @notice L1-only run. Useful when L2 has already been deployed or vice versa.
@@ -113,6 +115,7 @@ contract UpgradePolBridgerToProxy is Script {
         require(d1.polBridgerProxy == predictedL2Proxy, "PolBridger proxy L1 address != predicted L2 address");
 
         _printL1(_network, cfg, d1, predictedL2Proxy);
+        _recordDeploymentJsonL1(_network, d1);
     }
 
     /// @notice L2-only run.
@@ -129,6 +132,7 @@ contract UpgradePolBridgerToProxy is Script {
         require(d2.polBridgerProxy == predictedL1Proxy, "PolBridger proxy L2 address != predicted L1 address");
 
         _printL2(_network, cfg, d2, predictedL1Proxy);
+        _recordDeploymentJsonL2(_network, d2);
     }
 
     bytes32 internal constant ERC1967_IMPL_SLOT = hex"360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc";
@@ -287,7 +291,14 @@ contract UpgradePolBridgerToProxy is Script {
         // Deployer owns the ProxyAdmin. Atomically upgrade dummy -> real impl + initialize,
         // then hand the ProxyAdmin to the AccessManager. Multisig only has to deal with the
         // messenger impl swap + bridgeHelper pointer afterwards.
-        _finaliseBridger(d.polBridgerProxy, d.polBridgerProxyAdmin, d.polBridgerImpl, cfg.accessManagerL1, cfg.sPOLMessengerProxy, cfg.sPOLChildProxy);
+        _finaliseBridger(
+            d.polBridgerProxy,
+            d.polBridgerProxyAdmin,
+            d.polBridgerImpl,
+            cfg.accessManagerL1,
+            cfg.sPOLMessengerProxy,
+            cfg.sPOLChildProxy
+        );
 
         d.sPOLMessengerImpl = _deployMessengerImpl(cfg);
     }
@@ -332,7 +343,14 @@ contract UpgradePolBridgerToProxy is Script {
         d.polBridgerProxy = _deployOrReusePolBridgerProxy(cfg, deployer, d.dummy);
         d.polBridgerProxyAdmin = _getProxyAdmin(d.polBridgerProxy);
 
-        _finaliseBridger(d.polBridgerProxy, d.polBridgerProxyAdmin, d.polBridgerImpl, cfg.accessManagerL2, cfg.sPOLMessengerProxy, cfg.sPOLChildProxy);
+        _finaliseBridger(
+            d.polBridgerProxy,
+            d.polBridgerProxyAdmin,
+            d.polBridgerImpl,
+            cfg.accessManagerL2,
+            cfg.sPOLMessengerProxy,
+            cfg.sPOLChildProxy
+        );
 
         bytes32 childSalt = _salt(cfg.saltPrefix, "spol-child-impl-v1.2");
         bytes memory childInitCode = abi.encodePacked(type(sPOLChild).creationCode, abi.encode(cfg.stateSyncerL2));
@@ -378,9 +396,8 @@ contract UpgradePolBridgerToProxy is Script {
         returns (address)
     {
         bytes32 salt = _salt(cfg.saltPrefix, "pol-bridger-proxy-v1.2");
-        bytes memory initCode = abi.encodePacked(
-            type(TransparentUpgradeableProxy).creationCode, abi.encode(dummy, deployer, "")
-        );
+        bytes memory initCode =
+            abi.encodePacked(type(TransparentUpgradeableProxy).creationCode, abi.encode(dummy, deployer, ""));
         address predicted = _computeCreate2(salt, initCode);
         if (predicted.code.length > 0) {
             console.log("  [reuse] PolBridger proxy at", predicted);
@@ -402,11 +419,12 @@ contract UpgradePolBridgerToProxy is Script {
     ) internal {
         address currentImpl = address(uint160(uint256(vm.load(polBridgerProxy, ERC1967_IMPL_SLOT))));
         if (currentImpl != polBridgerImpl) {
-            ProxyAdmin(proxyAdmin).upgradeAndCall(
-                ITransparentUpgradeableProxy(polBridgerProxy),
-                polBridgerImpl,
-                abi.encodeCall(PolBridger.initialize, (accessManager, messengerProxy, childProxy))
-            );
+            ProxyAdmin(proxyAdmin)
+                .upgradeAndCall(
+                    ITransparentUpgradeableProxy(polBridgerProxy),
+                    polBridgerImpl,
+                    abi.encodeCall(PolBridger.initialize, (accessManager, messengerProxy, childProxy))
+                );
             console.log("  PolBridger proxy upgraded + initialized.");
         } else {
             console.log("  [skip] PolBridger proxy impl already up to date.");
@@ -631,5 +649,34 @@ contract UpgradePolBridgerToProxy is Script {
 
     function _isMainnet(string memory _network) internal pure returns (bool) {
         return keccak256(bytes(_network)) == keccak256(bytes("mainnet"));
+    }
+
+    /// @dev Patches the deployment JSON with the newly-deployed L1 addresses. Uses
+    ///      `vm.writeJson` with a value-key (3-arg variant) so only the listed keys are
+    ///      touched — the legacy `polBridger` key (pointing at the pre-upgrade non-proxy
+    ///      bridger) is preserved untouched. New keys are added, existing impl/related keys
+    ///      that the upgrade supersedes (`sPOLMessengerImpl`) are updated in-place.
+    function _recordDeploymentJsonL1(string memory _network, DeployedL1 memory d1) internal {
+        string memory path = string.concat("script/deployment-", _network, ".json");
+        _writeJsonAddress(path, ".sPOL_L1.polBridgerProxy", d1.polBridgerProxy);
+        _writeJsonAddress(path, ".sPOL_L1.polBridgerImpl", d1.polBridgerImpl);
+        _writeJsonAddress(path, ".sPOL_L1.polBridgerProxyAdmin", d1.polBridgerProxyAdmin);
+        _writeJsonAddress(path, ".sPOL_L1.sPOLMessengerImpl", d1.sPOLMessengerImpl);
+        console.log("deployment JSON updated for L1:", path);
+    }
+
+    function _recordDeploymentJsonL2(string memory _network, DeployedL2 memory d2) internal {
+        string memory path = string.concat("script/deployment-", _network, ".json");
+        _writeJsonAddress(path, ".sPOL_L2.polBridgerProxy", d2.polBridgerProxy);
+        _writeJsonAddress(path, ".sPOL_L2.polBridgerImpl", d2.polBridgerImpl);
+        _writeJsonAddress(path, ".sPOL_L2.polBridgerProxyAdmin", d2.polBridgerProxyAdmin);
+        _writeJsonAddress(path, ".sPOL_L2.sPOLChildImpl", d2.sPOLChildImpl);
+        console.log("deployment JSON updated for L2:", path);
+    }
+
+    /// @dev `vm.writeJson` expects the value arg to be a valid JSON expression. An address
+    ///      needs to be a quoted string — `"0x..."` — so we wrap here.
+    function _writeJsonAddress(string memory path, string memory key, address value) internal {
+        vm.writeJson(string.concat('"', vm.toString(value), '"'), path, key);
     }
 }
