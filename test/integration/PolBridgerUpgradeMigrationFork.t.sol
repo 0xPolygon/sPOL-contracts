@@ -22,7 +22,7 @@ import {ProxyAdmin} from "@openzeppelin/contracts/proxy/transparent/ProxyAdmin.s
 import {AccessManager} from "@openzeppelin/contracts/access/manager/AccessManager.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
-/// @notice Full migration round-trip on the upgraded mainnet state. This exercises the pending
+/// @notice Full migration round-trip on the upgraded mainnet state. Exercises the pending
 ///         mainnet migration end-to-end through the newly-deployed PolBridger proxy and the
 ///         upgraded messenger/child.
 ///
@@ -67,8 +67,11 @@ contract PolBridgerUpgradeMigrationForkTest is Test, UpgradePolBridgerToProxy {
         d2 = _deployL2(cfg, address(this));
         require(d1.polBridgerProxy == d2.polBridgerProxy, "proxy address mismatch");
 
-        _executeL1Admin();
-        _executeL2Admin();
+        // Execute the 2-step admin plan on each chain as the multisig would.
+        vm.selectFork(networkL1);
+        _executeAdminPlan(cfg.accessManagerL1, _buildL1AdminPlan(cfg, d1));
+        vm.selectFork(networkL2);
+        _executeAdminPlan(cfg.accessManagerL2, _buildL2AdminPlan(cfg, d2));
 
         messenger = sPOLMessenger(cfg.sPOLMessengerProxy);
         child = sPOLChild(payable(cfg.sPOLChildProxy));
@@ -76,16 +79,9 @@ contract PolBridgerUpgradeMigrationForkTest is Test, UpgradePolBridgerToProxy {
         sPOLToken = IERC20(cfg.sPOLProxy);
     }
 
-    function _executeL1Admin() internal {
-        vm.selectFork(networkL1);
-        _executeAdminPlan(cfg.accessManagerL1, _buildL1AdminPlan(cfg, d1));
-    }
-
-    function _executeL2Admin() internal {
-        vm.selectFork(networkL2);
-        _executeAdminPlan(cfg.accessManagerL2, _buildL2AdminPlan(cfg, d2));
-    }
-
+    /// @dev Drives each step of the multisig plan. ProxyAdmin upgrades go via AccessManager
+    ///      (its ProxyAdmin is `onlyOwner`-gated); `updateBridgeHelper` is a direct admin call
+    ///      (admin has ADMIN_ROLE → `restricted` check passes). Only address pranked is admin.
     function _executeAdminPlan(address accessManager, AdminStep[] memory steps) internal {
         for (uint256 i = 0; i < steps.length; i++) {
             vm.prank(admin);
@@ -102,11 +98,117 @@ contract PolBridgerUpgradeMigrationForkTest is Test, UpgradePolBridgerToProxy {
         }
     }
 
-    /// @dev Replaces the real sPOLMessenger impl with a bytecode-identical mock that exposes
-    ///      `_processMessageFromChild` publicly, so we can drive the migration without waiting
-    ///      for an L2→L1 checkpoint proof. Upgraded via AccessManager.execute — the only prank
-    ///      is on the admin multisig.
-    function _upgradeMessengerToMock() internal returns (MocksPOLMessenger) {
+    ///////////////////////////////
+    ///  Tests                  ///
+    ///////////////////////////////
+
+    /// @notice Two consecutive full migration cycles end-to-end through the new PolBridger
+    ///         proxy, using only real mainnet state.
+    ///
+    ///         (A) The pending mainnet migration that motivated this upgrade, finalised against
+    ///             the *real* sPOLMessenger (not the mock). The POL originally burnt on L2 for
+    ///             that migration is permanently stuck on mainnet (the old bridger was the L2
+    ///             burner, so only its address can start that Plasma exit, but its hardcoded
+    ///             predicate is defunct — nobody else's msg.sender matches). We donate fresh
+    ///             POL to the new proxy to stand in for the never-to-arrive exit, then submit
+    ///             the real L2→L1 state-sync message proof via `messenger.receiveMessage(...)`.
+    ///         (B) A fresh migration of the polBalance the child accumulated since the pending
+    ///             migration started. Triggered by an L1 rate push that propagates to L2 via
+    ///             state sync; the child auto-balances and the new bridger burns the POL on L2.
+    ///             We can't fabricate a real L2→L1 proof for the fresh burn in a fork test, so
+    ///             we swap the messenger to a mock that exposes `_processMessageFromChild` and
+    ///             drive the handler directly with the same payload `_handleMigration` would
+    ///             have decoded.
+    function test_pendingAndFreshMigrationThroughNewPolBridger() public {
+        // ---------------------------------------------------------------
+        //  PART A — Finalise the pending mainnet migration via real proof
+        // ---------------------------------------------------------------
+
+        vm.selectFork(networkL2);
+        assertTrue(child.onGoingMigration(), "precondition: child has pending migration");
+        uint256 pendingSPOL = child.backMigratingSPOL();
+        require(pendingSPOL > 0, "pending migration has zero sPOL");
+
+        vm.selectFork(networkL1);
+        // Donate generously: must cover whatever polAmount the proof decodes to and still leave
+        // at least `convertSPOLtoPOL(pendingSPOL) + 1` for the messenger's internal buySPOL.
+        // Anything extra stays in the bridger until rescued.
+        uint256 donationPOL = controller.convertSPOLtoPOL(pendingSPOL) * 2 + 1000 ether;
+        deal(cfg.polTokenL1, d1.polBridgerProxy, donationPOL);
+
+        uint256 prePOLMessenger = IERC20(cfg.polTokenL1).balanceOf(cfg.sPOLMessengerProxy);
+        uint256 preSPOLMessenger = sPOLToken.balanceOf(cfg.sPOLMessengerProxy);
+        uint256 preControllerPOL = IERC20(cfg.polTokenL1).balanceOf(cfg.sPOLControllerProxy);
+        uint256 prePredicateSPOL = sPOLToken.balanceOf(rcmERC20Predicate);
+
+        // Submit the REAL L2→L1 state-sync proof on the real messenger. `receiveMessage` is
+        // permissionless — no prank needed. It validates the proof against the mainnet
+        // CheckpointManager, extracts the original migration request, and runs
+        // `_processMessageFromChild` → `_handleMigration`.
+        bytes memory proof = vm.parseJsonBytes(vm.readFile("script/upgrades/UpgradePolBridgerProof.json"), ".proof");
+        vm.recordLogs();
+        messenger.receiveMessage(proof);
+        Vm.Log[] memory pendingLogs = vm.getRecordedLogs();
+
+        // Pull the proof-decoded amounts straight out of the MigrationProcessed event.
+        uint256 emittedPOL;
+        uint256 emittedSPOL;
+        bool foundProcessed;
+        for (uint256 i = 0; i < pendingLogs.length; i++) {
+            if (pendingLogs[i].topics[0] == keccak256("MigrationProcessed(uint256,uint256)")) {
+                (emittedPOL, emittedSPOL) = abi.decode(pendingLogs[i].data, (uint256, uint256));
+                foundProcessed = true;
+                break;
+            }
+        }
+        assertTrue(foundProcessed, "MigrationProcessed event missing");
+        assertEq(emittedSPOL, pendingSPOL, "proof-decoded sPOL must match child.backMigratingSPOL");
+
+        // Bridger relinquished exactly the proof's polAmount; the residual is our overpaid
+        // donation. Messenger consumed `convertSPOLtoPOL(sPOL)+1` and forwarded the rest to the
+        // controller, so its own balance nets to zero.
+        assertEq(
+            IERC20(cfg.polTokenL1).balanceOf(d1.polBridgerProxy),
+            donationPOL - emittedPOL,
+            "bridger residual must equal donation minus proof polAmount"
+        );
+        assertEq(
+            IERC20(cfg.polTokenL1).balanceOf(cfg.sPOLMessengerProxy),
+            prePOLMessenger,
+            "messenger POL balance must be unchanged (surplus forwarded to controller)"
+        );
+        assertEq(
+            sPOLToken.balanceOf(cfg.sPOLMessengerProxy),
+            preSPOLMessenger,
+            "messenger sPOL balance must be unchanged (deposited into bridge predicate)"
+        );
+        // The controller picked up the surplus POL. The staked portion may have flowed through
+        // to the StakeManager already, so we only assert the upper bound.
+        uint256 controllerPOLDelta = IERC20(cfg.polTokenL1).balanceOf(cfg.sPOLControllerProxy) - preControllerPOL;
+        assertLe(controllerPOLDelta, emittedPOL, "controller POL delta cannot exceed polAmount");
+        // The sPOL the messenger minted + deposited must have landed at the predicate (the
+        // destination for `rootChainManager.depositFor` deposits on L1).
+        assertEq(
+            sPOLToken.balanceOf(rcmERC20Predicate),
+            prePredicateSPOL + pendingSPOL,
+            "predicate did not receive deposited sPOL"
+        );
+
+        // ChildChainManager callback closes the pending migration on L2 (no admin action — the
+        // bridge does this automatically after `rootChainManager.depositFor` lands).
+        vm.selectFork(networkL2);
+        vm.prank(child.childChainManager());
+        child.deposit(address(child), abi.encode(pendingSPOL));
+        assertFalse(child.onGoingMigration(), "pending migration did not close on L2");
+        assertEq(child.backMigratingSPOL(), 0, "backMigratingSPOL not cleared");
+
+        // ---------------------------------------------------------------
+        //  PART B — Swap messenger to mock for the fresh-migration cycle
+        // ---------------------------------------------------------------
+        // We can't generate a real L2→L1 checkpoint proof for a freshly-burnt L2 migration in
+        // a fork test, so we replace the messenger impl with a bytecode-identical mock that
+        // exposes `_processMessageFromChild`. Storage (including bridgeHelper) is preserved.
+
         vm.selectFork(networkL1);
         MocksPOLMessenger mockImpl = new MocksPOLMessenger(
             cfg.polTokenL1,
@@ -127,236 +229,154 @@ contract PolBridgerUpgradeMigrationForkTest is Test, UpgradePolBridgerToProxy {
                     (ITransparentUpgradeableProxy(cfg.sPOLMessengerProxy), address(mockImpl), "")
                 )
             );
-        return MocksPOLMessenger(cfg.sPOLMessengerProxy);
-    }
+        MocksPOLMessenger mockMessenger = MocksPOLMessenger(cfg.sPOLMessengerProxy);
 
-    ///////////////////////////////
-    ///  Tests                  ///
-    ///////////////////////////////
+        // ---------------------------------------------------------------
+        //  PART C — Trigger fresh migration via L1 rate push → L2 delivery
+        // ---------------------------------------------------------------
+        // Production trigger: admin pushes a fresh exchange rate on L1; state sync delivers it
+        // to L2; child._handleExchangeRateUpdate calls _balanceWithL1 internally, which spots
+        // the non-zero polBalance accumulated during the stuck period and fires the migration.
 
-    /// @notice Two consecutive full migration cycles end-to-end through the new PolBridger
-    ///         proxy, using only real mainnet state.
-    ///
-    ///           (A) The pending migration that motivated this upgrade, finalised against the
-    ///               *real* sPOLMessenger (not the mock). The POL that was originally burnt on
-    ///               L2 for this migration is permanently stuck on mainnet (the old bridger was
-    ///               the L2 burner, so only its address can start that Plasma exit, but its
-    ///               hardcoded predicate is defunct — nobody else's msg.sender matches). We
-    ///               donate *fresh* POL to the new proxy to stand in for that never-to-arrive
-    ///               exit, then submit the real L2→L1 state-sync message proof
-    ///               `script/proof.json` via `messenger.receiveMessage(...)`. The messenger
-    ///               validates the proof against the mainnet CheckpointManager and runs
-    ///               `_processMessageFromChild` with the original migration payload. Finally
-    ///               the ChildChainManager callback on L2 closes the migration accounting.
-    ///           (B) A fresh migration of the polBalance the child accumulated since the
-    ///               pending migration started. We can't fabricate a real proof for this, so we
-    ///               upgrade the messenger to a mock that exposes `_processMessageFromChild`
-    ///               to drive the handler directly.
-    function test_pendingAndFreshMigrationThroughNewPolBridger() public {
-        _finalisePendingMigrationWithRealProof();
-
-        MocksPOLMessenger mockMessenger = _upgradeMessengerToMock();
-
-        (uint256 freshPOL, uint256 freshSPOL) = _triggerFreshMigrationFromAccumulatedState();
-        _processFreshMigrationOnL1(mockMessenger, freshPOL, freshSPOL);
-        _closeFreshMigrationOnL2(freshSPOL);
-    }
-
-    function _finalisePendingMigrationWithRealProof() internal {
         vm.selectFork(networkL2);
-        assertTrue(child.onGoingMigration(), "precondition: child has pending migration");
-        uint256 pendingSPOL = child.backMigratingSPOL();
-        require(pendingSPOL > 0, "pending migration has zero sPOL");
-
-        vm.selectFork(networkL1);
-        // Donate generously: needs to cover whatever polAmount the proof decodes to, and still
-        // leave at least `controller.convertSPOLtoPOL(pendingSPOL) + 1` for the messenger's
-        // internal buySPOL call. Anything extra stays in the bridger until rescued.
-        uint256 donationPOL = controller.convertSPOLtoPOL(pendingSPOL) * 2 + 1000 ether;
-
-        deal(cfg.polTokenL1, d1.polBridgerProxy, donationPOL);
-
-        uint256 prePOLMessenger = IERC20(cfg.polTokenL1).balanceOf(cfg.sPOLMessengerProxy);
-        uint256 preSPOLMessenger = sPOLToken.balanceOf(cfg.sPOLMessengerProxy);
-        uint256 preControllerPOL = IERC20(cfg.polTokenL1).balanceOf(cfg.sPOLControllerProxy);
-
-        // (2) Submit the REAL L2→L1 state-sync proof via receiveMessage on the real messenger.
-        //     receiveMessage is permissionless — no prank needed. It validates the proof against
-        //     the mainnet CheckpointManager, extracts the original migration request, and runs
-        //     _processMessageFromChild.
-        bytes memory proof = vm.parseJsonBytes(vm.readFile("script/upgrades/UpgradePolBridgerProof.json"), ".proof");
-        vm.recordLogs();
-        messenger.receiveMessage(proof);
-        (uint256 emittedPOL, uint256 emittedSPOL) = _extractProcessedAmounts(vm.getRecordedLogs());
-        assertEq(emittedSPOL, pendingSPOL, "proof-decoded sPOL must match child.backMigratingSPOL");
-
-        // Bridger must have relinquished the proof's polAmount; any extra donation stays until
-        // rescue. The messenger consumes `convertSPOLtoPOL(sPOL)+1` and forwards the rest to the
-        // controller, so its own balance nets to zero.
-        assertEq(
-            IERC20(cfg.polTokenL1).balanceOf(d1.polBridgerProxy),
-            donationPOL - emittedPOL,
-            "bridger residual must equal donation minus proof polAmount"
-        );
-        assertEq(
-            IERC20(cfg.polTokenL1).balanceOf(cfg.sPOLMessengerProxy),
-            prePOLMessenger,
-            "messenger POL balance must be unchanged (surplus forwarded to controller)"
-        );
-        assertEq(
-            sPOLToken.balanceOf(cfg.sPOLMessengerProxy),
-            preSPOLMessenger,
-            "messenger sPOL balance must be unchanged (deposited into bridge predicate)"
-        );
-        // Controller received the surplus POL from the messenger.
-        uint256 controllerPOLDelta = IERC20(cfg.polTokenL1).balanceOf(cfg.sPOLControllerProxy) - preControllerPOL;
-        // Messenger staked `convertSPOLtoPOL(pendingSPOL)+1` and forwarded the rest; the staked
-        // portion may have immediately flowed into the StakeManager, so we only assert the
-        // controller balance increased by at most the full polAmount.
-        assertLe(controllerPOLDelta, emittedPOL, "controller POL delta cannot exceed polAmount");
-
-        // (3) Close migration on L2 via the ChildChainManager callback.
-        vm.selectFork(networkL2);
-        vm.prank(child.childChainManager());
-        child.deposit(address(child), abi.encode(pendingSPOL));
-        assertFalse(child.onGoingMigration(), "pending migration did not close on L2");
-        assertEq(child.backMigratingSPOL(), 0, "backMigratingSPOL not cleared");
-    }
-
-    function _extractProcessedAmounts(Vm.Log[] memory logs) internal pure returns (uint256 pol, uint256 sPOL) {
-        for (uint256 i = 0; i < logs.length; i++) {
-            if (logs[i].topics[0] == keccak256("MigrationProcessed(uint256,uint256)")) {
-                return abi.decode(logs[i].data, (uint256, uint256));
-            }
-        }
-        revert("MigrationProcessed event missing");
-    }
-
-    function _triggerFreshMigrationFromAccumulatedState() internal returns (uint256 pol, uint256 sPOL) {
-        vm.selectFork(networkL2);
-        // After the pending migration closed, the child still carries the polBalance and
-        // locallyMintedSPOL accumulated from L2 buys since the pending migration started.
-        pol = child.polBalance();
-        sPOL = child.locallyMintedSPOL();
-        require(pol > 0 && sPOL > 0, "expected accumulated state after pending migration");
+        uint256 freshPOL = child.polBalance();
+        uint256 freshSPOL = child.locallyMintedSPOL();
+        require(freshPOL > 0 && freshSPOL > 0, "expected accumulated state after pending migration");
         assertFalse(child.onGoingMigration(), "should be clear after pending finalise");
         assertEq(address(child.bridgeHelper()), d2.polBridgerProxy, "child not wired to new proxy");
 
-        // Production trigger: admin pushes a fresh rate on L1, state sync delivers it to L2,
-        // and child._handleExchangeRateUpdate calls _balanceWithL1 internally — which spots
-        // the non-zero polBalance and fires the migration. No direct balanceWithL1 call.
-        bytes memory stateSyncData = _pushExchangeRateFromL1();
-
-        vm.selectFork(networkL2);
-        vm.recordLogs();
-        // stateSyncerL2 is the Polygon bridge system caller — the only address that can
-        // invoke onStateReceive. Pranking it simulates the bridge's automatic delivery.
-        vm.prank(cfg.stateSyncerL2);
-        child.onStateReceive(0, stateSyncData);
-        Vm.Log[] memory logs = vm.getRecordedLogs();
-
-        assertTrue(child.onGoingMigration(), "fresh migration should be ongoing");
-        assertEq(child.backMigratingSPOL(), sPOL, "backMigratingSPOL mismatch");
-        assertEq(child.polBalance(), 0, "polBalance should drain into migration");
-        assertEq(child.locallyMintedSPOL(), 0, "locallyMintedSPOL should drain into migration");
-
-        _assertMigrationRequestedAndBurn(logs, pol, sPOL);
-    }
-
-    /// @dev Calls messenger.updateL2ExchangeRate() on L1 (direct admin call — `restricted`
-    ///      modifier passes because admin has ADMIN_ROLE) and captures the emitted StateSynced
-    ///      payload. Returns the `bytes` the bridge would hand to child.onStateReceive.
-    function _pushExchangeRateFromL1() internal returns (bytes memory stateSyncData) {
         vm.selectFork(networkL1);
         vm.recordLogs();
         vm.prank(admin);
         messenger.updateL2ExchangeRate();
-        Vm.Log[] memory logs = vm.getRecordedLogs();
-        for (uint256 i = 0; i < logs.length; i++) {
-            if (logs[i].topics[0] == keccak256("StateSynced(uint256,address,bytes)")) {
-                return abi.decode(logs[i].data, (bytes));
+        Vm.Log[] memory rateLogs = vm.getRecordedLogs();
+
+        // Pull the StateSynced payload — the bytes the bridge would relay to onStateReceive.
+        bytes memory stateSyncData;
+        {
+            for (uint256 i = 0; i < rateLogs.length; i++) {
+                if (rateLogs[i].topics[0] == keccak256("StateSynced(uint256,address,bytes)")) {
+                    stateSyncData = abi.decode(rateLogs[i].data, (bytes));
+                    break;
+                }
+            }
+            require(stateSyncData.length > 0, "no StateSynced captured from updateL2ExchangeRate");
+        }
+
+        vm.selectFork(networkL2);
+        vm.recordLogs();
+        // stateSyncerL2 is the Polygon bridge system caller — only address that can invoke
+        // onStateReceive. Pranking it simulates the bridge's automatic delivery.
+        vm.prank(cfg.stateSyncerL2);
+        child.onStateReceive(0, stateSyncData);
+        Vm.Log[] memory burnLogs = vm.getRecordedLogs();
+
+        assertTrue(child.onGoingMigration(), "fresh migration should be ongoing");
+        assertEq(child.backMigratingSPOL(), freshSPOL, "backMigratingSPOL mismatch");
+        assertEq(child.polBalance(), 0, "polBalance should drain into migration");
+        assertEq(child.locallyMintedSPOL(), 0, "locallyMintedSPOL should drain into migration");
+
+        // Confirm the bridger actually burned via MRC20.withdraw, MigrationRequested emitted
+        // with the expected amounts, and capture the MessageSent payload — that's the exact
+        // bytes a real L1 `receiveMessage(proof)` call would deliver to `_handleMigration`
+        // after a checkpoint, so reusing it in Part D exercises the encoding/decoding path
+        // end-to-end instead of a hand-rolled payload.
+        bytes memory burntStateSyncMessage;
+        {
+            bool foundReq;
+            bool foundBurn;
+            bool foundMessage;
+            for (uint256 i = 0; i < burnLogs.length; i++) {
+                if (burnLogs[i].topics[0] == keccak256("MigrationRequested(uint256,uint256)")) {
+                    (uint256 reqPOL, uint256 reqSPOL) = abi.decode(burnLogs[i].data, (uint256, uint256));
+                    assertEq(reqPOL, freshPOL, "MigrationRequested POL");
+                    assertEq(reqSPOL, freshSPOL, "MigrationRequested sPOL");
+                    foundReq = true;
+                }
+                if (
+                    burnLogs[i].emitter == cfg.polTokenL2
+                        && burnLogs[i].topics[0] == keccak256("Withdraw(address,address,uint256,uint256,uint256)")
+                ) {
+                    foundBurn = true;
+                }
+                if (burnLogs[i].topics[0] == keccak256("MessageSent(bytes)")) {
+                    burntStateSyncMessage = abi.decode(burnLogs[i].data, (bytes));
+                    foundMessage = true;
+                }
+            }
+            assertTrue(foundReq, "MigrationRequested event missing");
+            assertTrue(foundBurn, "MRC20 Withdraw (POL burn) event not emitted");
+            assertTrue(foundMessage, "MessageSent (L2->L1 state-sync payload) not emitted");
+        }
+
+        // ---------------------------------------------------------------
+        //  PART D — Process fresh migration on L1 via mock messenger
+        // ---------------------------------------------------------------
+
+        vm.selectFork(networkL1);
+        // Snapshot pre-balances and run the handler. Wrapped in a block so the snapshot vars
+        // don't extend the parent scope (avoids stack-too-deep). Bridger pre-balance includes
+        // Part A's leftover donation (donationPOL - emittedPOL); we top it up by exactly
+        // `freshPOL` so takePOLL1 pulls only the new migration's amount and Part A's residual
+        // stays where it was.
+        {
+            uint256 preBridgerPOLFresh = IERC20(cfg.polTokenL1).balanceOf(d1.polBridgerProxy);
+            deal(cfg.polTokenL1, d1.polBridgerProxy, preBridgerPOLFresh + freshPOL);
+            uint256 prePredicateSPOLFresh = sPOLToken.balanceOf(rcmERC20Predicate);
+            uint256 preSPOLMessengerFresh = sPOLToken.balanceOf(cfg.sPOLMessengerProxy);
+            uint256 prePOLMessengerFresh = IERC20(cfg.polTokenL1).balanceOf(cfg.sPOLMessengerProxy);
+
+            // Drive the messenger handler with the EXACT bytes the child's BaseChildTunnel
+            // emitted in Part C — this is the payload that `messenger.receiveMessage(proof)`
+            // would extract and forward to `_processMessageFromChild` on a real L2→L1
+            // checkpoint.
+            vm.recordLogs();
+            mockMessenger.expose_processMessageFromChild(burntStateSyncMessage);
+
+            assertEq(
+                IERC20(cfg.polTokenL1).balanceOf(d1.polBridgerProxy),
+                preBridgerPOLFresh,
+                "bridger residual mismatch (takePOLL1 should take exactly freshPOL)"
+            );
+            assertEq(
+                IERC20(cfg.polTokenL1).balanceOf(cfg.sPOLMessengerProxy), prePOLMessengerFresh, "messenger POL drifted"
+            );
+            assertEq(sPOLToken.balanceOf(cfg.sPOLMessengerProxy), preSPOLMessengerFresh, "messenger sPOL drifted");
+            assertEq(
+                sPOLToken.balanceOf(rcmERC20Predicate),
+                prePredicateSPOLFresh + freshSPOL,
+                "predicate did not receive deposited sPOL"
+            );
+        }
+        // Confirm MigrationProcessed event matches the fresh migration amounts.
+        Vm.Log[] memory processedLogs = vm.getRecordedLogs();
+        bool foundFreshProcessed;
+        for (uint256 i = 0; i < processedLogs.length; i++) {
+            if (processedLogs[i].topics[0] == keccak256("MigrationProcessed(uint256,uint256)")) {
+                (uint256 emittedFreshPOL, uint256 emittedFreshSPOL) =
+                    abi.decode(processedLogs[i].data, (uint256, uint256));
+                assertEq(emittedFreshPOL, freshPOL, "MigrationProcessed POL mismatch");
+                assertEq(emittedFreshSPOL, freshSPOL, "MigrationProcessed sPOL mismatch");
+                foundFreshProcessed = true;
             }
         }
-        revert("no StateSynced captured from updateL2ExchangeRate");
-    }
+        assertTrue(foundFreshProcessed, "MigrationProcessed event missing");
 
-    function _processFreshMigrationOnL1(MocksPOLMessenger mockMessenger, uint256 pol, uint256 sPOL) internal {
-        vm.selectFork(networkL1);
+        // ---------------------------------------------------------------
+        //  PART E — Close fresh migration on L2 via ChildChainManager
+        // ---------------------------------------------------------------
 
-        // Snapshot the L1 bridge ERC20 predicate's sPOL balance BEFORE anything (including the
-        // donation `deal`) — `rootChainManager.depositFor(...)` deposits sPOL to the predicate
-        // contract, so the predicate's post-balance must be exactly `pre + sPOL`.
-        uint256 prePredicateSPOL = sPOLToken.balanceOf(rcmERC20Predicate);
-
-        deal(cfg.polTokenL1, d1.polBridgerProxy, pol);
-
-        uint256 preSPOLMessenger = sPOLToken.balanceOf(cfg.sPOLMessengerProxy);
-        uint256 prePOLMessenger = IERC20(cfg.polTokenL1).balanceOf(cfg.sPOLMessengerProxy);
-
-        vm.recordLogs();
-        mockMessenger.expose_processMessageFromChild(
-            abi.encode(MsgCoder.MsgType.L2_MIGRATION_REQUEST, abi.encode(pol, sPOL))
-        );
-
-        assertEq(IERC20(cfg.polTokenL1).balanceOf(d1.polBridgerProxy), 0, "bridger must be emptied");
-        assertEq(IERC20(cfg.polTokenL1).balanceOf(cfg.sPOLMessengerProxy), prePOLMessenger, "messenger POL drifted");
-        assertEq(sPOLToken.balanceOf(cfg.sPOLMessengerProxy), preSPOLMessenger, "messenger sPOL drifted");
-
-        // The sPOL the messenger minted + deposited must have landed at the predicate, which is
-        // the destination for `rootChainManager.depositFor` deposits on L1.
-        assertEq(
-            sPOLToken.balanceOf(rcmERC20Predicate), prePredicateSPOL + sPOL, "predicate did not receive deposited sPOL"
-        );
-
-        _assertMigrationProcessed(vm.getRecordedLogs(), pol, sPOL);
-    }
-
-    function _closeFreshMigrationOnL2(uint256 sPOL) internal {
         vm.selectFork(networkL2);
         uint256 supplyBefore = child.totalSupply();
         uint256 selfBefore = child.balanceOf(address(child));
 
         vm.prank(child.childChainManager());
-        child.deposit(address(child), abi.encode(sPOL));
+        child.deposit(address(child), abi.encode(freshSPOL));
 
         assertFalse(child.onGoingMigration(), "fresh migration did not close");
         assertEq(child.backMigratingSPOL(), 0, "backMigratingSPOL should be zero");
         assertEq(child.balanceOf(address(child)), selfBefore, "child self-balance should not grow");
         assertEq(child.totalSupply(), supplyBefore, "child totalSupply should be unchanged");
-    }
-
-    function _assertMigrationRequestedAndBurn(Vm.Log[] memory logs, uint256 pol, uint256 sPOL) internal view {
-        bool foundReq;
-        bool foundBurn;
-        for (uint256 i = 0; i < logs.length; i++) {
-            if (logs[i].topics[0] == keccak256("MigrationRequested(uint256,uint256)")) {
-                (uint256 emittedPOL, uint256 emittedSPOL) = abi.decode(logs[i].data, (uint256, uint256));
-                assertEq(emittedPOL, pol, "MigrationRequested POL");
-                assertEq(emittedSPOL, sPOL, "MigrationRequested sPOL");
-                foundReq = true;
-            }
-            if (
-                logs[i].emitter == cfg.polTokenL2
-                    && logs[i].topics[0] == keccak256("Withdraw(address,address,uint256,uint256,uint256)")
-            ) {
-                foundBurn = true;
-            }
-        }
-        assertTrue(foundReq, "MigrationRequested event missing");
-        assertTrue(foundBurn, "MRC20 Withdraw (POL burn) event not emitted");
-    }
-
-    function _assertMigrationProcessed(Vm.Log[] memory logs, uint256 pol, uint256 sPOL) internal pure {
-        bool found;
-        for (uint256 i = 0; i < logs.length; i++) {
-            if (logs[i].topics[0] == keccak256("MigrationProcessed(uint256,uint256)")) {
-                (uint256 emittedPOL, uint256 emittedSPOL) = abi.decode(logs[i].data, (uint256, uint256));
-                assertEq(emittedPOL, pol, "MigrationProcessed POL mismatch");
-                assertEq(emittedSPOL, sPOL, "MigrationProcessed sPOL mismatch");
-                found = true;
-            }
-        }
-        assertTrue(found, "MigrationProcessed event missing");
     }
 
     /// @notice takePOLL1 is still gated to the messenger after the upgrade.
