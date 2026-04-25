@@ -42,7 +42,10 @@ jobs:
         env:
           L1_RPC_URL: ${{ vars.L1_RPC_URL }}
           L2_RPC_URL: ${{ vars.L2_RPC_URL }}
+        # `test/upgrades/` holds fork tests that fork pre-upgrade mainnet state and run 
+        # migrations in-place. Once the upgrade lands on mainnet they will
+        # start failing.
         run: |
-          forge test -vvv
+          forge test -vvv --no-match-path "test/upgrades/*"
         id: test
 
