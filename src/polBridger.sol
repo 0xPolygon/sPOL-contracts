@@ -27,7 +27,7 @@ contract PolBridger is Initializable, AccessManagedUpgradeable, PausableUpgradea
     address public immutable maticTokenL1;
     uint256 public immutable chainIDL1;
     uint256 public immutable chainIDL2;
-    IRegistry public immutable registry;
+    address public immutable registry;
 
     address public sPOLMessengerL1;
     address public sPOLMessengerL2;
@@ -51,7 +51,7 @@ contract PolBridger is Initializable, AccessManagedUpgradeable, PausableUpgradea
         maticTokenL1 = _maticTokenL1;
         chainIDL1 = _chainIDL1;
         chainIDL2 = _chainIDL2;
-        registry = IRegistry(_registry);
+        registry = _registry;
 
         _disableInitializers();
     }
@@ -135,13 +135,13 @@ contract PolBridger is Initializable, AccessManagedUpgradeable, PausableUpgradea
     }
 
     function _erc20Predicate() internal view returns (address) {
-        address predicate = registry.erc20Predicate();
+        address predicate = IRegistry(registry).erc20Predicate();
         require(predicate != address(0), RegistryReturnedZero());
         return predicate;
     }
 
     function _withdrawManager() internal view returns (address) {
-        address withdrawManager = registry.getWithdrawManagerAddress();
+        address withdrawManager = IRegistry(registry).getWithdrawManagerAddress();
         require(withdrawManager != address(0), RegistryReturnedZero());
         return withdrawManager;
     }

@@ -242,6 +242,7 @@ contract UpgradePolBridgerToProxy is Script {
         require(bridger.maticTokenL1() == cfg.maticTokenL1, "PolBridger maticTokenL1 immutable incorrect");
         require(bridger.chainIDL1() == cfg.chainIdL1, "PolBridger chainIDL1 immutable incorrect");
         require(bridger.chainIDL2() == cfg.chainIdL2, "PolBridger chainIDL2 immutable incorrect");
+        require(bridger.registry() == cfg.registry, "PolBridger registry immutable incorrect");
         require(!bridger.paused(), "PolBridger should not be paused post-upgrade");
 
         address proxyAdmin = _getProxyAdmin(expectedPolBridgerProxy);
