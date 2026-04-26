@@ -532,33 +532,29 @@ contract UpgradePolBridgerToProxy is Script {
         bool viaAccessManager;
     }
 
-    /// @dev Builds the two-step admin plan for L1. Consumed by both the print path and the
-    ///      fork tests so a change in the plan can't desync the two.
+    /// @dev Builds the single-step admin plan for L1. The plan is one tx:
+    ///      `AccessManager.execute(messengerProxyAdmin, upgradeAndCall(messengerProxy, newImpl,
+    ///       reinitialize(polBridgerProxy)))`. The reinitialize runs in the same delegatecall as
+    ///      the impl swap, atomically wiring the polBridger pointer. No separate updatePolBridger
+    ///      step is needed; that setter remains in the contract for ad-hoc swaps in the future.
     function _buildL1AdminPlan(Config memory cfg, DeployedL1 memory d1)
         internal
         pure
         returns (AdminStep[] memory steps)
     {
-        // The PolBridger proxy is fully configured by the deployer before the multisig acts
-        // (upgrade-from-dummy + initialize + ProxyAdmin ownership transfer). The multisig's
-        // only job is the 2-step wiring on the existing messenger proxy.
-        steps = new AdminStep[](2);
-        // 1. Upgrade messenger impl (ProxyAdmin is onlyOwner-gated by the AccessManager → execute).
+        steps = new AdminStep[](1);
         steps[0] = AdminStep({
             target: cfg.sPOLMessengerProxyAdmin,
             data: abi.encodeCall(
                 ProxyAdmin.upgradeAndCall,
-                (ITransparentUpgradeableProxy(cfg.sPOLMessengerProxy), d1.sPOLMessengerImpl, "")
+                (
+                    ITransparentUpgradeableProxy(cfg.sPOLMessengerProxy),
+                    d1.sPOLMessengerImpl,
+                    abi.encodeCall(sPOLMessenger.reinitialize, (d1.polBridgerProxy))
+                )
             ),
-            label: "upgrade sPOLMessenger",
+            label: "upgrade sPOLMessenger + reinitialize(polBridger)",
             viaAccessManager: true
-        });
-        // 2. Direct admin call (`restricted` check passes because admin has ADMIN_ROLE).
-        steps[1] = AdminStep({
-            target: cfg.sPOLMessengerProxy,
-            data: abi.encodeCall(sPOLMessenger.updatePolBridger, (d1.polBridgerProxy)),
-            label: "updatePolBridger on messenger",
-            viaAccessManager: false
         });
     }
 
@@ -567,20 +563,19 @@ contract UpgradePolBridgerToProxy is Script {
         pure
         returns (AdminStep[] memory steps)
     {
-        steps = new AdminStep[](2);
+        steps = new AdminStep[](1);
         steps[0] = AdminStep({
             target: cfg.sPOLChildProxyAdmin,
             data: abi.encodeCall(
-                ProxyAdmin.upgradeAndCall, (ITransparentUpgradeableProxy(cfg.sPOLChildProxy), d2.sPOLChildImpl, "")
+                ProxyAdmin.upgradeAndCall,
+                (
+                    ITransparentUpgradeableProxy(cfg.sPOLChildProxy),
+                    d2.sPOLChildImpl,
+                    abi.encodeCall(sPOLChild.reinitialize, (d2.polBridgerProxy))
+                )
             ),
-            label: "upgrade sPOLChild",
+            label: "upgrade sPOLChild + reinitialize(polBridger)",
             viaAccessManager: true
-        });
-        steps[1] = AdminStep({
-            target: cfg.sPOLChildProxy,
-            data: abi.encodeCall(sPOLChild.updatePolBridger, (d2.polBridgerProxy)),
-            label: "updatePolBridger on child",
-            viaAccessManager: false
         });
     }
 

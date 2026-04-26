@@ -359,6 +359,66 @@ contract PolBridgerUpgradeForkTest is Test, UpgradePolBridgerToProxy {
     }
 
     ///////////////////////////////
+    ///  Reinitialize one-shot  ///
+    ///////////////////////////////
+
+    /// @notice After setUp ran the upgrade plan, both proxies' `_initialized` counters are at 2.
+    ///         A second reinitialize via the canonical path (AccessManager.execute -> ProxyAdmin
+    ///         -> proxy.upgradeAndCall(impl, reinitialize(...))) must revert with OZ's
+    ///         InvalidInitialization. Locks down the "exactly once" guarantee.
+    function test_messengerReinitialize_revertsOnSecondCallViaProxyAdmin() public {
+        vm.selectFork(networkL1);
+        bytes memory call = abi.encodeCall(
+            ProxyAdmin.upgradeAndCall,
+            (
+                ITransparentUpgradeableProxy(cfg.sPOLMessengerProxy),
+                d1.sPOLMessengerImpl,
+                abi.encodeCall(sPOLMessenger.reinitialize, (makeAddr("attackerBridger")))
+            )
+        );
+        vm.prank(admin);
+        vm.expectRevert();
+        AccessManager(cfg.accessManagerL1).execute(cfg.sPOLMessengerProxyAdmin, call);
+
+        // Pointer is still the legitimate proxy from setUp.
+        assertEq(address(sPOLMessenger(cfg.sPOLMessengerProxy).polBridger()), d1.polBridgerProxy);
+    }
+
+    function test_childReinitialize_revertsOnSecondCallViaProxyAdmin() public {
+        vm.selectFork(networkL2);
+        bytes memory call = abi.encodeCall(
+            ProxyAdmin.upgradeAndCall,
+            (
+                ITransparentUpgradeableProxy(cfg.sPOLChildProxy),
+                d2.sPOLChildImpl,
+                abi.encodeCall(sPOLChild.reinitialize, (makeAddr("attackerBridger")))
+            )
+        );
+        vm.prank(admin);
+        vm.expectRevert();
+        AccessManager(cfg.accessManagerL2).execute(cfg.sPOLChildProxyAdmin, call);
+
+        assertEq(address(sPOLChild(payable(cfg.sPOLChildProxy)).polBridger()), d2.polBridgerProxy);
+    }
+
+    /// @notice Even after `_initialized` is at 2, direct reinitialize calls revert. (The body's
+    ///         OnlyProxyAdmin check would fire first if _initialized were < 2; once it's at 2
+    ///         the reinitializer modifier hits InvalidInitialization first. Either way: locked.)
+    ///         The pre-bump OnlyProxyAdmin gate is exercised in the unit suite where a fresh
+    ///         proxy at _initialized=1 is constructed for that purpose.
+    function test_messengerReinitialize_directCallReverts() public {
+        vm.selectFork(networkL1);
+        vm.expectRevert();
+        sPOLMessenger(cfg.sPOLMessengerProxy).reinitialize(makeAddr("rando"));
+    }
+
+    function test_childReinitialize_directCallReverts() public {
+        vm.selectFork(networkL2);
+        vm.expectRevert();
+        sPOLChild(payable(cfg.sPOLChildProxy)).reinitialize(makeAddr("rando"));
+    }
+
+    ///////////////////////////////
     ///  Pre-existing state     ///
     ///////////////////////////////
 
@@ -468,6 +528,12 @@ contract PolBridgerUpgradeSlotTrackingTest is Test, UpgradePolBridgerToProxy {
     uint256 internal constant MESSENGER_BRIDGE_HELPER_SLOT = 4;
     uint256 internal constant CHILD_BRIDGE_HELPER_SLOT = 12;
 
+    // OZ Initializable's ERC-7201 namespaced storage slot. `reinitializer(2)` bumps the
+    // `_initialized` counter inside this struct, so the slot is also written on upgrade.
+    // keccak256(abi.encode(uint256(keccak256("openzeppelin.storage.Initializable")) - 1)) & ~bytes32(uint256(0xff))
+    bytes32 internal constant INITIALIZABLE_STORAGE_SLOT =
+        0xf0c57e16840df040f15088dc2f81fe391c3923bec73e23a9662efc9c229c6a00;
+
     uint256 internal networkL1;
     uint256 internal networkL2;
     Config internal cfg;
@@ -550,11 +616,15 @@ contract PolBridgerUpgradeSlotTrackingTest is Test, UpgradePolBridgerToProxy {
     ) internal pure {
         bool sawImpl;
         bool sawPolBridger;
+        bool sawInitializable;
         for (uint256 i = 0; i < writes.length; i++) {
             if (writes[i] == expectedImplSlot) {
                 sawImpl = true;
             } else if (writes[i] == expectedPolBridgerSlot) {
                 sawPolBridger = true;
+            } else if (writes[i] == INITIALIZABLE_STORAGE_SLOT) {
+                // OZ Initializable bumps `_initialized` (1 -> 2) when reinitialize(2) runs.
+                sawInitializable = true;
             } else {
                 // Any other slot means the upgrade touched unexpected state.
                 revert(string.concat(label, " upgrade wrote unexpected slot"));
@@ -562,5 +632,6 @@ contract PolBridgerUpgradeSlotTrackingTest is Test, UpgradePolBridgerToProxy {
         }
         require(sawImpl, string.concat(label, " upgrade did not write the ERC1967 impl slot"));
         require(sawPolBridger, string.concat(label, " upgrade did not write the polBridger slot"));
+        require(sawInitializable, string.concat(label, " upgrade did not bump the Initializable counter"));
     }
 }

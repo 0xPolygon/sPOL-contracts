@@ -175,18 +175,28 @@ contract Deploy is Script, ConfigLoader {
         );
         accessManagerL1.execute(address(sPOLproxyAdmin), upgradeAndCallsPOLdata);
 
-        // Upgrade messenger; `initialize` wires the PolBridger proxy atomically.
+        // Upgrade messenger and run v1 `initialize` (no polBridger arg).
         bytes memory upgradeAndCallsPOLMessengerdata = abi.encodeCall(
             ProxyAdmin.upgradeAndCall,
             (
                 ITransparentUpgradeableProxy(address(sPOLMessengerProxy)),
                 address(sPOLMessengerImpl),
-                abi.encodeCall(
-                    sPOLMessenger.initialize, (address(accessManagerL1), rcmERC20Predicate, address(polBridgerProxy))
-                )
+                abi.encodeCall(sPOLMessenger.initialize, (address(accessManagerL1), rcmERC20Predicate))
             )
         );
         accessManagerL1.execute(address(sPOLMessengerproxyAdmin), upgradeAndCallsPOLMessengerdata);
+
+        // Wire the PolBridger pointer via reinitialize. Must go through the ProxyAdmin so the
+        // ERC1967 admin check inside `reinitialize` passes (a direct call would frontrun-vulnerable).
+        bytes memory reinitMessengerData = abi.encodeCall(
+            ProxyAdmin.upgradeAndCall,
+            (
+                ITransparentUpgradeableProxy(address(sPOLMessengerProxy)),
+                address(sPOLMessengerImpl),
+                abi.encodeCall(sPOLMessenger.reinitialize, (address(polBridgerProxy)))
+            )
+        );
+        accessManagerL1.execute(address(sPOLMessengerproxyAdmin), reinitMessengerData);
 
         bytes memory upgradeAndCallsPOLControllerdata = abi.encodeCall(
             ProxyAdmin.upgradeAndCall,
@@ -220,17 +230,27 @@ contract Deploy is Script, ConfigLoader {
         );
         accessManagerL2.execute(address(polBridgerProxyAdmin), upgradeAndCallPolBridgerData);
 
+        // Upgrade child and run v1 `initialize` (no polBridger arg).
         bytes memory upgradeAndCalldata = abi.encodeCall(
             ProxyAdmin.upgradeAndCall,
             (
                 ITransparentUpgradeableProxy(address(sPOLChildProxy)),
                 address(sPOLChildImpl),
-                abi.encodeCall(
-                    sPOLChild.initialize, (address(accessManagerL2), address(polBridgerProxy), childChainManager)
-                )
+                abi.encodeCall(sPOLChild.initialize, (address(accessManagerL2), childChainManager))
             )
         );
         accessManagerL2.execute(address(sPOLChildproxyAdmin), upgradeAndCalldata);
+
+        // Wire the PolBridger pointer via reinitialize. See L1 messenger for the rationale.
+        bytes memory reinitChildData = abi.encodeCall(
+            ProxyAdmin.upgradeAndCall,
+            (
+                ITransparentUpgradeableProxy(address(sPOLChildProxy)),
+                address(sPOLChildImpl),
+                abi.encodeCall(sPOLChild.reinitialize, (address(polBridgerProxy)))
+            )
+        );
+        accessManagerL2.execute(address(sPOLChildproxyAdmin), reinitChildData);
 
         if (_deployer != admin) {
             accessManagerL2.grantRole(accessManagerL2.ADMIN_ROLE(), admin, 0);
@@ -306,7 +326,7 @@ contract Deploy is Script, ConfigLoader {
 
         // Verify messenger
         require(messenger.authority() == address(accessManagerL1), "Messenger authority incorrect");
-        require(address(messenger.bridgeHelper()) == address(polBridgerProxy), "Messenger polBridger incorrect");
+        require(address(messenger.polBridger()) == address(polBridgerProxy), "Messenger polBridger incorrect");
 
         // Verify PolBridger (L1 side)
         require(bridger.authority() == address(accessManagerL1), "PolBridger L1 authority incorrect");
@@ -345,7 +365,7 @@ contract Deploy is Script, ConfigLoader {
         // Verify sPOLChild
         require(address(child) == precalcsPOLChildProxyAddress(), "sPOLChild proxy address incorrect");
         require(child.stateSyncer() == stateSyncerL2, "sPOLChild state syncer incorrect");
-        require(address(child.bridgeHelper()) == address(polBridgerProxy), "sPOLChild bridger incorrect");
+        require(address(child.polBridger()) == address(polBridgerProxy), "sPOLChild polBridger incorrect");
         require(child.authority() == address(accessManagerL2), "sPOLChild authority incorrect");
         require(child.childChainManager() == childChainManager, "sPOLChild child chain manager incorrect");
         require(

@@ -14,6 +14,7 @@ import {
     ERC20PermitUpgradeable
 } from "@openzeppelin-contracts-upgradeable/token/ERC20/extensions/ERC20PermitUpgradeable.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
+import {ERC1967Utils} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol";
 
 /// @title sPOL Child
 /// @notice L2 contract for the sPOL liquid staking protocol on Polygon
@@ -91,6 +92,7 @@ contract sPOLChild is
     error FeeTooHigh(uint16 provided, uint16 maxAllowed);
     error IncorrectPOLAmount(uint256 sent, uint256 expected);
     error MigrationAlreadyOngoing();
+    error OnlyProxyAdmin();
     error POLAmountMustBeGreaterThanZero();
     error ZeroAddress();
 
@@ -107,12 +109,12 @@ contract sPOLChild is
 
     /// @notice Initializes the L2 sPOL contract with bridge and access control settings
     /// @dev Starts paused until exchange rate is received from L1. Sets initial safety fee.
+    ///      Does NOT set `polBridger` — that's done in `reinitialize` so the polBridger pointer
+    ///      can be set atomically with a proxy upgrade in a single multisig transaction.
     /// @param _authority AccessManager contract for restricted function access
-    /// @param _polBridger Helper contract for bridging POL back to L1
     /// @param _childChainManager Polygon PoS bridge deposit manager
-    function initialize(address _authority, address _polBridger, address _childChainManager) external initializer {
+    function initialize(address _authority, address _childChainManager) external initializer {
         require(_authority != address(0), ZeroAddress());
-        require(_polBridger != address(0), ZeroAddress());
         require(_childChainManager != address(0), ZeroAddress());
 
         __Pausable_init();
@@ -122,7 +124,6 @@ contract sPOLChild is
 
         maxExchangeRateUpdateDelay = 10 days;
         safetyFee = 30; // 0.3%
-        polBridger = PolBridger(_polBridger);
         childChainManager = _childChainManager;
 
         // Init so update can work
@@ -130,6 +131,17 @@ contract sPOLChild is
         l1SPOLBalance = 1;
 
         _pause();
+    }
+
+    /// @notice Sets the PolBridger pointer atomically alongside a proxy upgrade
+    /// @dev Callable exactly once (via the `reinitializer(2)` modifier) and only when invoked
+    ///      via `ProxyAdmin.upgradeAndCall(childProxy, newImpl, reinitialize(polBridger))`.
+    /// @param _polBridger PolBridger proxy address to wire into the child.
+    function reinitialize(address _polBridger) external reinitializer(2) {
+        require(msg.sender == ERC1967Utils.getAdmin(), OnlyProxyAdmin());
+        require(_polBridger != address(0), ZeroAddress());
+        emit PolBridgerUpdated(address(polBridger), _polBridger);
+        polBridger = PolBridger(_polBridger);
     }
 
     ///////////////////////////////
