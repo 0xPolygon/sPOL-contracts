@@ -57,9 +57,7 @@ contract ReinitializeMessengerTest is Test {
         );
         // Construct the proxy and run v1 initialize (no polBridger arg). _initialized = 1 after this.
         proxy = new TransparentUpgradeableProxy(
-            address(impl),
-            admin,
-            abi.encodeCall(sPOLMessenger.initialize, (address(accessManager), rcmERC20Predicate))
+            address(impl), admin, abi.encodeCall(sPOLMessenger.initialize, (address(accessManager), rcmERC20Predicate))
         );
         proxyAdmin = ProxyAdmin(address(uint160(uint256(vm.load(address(proxy), PROXY_ADMIN_SLOT)))));
     }
