@@ -30,14 +30,14 @@ contract sPOLMessenger is Initializable, AccessManagedUpgradeable, ReentrancyGua
     mapping(uint256 => bool) public completedBackfill;
     mapping(uint256 => uint256) public backfillAmounts;
     uint256 public currentActiveBackfillCycle;
-    PolBridger public bridgeHelper;
+    PolBridger public polBridger;
 
     event BackfillCompleted(uint256 indexed backfillCycle, uint256 totalWithdraw);
     event BackfillStarted(uint256 indexed backfillCycle, uint256 polAmount, uint256 sPOLAmount);
     event ExchangeRateUpdateSent(uint256 totalsPOLBalance, uint256 totaldPOLBalance);
     event InvalidMessageType(uint8 msgType);
     event MigrationProcessed(uint256 polAmount, uint256 mintedSPOL);
-    event BridgeHelperUpdated(address indexed oldBridger, address indexed newBridger);
+    event PolBridgerUpdated(address indexed oldPolBridger, address indexed newPolBridger);
 
     error BackfillAlreadyCompleted(uint256 backfillCycle);
     error BackfillAlreadyOngoing(uint256 backfillCycle);
@@ -74,19 +74,19 @@ contract sPOLMessenger is Initializable, AccessManagedUpgradeable, ReentrancyGua
         _disableInitializers();
     }
 
-    /// @notice Initializes the messenger with access control, bridge helper wiring, and token approvals
+    /// @notice Initializes the messenger with access control, polBridger wiring, and token approvals
     /// @dev Sets up approvals for sPOLController (POL staking) and bridge contracts (POL/sPOL transfers).
     /// @param _authority AccessManager contract for restricted function access
     /// @param _rcmERC20Predicate RootChainManager ERC20 predicate for sPOL bridge deposits
-    /// @param _bridgeHelper PolBridger proxy used to process L2 migration POL exits
-    function initialize(address _authority, address _rcmERC20Predicate, address _bridgeHelper) external initializer {
+    /// @param _polBridger PolBridger proxy used to process L2 migration POL exits
+    function initialize(address _authority, address _rcmERC20Predicate, address _polBridger) external initializer {
         require(_authority != address(0), ZeroAddress());
         require(_rcmERC20Predicate != address(0), ZeroAddress());
-        require(_bridgeHelper != address(0), ZeroAddress());
+        require(_polBridger != address(0), ZeroAddress());
 
         __AccessManaged_init(_authority);
 
-        bridgeHelper = PolBridger(_bridgeHelper);
+        polBridger = PolBridger(_polBridger);
 
         polToken.approve(address(sPOLController), type(uint256).max);
         polToken.approve(address(depositManager), type(uint256).max);
@@ -107,7 +107,7 @@ contract sPOLMessenger is Initializable, AccessManagedUpgradeable, ReentrancyGua
 
     function _handleMigration(bytes memory _msg) internal {
         (uint256 _polAmount, uint256 _mintedSPOL) = _decodeL2MigrationRequestMessage(_msg);
-        bridgeHelper.takePOLL1(_polAmount);
+        polBridger.takePOLL1(_polAmount);
         uint256 polBalance = polToken.balanceOf(address(this));
         require(polBalance >= _polAmount, NotEnoughPOLInMessenger(_polAmount, polBalance));
 
@@ -183,12 +183,12 @@ contract sPOLMessenger is Initializable, AccessManagedUpgradeable, ReentrancyGua
         emit ExchangeRateUpdateSent(totalsPOLBalance, totaldPOLBalance);
     }
 
-    /// @notice Sets or updates the BridgeHelper address
+    /// @notice Sets or updates the PolBridger address
     /// @dev Restricted to AccessManager.
-    /// @param _bridgeHelper New BridgeHelper address
-    function updateBridgeHelper(address _bridgeHelper) external restricted {
-        require(_bridgeHelper != address(0), ZeroAddress());
-        emit BridgeHelperUpdated(address(bridgeHelper), _bridgeHelper);
-        bridgeHelper = PolBridger(_bridgeHelper);
+    /// @param _polBridger New PolBridger address
+    function updatePolBridger(address _polBridger) external restricted {
+        require(_polBridger != address(0), ZeroAddress());
+        emit PolBridgerUpdated(address(polBridger), _polBridger);
+        polBridger = PolBridger(_polBridger);
     }
 }

@@ -113,7 +113,7 @@ contract PolBridgerUpgradeForkTest is Test, UpgradePolBridgerToProxy {
     }
 
     /// @dev Drives each step of the multisig plan. ProxyAdmin upgrades go via AccessManager
-    ///      (its ProxyAdmin is `onlyOwner`-gated); `updateBridgeHelper` is a direct admin call
+    ///      (its ProxyAdmin is `onlyOwner`-gated); `updatePolBridger` is a direct admin call
     ///      (admin has ADMIN_ROLE → `restricted` check passes). Only address pranked is admin.
     function _executeAdminPlan(address accessManager, AdminStep[] memory steps) internal {
         for (uint256 i = 0; i < steps.length; i++) {
@@ -188,7 +188,7 @@ contract PolBridgerUpgradeForkTest is Test, UpgradePolBridgerToProxy {
 
     /// @notice End-to-end: the script's post-upgrade verification functions must pass against
     ///         the forked, post-admin-execution state. Any break in impl deployment, proxy
-    ///         impl slot, PolBridger state, ProxyAdmin ownership, or bridgeHelper wiring will
+    ///         impl slot, PolBridger state, ProxyAdmin ownership, or polBridger wiring will
     ///         revert inside these calls.
     function test_verifyL1_succeedsOnPostUpgradeState() public {
         vm.selectFork(networkL1);
@@ -315,46 +315,46 @@ contract PolBridgerUpgradeForkTest is Test, UpgradePolBridgerToProxy {
 
     function test_messengerPointsAtNewProxy() public {
         vm.selectFork(networkL1);
-        assertEq(address(sPOLMessenger(cfg.sPOLMessengerProxy).bridgeHelper()), d1.polBridgerProxy);
+        assertEq(address(sPOLMessenger(cfg.sPOLMessengerProxy).polBridger()), d1.polBridgerProxy);
     }
 
     function test_childPointsAtNewProxy() public {
         vm.selectFork(networkL2);
-        assertEq(address(sPOLChild(payable(cfg.sPOLChildProxy)).bridgeHelper()), d2.polBridgerProxy);
+        assertEq(address(sPOLChild(payable(cfg.sPOLChildProxy)).polBridger()), d2.polBridgerProxy);
     }
 
-    function test_updateBridgeHelperOnMessenger_notCallableFromRandomCaller() public {
+    function test_updatePolBridgerOnMessenger_notCallableFromRandomCaller() public {
         vm.selectFork(networkL1);
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, address(this)));
-        sPOLMessenger(cfg.sPOLMessengerProxy).updateBridgeHelper(address(0xBEEF));
+        sPOLMessenger(cfg.sPOLMessengerProxy).updatePolBridger(address(0xBEEF));
     }
 
-    function test_updateBridgeHelperOnChild_notCallableFromRandomCaller() public {
+    function test_updatePolBridgerOnChild_notCallableFromRandomCaller() public {
         vm.selectFork(networkL2);
         vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, address(this)));
-        sPOLChild(payable(cfg.sPOLChildProxy)).updateBridgeHelper(address(0xBEEF));
+        sPOLChild(payable(cfg.sPOLChildProxy)).updatePolBridger(address(0xBEEF));
     }
 
-    function test_updateBridgeHelperOnMessenger_rejectsZero() public {
+    function test_updatePolBridgerOnMessenger_rejectsZero() public {
         vm.selectFork(networkL1);
         vm.prank(admin);
         vm.expectRevert(sPOLMessenger.ZeroAddress.selector);
-        sPOLMessenger(cfg.sPOLMessengerProxy).updateBridgeHelper(address(0));
+        sPOLMessenger(cfg.sPOLMessengerProxy).updatePolBridger(address(0));
     }
 
-    function test_updateBridgeHelperOnChild_rejectsZero() public {
+    function test_updatePolBridgerOnChild_rejectsZero() public {
         vm.selectFork(networkL2);
         vm.prank(admin);
         vm.expectRevert(sPOLChild.ZeroAddress.selector);
-        sPOLChild(payable(cfg.sPOLChildProxy)).updateBridgeHelper(address(0));
+        sPOLChild(payable(cfg.sPOLChildProxy)).updatePolBridger(address(0));
     }
 
-    function test_updateBridgeHelperOnMessenger_canBeUpdated() public {
+    function test_updatePolBridgerOnMessenger_canBeUpdated() public {
         vm.selectFork(networkL1);
         address newBridger = makeAddr("nextBridger");
         vm.prank(admin);
-        sPOLMessenger(cfg.sPOLMessengerProxy).updateBridgeHelper(newBridger);
-        assertEq(address(sPOLMessenger(cfg.sPOLMessengerProxy).bridgeHelper()), newBridger);
+        sPOLMessenger(cfg.sPOLMessengerProxy).updatePolBridger(newBridger);
+        assertEq(address(sPOLMessenger(cfg.sPOLMessengerProxy).polBridger()), newBridger);
     }
 
     ///////////////////////////////
@@ -409,7 +409,7 @@ contract PolBridgerUpgradeForkTest is Test, UpgradePolBridgerToProxy {
     /// @notice End-to-end regression for the messenger's storage layout post-upgrade. Probes
     ///         a synthetic `processedExits` entry, then upgrades the proxy a second time (same
     ///         bytecode, fresh deploy) and verifies the entry survived along with the new
-    ///         `bridgeHelper` slot introduced by this upgrade. Catches any accidental reorder
+    ///         `polBridger` slot introduced by this upgrade. Catches any accidental reorder
     ///         or slot-shift in `sPOLMessenger.sol` or its inherited chain.
     function test_preservesMessengerStorageThroughSecondUpgrade() public {
         vm.selectFork(networkL1);
@@ -440,7 +440,7 @@ contract PolBridgerUpgradeForkTest is Test, UpgradePolBridgerToProxy {
             );
 
         assertTrue(msgr.processedExits(probeExitHash), "processedExits drifted");
-        assertEq(address(msgr.bridgeHelper()), d1.polBridgerProxy, "polBridger drifted");
+        assertEq(address(msgr.polBridger()), d1.polBridgerProxy, "polBridger drifted");
     }
 
     function test_preservesChildExchangeRate() public {
@@ -462,7 +462,7 @@ contract PolBridgerUpgradeForkTest is Test, UpgradePolBridgerToProxy {
 ///         upgrade's writes (no prior setUp admin noise). Deployer-driven PolBridger setup
 ///         is done pre-record; only the 2-step multisig sequence runs inside the recorder.
 contract PolBridgerUpgradeSlotTrackingTest is Test, UpgradePolBridgerToProxy {
-    // Storage-layout anchors — if either of these drifts, the corresponding `bridgeHelper`
+    // Storage-layout anchors — if either of these drifts, the corresponding `polBridger`
     // storage slot changes and the upgrade would write a different slot. Asserted explicitly.
     uint256 internal constant MESSENGER_BRIDGE_HELPER_SLOT = 4;
     uint256 internal constant CHILD_BRIDGE_HELPER_SLOT = 12;
@@ -489,7 +489,7 @@ contract PolBridgerUpgradeSlotTrackingTest is Test, UpgradePolBridgerToProxy {
         d2 = _deployL2(cfg, address(this));
     }
 
-    function test_messengerUpgrade_writesOnlyImplAndBridgeHelperSlots() public {
+    function test_messengerUpgrade_writesOnlyImplAndPolBridgerSlots() public {
         vm.selectFork(networkL1);
 
         vm.record();
@@ -499,16 +499,16 @@ contract PolBridgerUpgradeSlotTrackingTest is Test, UpgradePolBridgerToProxy {
 
         _assertOnlyExpectedSlotsWritten(writes, ERC1967_IMPL_SLOT, bytes32(MESSENGER_BRIDGE_HELPER_SLOT), "messenger");
 
-        // Sanity: the slot we assert is actually where bridgeHelper lives. If the storage
-        // layout ever shifts bridgeHelper to a different slot, this assertion surfaces it.
+        // Sanity: the slot we assert is actually where polBridger lives. If the storage
+        // layout ever shifts polBridger to a different slot, this assertion surfaces it.
         assertEq(
             address(uint160(uint256(vm.load(cfg.sPOLMessengerProxy, bytes32(MESSENGER_BRIDGE_HELPER_SLOT))))),
-            address(sPOLMessenger(cfg.sPOLMessengerProxy).bridgeHelper()),
-            "messenger bridgeHelper slot drifted"
+            address(sPOLMessenger(cfg.sPOLMessengerProxy).polBridger()),
+            "messenger polBridger slot drifted"
         );
     }
 
-    function test_childUpgrade_writesOnlyImplAndBridgeHelperSlots() public {
+    function test_childUpgrade_writesOnlyImplAndPolBridgerSlots() public {
         vm.selectFork(networkL2);
 
         vm.record();
@@ -520,8 +520,8 @@ contract PolBridgerUpgradeSlotTrackingTest is Test, UpgradePolBridgerToProxy {
 
         assertEq(
             address(uint160(uint256(vm.load(cfg.sPOLChildProxy, bytes32(CHILD_BRIDGE_HELPER_SLOT))))),
-            address(sPOLChild(payable(cfg.sPOLChildProxy)).bridgeHelper()),
-            "child bridgeHelper slot drifted"
+            address(sPOLChild(payable(cfg.sPOLChildProxy)).polBridger()),
+            "child polBridger slot drifted"
         );
     }
 
@@ -544,22 +544,22 @@ contract PolBridgerUpgradeSlotTrackingTest is Test, UpgradePolBridgerToProxy {
     function _assertOnlyExpectedSlotsWritten(
         bytes32[] memory writes,
         bytes32 expectedImplSlot,
-        bytes32 expectedBridgeHelperSlot,
+        bytes32 expectedPolBridgerSlot,
         string memory label
     ) internal pure {
         bool sawImpl;
-        bool sawBridgeHelper;
+        bool sawPolBridger;
         for (uint256 i = 0; i < writes.length; i++) {
             if (writes[i] == expectedImplSlot) {
                 sawImpl = true;
-            } else if (writes[i] == expectedBridgeHelperSlot) {
-                sawBridgeHelper = true;
+            } else if (writes[i] == expectedPolBridgerSlot) {
+                sawPolBridger = true;
             } else {
                 // Any other slot means the upgrade touched unexpected state.
                 revert(string.concat(label, " upgrade wrote unexpected slot"));
             }
         }
         require(sawImpl, string.concat(label, " upgrade did not write the ERC1967 impl slot"));
-        require(sawBridgeHelper, string.concat(label, " upgrade did not write the bridgeHelper slot"));
+        require(sawPolBridger, string.concat(label, " upgrade did not write the polBridger slot"));
     }
 }

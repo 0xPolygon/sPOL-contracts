@@ -54,8 +54,8 @@ contract sPOLChild is
     uint256 deprecated_locallyBurnedSPOL;
     // Deprecated slot, not zero
     address deprecated_l1Messenger;
-    // Bridge helper contract, because POL has no withdrawFor function
-    PolBridger public bridgeHelper;
+    // PolBridger helper contract, because POL has no withdrawFor function
+    PolBridger public polBridger;
 
     // Depositor bridge contract of sPOL
     address public childChainManager;
@@ -77,7 +77,7 @@ contract sPOLChild is
     event InvalidMessageType(uint8 msgType);
     event SafetyFeeChanged(uint16 oldFee, uint16 newFee);
     event MaxExchangeRateDelayChanged(uint256 oldDelay, uint256 newDelay);
-    event BridgeHelperUpdated(address indexed oldBridgeHelper, address indexed newBridgeHelper);
+    event PolBridgerUpdated(address indexed oldPolBridger, address indexed newPolBridger);
 
     // Migration events
     event BalancedOnlyLocally();
@@ -108,11 +108,11 @@ contract sPOLChild is
     /// @notice Initializes the L2 sPOL contract with bridge and access control settings
     /// @dev Starts paused until exchange rate is received from L1. Sets initial safety fee.
     /// @param _authority AccessManager contract for restricted function access
-    /// @param _bridgeHelper Helper contract for bridging POL back to L1
+    /// @param _polBridger Helper contract for bridging POL back to L1
     /// @param _childChainManager Polygon PoS bridge deposit manager
-    function initialize(address _authority, address _bridgeHelper, address _childChainManager) external initializer {
+    function initialize(address _authority, address _polBridger, address _childChainManager) external initializer {
         require(_authority != address(0), ZeroAddress());
-        require(_bridgeHelper != address(0), ZeroAddress());
+        require(_polBridger != address(0), ZeroAddress());
         require(_childChainManager != address(0), ZeroAddress());
 
         __Pausable_init();
@@ -122,7 +122,7 @@ contract sPOLChild is
 
         maxExchangeRateUpdateDelay = 10 days;
         safetyFee = 30; // 0.3%
-        bridgeHelper = PolBridger(_bridgeHelper);
+        polBridger = PolBridger(_polBridger);
         childChainManager = _childChainManager;
 
         // Init so update can work
@@ -289,13 +289,13 @@ contract sPOLChild is
         emit MaxExchangeRateDelayChanged(oldDelay, _newDelay);
     }
 
-    /// @notice Sets or updates the PolBridger (bridge helper) address
+    /// @notice Sets or updates the PolBridger address
     /// @dev Restricted to AccessManager.
-    /// @param _bridgeHelper New PolBridger address
-    function updateBridgeHelper(address _bridgeHelper) external restricted {
-        require(_bridgeHelper != address(0), ZeroAddress());
-        emit BridgeHelperUpdated(address(bridgeHelper), _bridgeHelper);
-        bridgeHelper = PolBridger(_bridgeHelper);
+    /// @param _polBridger New PolBridger address
+    function updatePolBridger(address _polBridger) external restricted {
+        require(_polBridger != address(0), ZeroAddress());
+        emit PolBridgerUpdated(address(polBridger), _polBridger);
+        polBridger = PolBridger(_polBridger);
     }
 
     /// @notice Pauses buy operations on L2
@@ -318,7 +318,7 @@ contract sPOLChild is
     /////////////////////////////////
 
     function _exitPOLforMessenger(uint256 _polAmount) internal {
-        bridgeHelper.bridgePOLToL1{value: _polAmount}(_polAmount);
+        polBridger.bridgePOLToL1{value: _polAmount}(_polAmount);
     }
 }
 

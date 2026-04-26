@@ -27,7 +27,7 @@ import {AccessManager} from "@openzeppelin/contracts/access/manager/AccessManage
 ///           3. `proxyAdmin.transferOwnership(accessManager)` — hands over upgrade rights.
 ///           4. Deploy new sPOLMessenger impl (L1) / new sPOLChild impl (L2) via CREATE2.
 ///           5. Assert the PolBridger proxy address matches across L1/L2 (Plasma requirement).
-///           6. Print the remaining multisig calldata: upgrade messenger/child + updateBridgeHelper.
+///           6. Print the remaining multisig calldata: upgrade messenger/child + updatePolBridger.
 ///
 /// @dev    Usage:
 ///         forge script script/upgrades/UpgradePolBridgerToProxy.s.sol \
@@ -140,7 +140,7 @@ contract UpgradePolBridgerToProxy is Script {
     /// @notice Post-upgrade verification for L1. Computes every expected CREATE2 address from
     ///         the config (so operator passes no impl addresses), checks each has code, then
     ///         verifies proxy impl slots, authority, wiring, ProxyAdmin ownership, PolBridger
-    ///         immutables, and the messenger's bridgeHelper pointer. Mirrors the spirit of
+    ///         immutables, and the messenger's polBridger pointer. Mirrors the spirit of
     ///         Deploy.s.sol::_verifyDeploymentL1 for the newly-initialized contracts.
     /// @dev    Usage: forge script script/upgrades/UpgradePolBridgerToProxy.s.sol \
     ///                   --sig "verifyL1(string,address)" "mainnet" <polBridgerProxy> \
@@ -193,8 +193,8 @@ contract UpgradePolBridgerToProxy is Script {
 
         // 5. Messenger pointer.
         require(
-            address(sPOLMessenger(cfg.sPOLMessengerProxy).bridgeHelper()) == expectedPolBridgerProxy,
-            "Messenger bridgeHelper not pointing at new PolBridger proxy"
+            address(sPOLMessenger(cfg.sPOLMessengerProxy).polBridger()) == expectedPolBridgerProxy,
+            "Messenger polBridger not pointing at new PolBridger proxy"
         );
 
         console.log("L1 verification passed.");
@@ -251,8 +251,8 @@ contract UpgradePolBridgerToProxy is Script {
         );
 
         require(
-            address(sPOLChild(payable(cfg.sPOLChildProxy)).bridgeHelper()) == expectedPolBridgerProxy,
-            "Child bridgeHelper not pointing at new PolBridger proxy"
+            address(sPOLChild(payable(cfg.sPOLChildProxy)).polBridger()) == expectedPolBridgerProxy,
+            "Child polBridger not pointing at new PolBridger proxy"
         );
 
         console.log("L2 verification passed.");
@@ -291,7 +291,7 @@ contract UpgradePolBridgerToProxy is Script {
 
         // Deployer owns the ProxyAdmin. Atomically upgrade dummy -> real impl + initialize,
         // then hand the ProxyAdmin to the AccessManager. Multisig only has to deal with the
-        // messenger impl swap + bridgeHelper pointer afterwards.
+        // messenger impl swap + polBridger pointer afterwards.
         _finaliseBridger(
             d.polBridgerProxy,
             d.polBridgerProxyAdmin,
@@ -556,8 +556,8 @@ contract UpgradePolBridgerToProxy is Script {
         // 2. Direct admin call (`restricted` check passes because admin has ADMIN_ROLE).
         steps[1] = AdminStep({
             target: cfg.sPOLMessengerProxy,
-            data: abi.encodeCall(sPOLMessenger.updateBridgeHelper, (d1.polBridgerProxy)),
-            label: "updateBridgeHelper on messenger",
+            data: abi.encodeCall(sPOLMessenger.updatePolBridger, (d1.polBridgerProxy)),
+            label: "updatePolBridger on messenger",
             viaAccessManager: false
         });
     }
@@ -578,8 +578,8 @@ contract UpgradePolBridgerToProxy is Script {
         });
         steps[1] = AdminStep({
             target: cfg.sPOLChildProxy,
-            data: abi.encodeCall(sPOLChild.updateBridgeHelper, (d2.polBridgerProxy)),
-            label: "updateBridgeHelper on child",
+            data: abi.encodeCall(sPOLChild.updatePolBridger, (d2.polBridgerProxy)),
+            label: "updatePolBridger on child",
             viaAccessManager: false
         });
     }

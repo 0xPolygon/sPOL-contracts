@@ -29,7 +29,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 ///         Pranking rules we follow:
 ///           - Admin multisig is pranked for every production-privileged call. ProxyAdmin
 ///             upgrades go through AccessManager.execute (required — ProxyAdmin is onlyOwner-
-///             gated by the AccessManager). `updateBridgeHelper` is a direct admin call (admin
+///             gated by the AccessManager). `updatePolBridger` is a direct admin call (admin
 ///             has ADMIN_ROLE so AccessManager.canCall passes without the extra hop).
 ///           - stateSyncerL2 and childChainManager are pranked for their respective bridge
 ///             delivery callbacks — that's the only way the Polygon bridge delivers messages,
@@ -80,7 +80,7 @@ contract PolBridgerUpgradeMigrationForkTest is Test, UpgradePolBridgerToProxy {
     }
 
     /// @dev Drives each step of the multisig plan. ProxyAdmin upgrades go via AccessManager
-    ///      (its ProxyAdmin is `onlyOwner`-gated); `updateBridgeHelper` is a direct admin call
+    ///      (its ProxyAdmin is `onlyOwner`-gated); `updatePolBridger` is a direct admin call
     ///      (admin has ADMIN_ROLE → `restricted` check passes). Only address pranked is admin.
     function _executeAdminPlan(address accessManager, AdminStep[] memory steps) internal {
         for (uint256 i = 0; i < steps.length; i++) {
@@ -207,7 +207,7 @@ contract PolBridgerUpgradeMigrationForkTest is Test, UpgradePolBridgerToProxy {
         // ---------------------------------------------------------------
         // We can't generate a real L2→L1 checkpoint proof for a freshly-burnt L2 migration in
         // a fork test, so we replace the messenger impl with a bytecode-identical mock that
-        // exposes `_processMessageFromChild`. Storage (including bridgeHelper) is preserved.
+        // exposes `_processMessageFromChild`. Storage (including polBridger) is preserved.
 
         vm.selectFork(networkL1);
         MocksPOLMessenger mockImpl = new MocksPOLMessenger(
@@ -243,7 +243,7 @@ contract PolBridgerUpgradeMigrationForkTest is Test, UpgradePolBridgerToProxy {
         uint256 freshSPOL = child.locallyMintedSPOL();
         require(freshPOL > 0 && freshSPOL > 0, "expected accumulated state after pending migration");
         assertFalse(child.onGoingMigration(), "should be clear after pending finalise");
-        assertEq(address(child.bridgeHelper()), d2.polBridgerProxy, "child not wired to new proxy");
+        assertEq(address(child.polBridger()), d2.polBridgerProxy, "child not wired to new proxy");
 
         vm.selectFork(networkL1);
         vm.recordLogs();
