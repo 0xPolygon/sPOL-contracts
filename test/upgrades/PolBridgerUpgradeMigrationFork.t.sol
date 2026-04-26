@@ -65,6 +65,7 @@ contract PolBridgerUpgradeMigrationForkTest is Test, UpgradePolBridgerToProxy {
         d1 = _deployL1(cfg, address(this));
         vm.selectFork(networkL2);
         d2 = _deployL2(cfg, address(this));
+        require(d1.polBridgerProxy != address(0), "L1 proxy address is zero");
         require(d1.polBridgerProxy == d2.polBridgerProxy, "proxy address mismatch");
 
         // Execute the 2-step admin plan on each chain as the multisig would.
