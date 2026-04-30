@@ -41,7 +41,7 @@ contract PauserRole is Script {
     function _outputL1(string memory deployJson, address adminSafe, address pauser) internal pure {
         address accessManager = vm.parseJsonAddress(deployJson, ".sPOL_L1.accessManagerL1");
         address controllerAddr = vm.parseJsonAddress(deployJson, ".sPOL_L1.sPOLControllerProxy");
-        address polBridgerAddr = vm.parseJsonAddress(deployJson, ".sPOL_L1.polBridger");
+        address polBridgerAddr = vm.parseJsonAddress(deployJson, ".sPOL_L1.polBridgerProxy");
 
         console.log("## L1 (Ethereum) -- AccessManager `%s`", accessManager);
         console.log("");
@@ -92,7 +92,7 @@ contract PauserRole is Script {
     function _outputL2(string memory deployJson, address adminSafe, address pauser) internal pure {
         address accessManager = vm.parseJsonAddress(deployJson, ".sPOL_L2.accessManagerL2");
         address childAddr = vm.parseJsonAddress(deployJson, ".sPOL_L2.sPOLChildProxy");
-        address polBridgerAddr = vm.parseJsonAddress(deployJson, ".sPOL_L2.polBridger");
+        address polBridgerAddr = vm.parseJsonAddress(deployJson, ".sPOL_L2.polBridgerProxy");
 
         console.log("---");
         console.log("");

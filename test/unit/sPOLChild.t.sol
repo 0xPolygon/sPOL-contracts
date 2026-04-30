@@ -162,8 +162,8 @@ contract sPOLChildTest is Test, Deploy {
 
         // Trigger migration via balanceWithL1
         vm.mockCall(
-            address(sPOLChildToken.bridgeHelper()),
-            abi.encodeWithSelector(sPOLChildToken.bridgeHelper().bridgePOLToL1.selector),
+            address(sPOLChildToken.polBridger()),
+            abi.encodeWithSelector(sPOLChildToken.polBridger().bridgePOLToL1.selector),
             abi.encode(true)
         );
         vm.prank(admin);
@@ -538,8 +538,8 @@ contract sPOLChildTest is Test, Deploy {
         sPOLChildToken.buySPOL{value: polAmount}(polAmount);
 
         vm.mockCall(
-            address(sPOLChildToken.bridgeHelper()),
-            abi.encodeWithSelector(sPOLChildToken.bridgeHelper().bridgePOLToL1.selector),
+            address(sPOLChildToken.polBridger()),
+            abi.encodeWithSelector(sPOLChildToken.polBridger().bridgePOLToL1.selector),
             abi.encode(true)
         );
 
@@ -616,8 +616,8 @@ contract sPOLChildTest is Test, Deploy {
         sPOLChildToken.buySPOL{value: polAmount}(polAmount);
 
         vm.mockCall(
-            address(sPOLChildToken.bridgeHelper()),
-            abi.encodeWithSelector(sPOLChildToken.bridgeHelper().bridgePOLToL1.selector),
+            address(sPOLChildToken.polBridger()),
+            abi.encodeWithSelector(sPOLChildToken.polBridger().bridgePOLToL1.selector),
             abi.encode(true)
         );
 
@@ -643,8 +643,8 @@ contract sPOLChildTest is Test, Deploy {
         uint256 expectedSPOL = sPOLChildToken.convertPOLToSPOL(polAmount);
 
         vm.mockCall(
-            address(sPOLChildToken.bridgeHelper()),
-            abi.encodeWithSelector(sPOLChildToken.bridgeHelper().bridgePOLToL1.selector),
+            address(sPOLChildToken.polBridger()),
+            abi.encodeWithSelector(sPOLChildToken.polBridger().bridgePOLToL1.selector),
             abi.encode(true)
         );
 
