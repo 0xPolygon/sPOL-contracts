@@ -166,9 +166,19 @@ contract MigrationHealth is Script {
         }
 
         if (diffBpsX100 >= 0) {
-            console.log(string.concat("  Divergence      : +", _bpsFmtX100(uint256(diffBpsX100)), " bps  (L1 rate has appreciated)"));
+            console.log(
+                string.concat(
+                    "  Divergence      : +", _bpsFmtX100(uint256(diffBpsX100)), " bps  (L1 rate has appreciated)"
+                )
+            );
         } else {
-            console.log(string.concat("  Divergence      : -", _bpsFmtX100(uint256(-diffBpsX100)), " bps  (L2 cached > L1 live -- unexpected)"));
+            console.log(
+                string.concat(
+                    "  Divergence      : -",
+                    _bpsFmtX100(uint256(-diffBpsX100)),
+                    " bps  (L2 cached > L1 live -- unexpected)"
+                )
+            );
         }
 
         console.log(string.concat("  Stored safetyFee: ", _bpsFmtX100(s.safetyFee * 100), " bps"));
@@ -207,18 +217,14 @@ contract MigrationHealth is Script {
             uint256 overdueSec = s.l2Now - deadline;
             console.log("L2 buys are ALREADY BLOCKED.");
             console.log("  ExchangeRateUpdateTooOld revert fires on every buySPOL call.");
-            console.log(
-                "  Overdue by: %s s  (%s h, %s d)", overdueSec, overdueSec / 1 hours, overdueSec / 1 days
-            );
+            console.log("  Overdue by: %s s  (%s h, %s d)", overdueSec, overdueSec / 1 hours, overdueSec / 1 days);
             console.log("  -> push a fresh exchange rate via sPOLMessenger.updateL2ExchangeRate()");
             console.log("     and wait for state-sync delivery (~20-30 min).");
             return;
         }
         uint256 remaining = deadline - s.l2Now;
         console.log("L2 buys block at L2 timestamp: %s", deadline);
-        console.log(
-            "  remaining: %s s  (%s h, %s d)", remaining, remaining / 1 hours, remaining / 1 days
-        );
+        console.log("  remaining: %s s  (%s h, %s d)", remaining, remaining / 1 hours, remaining / 1 days);
         if (remaining < 1 days) {
             console.log("  WARNING: < 24h. Push exchange rate now or buys will block.");
         } else if (remaining < 3 days) {
@@ -364,11 +370,7 @@ contract MigrationHealth is Script {
     /// Preq at offset `daysOffset` under `apyBps`, in wei.
     /// Preq = convertSPOLtoPOL(spol) + 1 = spol * (totaldPOL - feedPOL) / totalsPOL + 1
     /// Projected: Preq_t = Preq_0 * (1 + apyBps * dt / (BPS * SECONDS_PER_YEAR)).
-    function _preqAt(uint256 spol, State memory s, uint256 daysOffset, uint256 apyBps)
-        internal
-        pure
-        returns (uint256)
-    {
+    function _preqAt(uint256 spol, State memory s, uint256 daysOffset, uint256 apyBps) internal pure returns (uint256) {
         if (spol == 0) return 0;
         uint256 preq0 = (spol * (s.totaldPOL - s.feedPOL)) / s.totalsPOL + 1;
         uint256 dt = daysOffset * 1 days;
