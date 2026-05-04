@@ -18,8 +18,7 @@ contract sPOLMessengerTest is Test {
             makeAddr("depositManager"),
             makeAddr("stateSender"),
             makeAddr("checkpointManager"),
-            makeAddr("childTunnel"),
-            makeAddr("polBridger")
+            makeAddr("childTunnel")
         );
     }
 

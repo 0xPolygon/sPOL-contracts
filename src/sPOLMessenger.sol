@@ -14,6 +14,7 @@ import {
     AccessManagedUpgradeable
 } from "@openzeppelin-contracts-upgradeable/access/manager/AccessManagedUpgradeable.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
+import {ERC1967Utils} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol";
 
 /// @title sPOL Messenger
 /// @notice L1 bridge coordinator for cross-chain sPOL operations
@@ -26,23 +27,25 @@ contract sPOLMessenger is Initializable, AccessManagedUpgradeable, ReentrancyGua
     IRootChainManager public immutable rootChainManager;
     IDepositManager public immutable depositManager;
     IsPOLController public immutable sPOLController;
-    PolBridger public immutable polBridger;
 
     mapping(uint256 => bool) public completedBackfill;
     mapping(uint256 => uint256) public backfillAmounts;
     uint256 public currentActiveBackfillCycle;
+    PolBridger public polBridger;
 
     event BackfillCompleted(uint256 indexed backfillCycle, uint256 totalWithdraw);
     event BackfillStarted(uint256 indexed backfillCycle, uint256 polAmount, uint256 sPOLAmount);
     event ExchangeRateUpdateSent(uint256 totalsPOLBalance, uint256 totaldPOLBalance);
     event InvalidMessageType(uint8 msgType);
     event MigrationProcessed(uint256 polAmount, uint256 mintedSPOL);
+    event PolBridgerUpdated(address indexed oldPolBridger, address indexed newPolBridger);
 
     error BackfillAlreadyCompleted(uint256 backfillCycle);
     error BackfillAlreadyOngoing(uint256 backfillCycle);
     error BackfillNotActive(uint256 backfillCycle);
     error NotEnoughPOLInMessenger(uint256 required, uint256 available);
     error NotEnoughSPOLInMessenger(uint256 required, uint256 available);
+    error OnlyProxyAdmin();
     error ZeroAddress();
 
     constructor(
@@ -53,8 +56,7 @@ contract sPOLMessenger is Initializable, AccessManagedUpgradeable, ReentrancyGua
         address _depositManager,
         address _stateSender,
         address _checkpointManager,
-        address _childTunnel,
-        address _polBridger
+        address _childTunnel
     ) BaseRootTunnel(_stateSender, _checkpointManager, _childTunnel) {
         require(_polToken != address(0), ZeroAddress());
         require(_sPOLToken != address(0), ZeroAddress());
@@ -64,20 +66,20 @@ contract sPOLMessenger is Initializable, AccessManagedUpgradeable, ReentrancyGua
         require(_stateSender != address(0), ZeroAddress());
         require(_checkpointManager != address(0), ZeroAddress());
         require(_childTunnel != address(0), ZeroAddress());
-        require(_polBridger != address(0), ZeroAddress());
 
         polToken = IERC20(_polToken);
         sPOLToken = IERC20(_sPOLToken);
         sPOLController = IsPOLController(_sPOLController);
         rootChainManager = IRootChainManager(_rootChainManager);
         depositManager = IDepositManager(_depositManager);
-        polBridger = PolBridger(_polBridger);
 
         _disableInitializers();
     }
 
     /// @notice Initializes the messenger with access control and token approvals
     /// @dev Sets up approvals for sPOLController (POL staking) and bridge contracts (POL/sPOL transfers).
+    ///      Does NOT set `polBridger` — that's done in `reinitialize` so the polBridger pointer
+    ///      can be set atomically with a proxy upgrade in a single multisig transaction.
     /// @param _authority AccessManager contract for restricted function access
     /// @param _rcmERC20Predicate RootChainManager ERC20 predicate for sPOL bridge deposits
     function initialize(address _authority, address _rcmERC20Predicate) external initializer {
@@ -89,6 +91,17 @@ contract sPOLMessenger is Initializable, AccessManagedUpgradeable, ReentrancyGua
         polToken.approve(address(sPOLController), type(uint256).max);
         polToken.approve(address(depositManager), type(uint256).max);
         sPOLToken.approve(_rcmERC20Predicate, type(uint256).max);
+    }
+
+    /// @notice Sets the PolBridger pointer atomically alongside a proxy upgrade
+    /// @dev Callable exactly once (via the `reinitializer(2)` modifier) and only when invoked
+    ///      via `ProxyAdmin.upgradeAndCall(messengerProxy, newImpl, reinitialize(polBridger))`.
+    /// @param _polBridger PolBridger proxy address to wire into the messenger.
+    function reinitialize(address _polBridger) external reinitializer(2) {
+        require(msg.sender == ERC1967Utils.getAdmin(), OnlyProxyAdmin());
+        require(_polBridger != address(0), ZeroAddress());
+        polBridger = PolBridger(_polBridger);
+        emit PolBridgerUpdated(address(0), _polBridger);
     }
 
     function _processMessageFromChild(bytes memory _message) internal override {
@@ -179,5 +192,14 @@ contract sPOLMessenger is Initializable, AccessManagedUpgradeable, ReentrancyGua
             abi.encode(MsgType.EXCHANGE_UPDATE, _encodeExchangeUpdateMessage(totalsPOLBalance, totaldPOLBalance))
         );
         emit ExchangeRateUpdateSent(totalsPOLBalance, totaldPOLBalance);
+    }
+
+    /// @notice Sets or updates the PolBridger address
+    /// @dev Restricted to AccessManager.
+    /// @param _polBridger New PolBridger address
+    function updatePolBridger(address _polBridger) external restricted {
+        require(_polBridger != address(0), ZeroAddress());
+        emit PolBridgerUpdated(address(polBridger), _polBridger);
+        polBridger = PolBridger(_polBridger);
     }
 }

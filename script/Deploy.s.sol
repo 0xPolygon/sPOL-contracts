@@ -24,20 +24,23 @@ contract Deploy is Script, ConfigLoader {
     sPOLController public sPOLControllerImpl;
     sPOLChild public sPOLChildImpl;
     sPOLMessenger public sPOLMessengerImpl;
+    PolBridger public polBridgerImplL1;
+    PolBridger public polBridgerImplL2;
 
     TransparentUpgradeableProxy public sPOLProxy;
     TransparentUpgradeableProxy public sPOLControllerProxy;
     TransparentUpgradeableProxy public sPOLChildProxy;
     TransparentUpgradeableProxy public sPOLMessengerProxy;
+    TransparentUpgradeableProxy public polBridgerProxy;
 
     ProxyAdmin public sPOLproxyAdmin;
     ProxyAdmin public sPOLControllerproxyAdmin;
     ProxyAdmin public sPOLChildproxyAdmin;
     ProxyAdmin public sPOLMessengerproxyAdmin;
+    ProxyAdmin public polBridgerProxyAdmin;
 
     AccessManager public accessManagerL1;
     AccessManager public accessManagerL2;
-    PolBridger public polBridger;
 
     address precalcedsPOLChildProxyAddress;
     address dummyImplL1;
@@ -85,16 +88,14 @@ contract Deploy is Script, ConfigLoader {
 
         accessManagerL1 = new AccessManager{salt: getSalt("polygon-access-manager")}(_deployer);
 
-        polBridger = new PolBridger{salt: getSalt("pol-bridger")}(
-            polTokenL1,
-            polTokenL2,
-            maticTokenL1,
-            chainIdL1,
-            chainIdL2,
-            erc20predicate,
-            withdrawManager,
-            address(accessManagerL1)
+        polBridgerImplL1 = new PolBridger{salt: getSalt("pol-bridger-impl")}(
+            polTokenL1, polTokenL2, maticTokenL1, chainIdL1, chainIdL2, registry
         );
+
+        polBridgerProxy = new TransparentUpgradeableProxy{salt: getSalt("pol-bridger-proxy")}(
+            dummyImplL1, address(accessManagerL1), ""
+        );
+        polBridgerProxyAdmin = getProxyAdmin(polBridgerProxy);
 
         sPOLControllerProxy = new TransparentUpgradeableProxy{salt: getSalt("spol-controller-proxy")}(
             dummyImplL1, address(accessManagerL1), ""
@@ -125,8 +126,7 @@ contract Deploy is Script, ConfigLoader {
             depositManager,
             stateSenderL1,
             checkpointManager,
-            precalcedsPOLChildProxyAddress,
-            address(polBridger)
+            precalcedsPOLChildProxyAddress
         );
 
         _configureDeploymentL1(_deployer);
@@ -137,16 +137,14 @@ contract Deploy is Script, ConfigLoader {
 
         accessManagerL2 = new AccessManager{salt: getSalt("polygon-access-manager")}(_deployer);
 
-        polBridger = new PolBridger{salt: getSalt("pol-bridger")}(
-            polTokenL1,
-            polTokenL2,
-            maticTokenL1,
-            chainIdL1,
-            chainIdL2,
-            erc20predicate,
-            withdrawManager,
-            address(accessManagerL2)
+        polBridgerImplL2 = new PolBridger{salt: getSalt("pol-bridger-impl")}(
+            polTokenL1, polTokenL2, maticTokenL1, chainIdL1, chainIdL2, registry
         );
+        polBridgerProxy = new TransparentUpgradeableProxy{salt: getSalt("pol-bridger-proxy")}(
+            dummyImplL2, address(accessManagerL2), ""
+        );
+        polBridgerProxyAdmin = getProxyAdmin(polBridgerProxy);
+
         sPOLChildImpl = new sPOLChild{salt: getSalt("spol-child-impl")}(stateSyncerL2);
         sPOLChildProxy = new TransparentUpgradeableProxy{salt: getSalt("spol-child-proxy")}(
             dummyImplL2, address(accessManagerL2), ""
@@ -157,7 +155,19 @@ contract Deploy is Script, ConfigLoader {
     }
 
     function _configureDeploymentL1(address _deployer) internal {
-        polBridger.initialize(address(sPOLMessengerProxy), precalcedsPOLChildProxyAddress);
+        // Upgrade PolBridger proxy to real impl and initialize.
+        bytes memory upgradeAndCallPolBridgerData = abi.encodeCall(
+            ProxyAdmin.upgradeAndCall,
+            (
+                ITransparentUpgradeableProxy(address(polBridgerProxy)),
+                address(polBridgerImplL1),
+                abi.encodeCall(
+                    PolBridger.initialize,
+                    (address(accessManagerL1), address(sPOLMessengerProxy), precalcedsPOLChildProxyAddress)
+                )
+            )
+        );
+        accessManagerL1.execute(address(polBridgerProxyAdmin), upgradeAndCallPolBridgerData);
 
         bytes memory upgradeAndCallsPOLdata = abi.encodeCall(
             ProxyAdmin.upgradeAndCall,
@@ -165,6 +175,7 @@ contract Deploy is Script, ConfigLoader {
         );
         accessManagerL1.execute(address(sPOLproxyAdmin), upgradeAndCallsPOLdata);
 
+        // Upgrade messenger and run v1 `initialize` (no polBridger arg).
         bytes memory upgradeAndCallsPOLMessengerdata = abi.encodeCall(
             ProxyAdmin.upgradeAndCall,
             (
@@ -174,6 +185,18 @@ contract Deploy is Script, ConfigLoader {
             )
         );
         accessManagerL1.execute(address(sPOLMessengerproxyAdmin), upgradeAndCallsPOLMessengerdata);
+
+        // Wire the PolBridger pointer via reinitialize. Must go through the ProxyAdmin so the
+        // ERC1967 admin check inside `reinitialize` passes (a direct call would frontrun-vulnerable).
+        bytes memory reinitMessengerData = abi.encodeCall(
+            ProxyAdmin.upgradeAndCall,
+            (
+                ITransparentUpgradeableProxy(address(sPOLMessengerProxy)),
+                address(sPOLMessengerImpl),
+                abi.encodeCall(sPOLMessenger.reinitialize, (address(polBridgerProxy)))
+            )
+        );
+        accessManagerL1.execute(address(sPOLMessengerproxyAdmin), reinitMessengerData);
 
         bytes memory upgradeAndCallsPOLControllerdata = abi.encodeCall(
             ProxyAdmin.upgradeAndCall,
@@ -194,17 +217,40 @@ contract Deploy is Script, ConfigLoader {
     }
 
     function _configureDeploymentL2(address _deployer) internal {
-        polBridger.initialize(address(sPOLMessengerProxy), address(sPOLChildProxy));
+        bytes memory upgradeAndCallPolBridgerData = abi.encodeCall(
+            ProxyAdmin.upgradeAndCall,
+            (
+                ITransparentUpgradeableProxy(address(polBridgerProxy)),
+                address(polBridgerImplL2),
+                abi.encodeCall(
+                    PolBridger.initialize,
+                    (address(accessManagerL2), address(sPOLMessengerProxy), address(sPOLChildProxy))
+                )
+            )
+        );
+        accessManagerL2.execute(address(polBridgerProxyAdmin), upgradeAndCallPolBridgerData);
 
+        // Upgrade child and run v1 `initialize` (no polBridger arg).
         bytes memory upgradeAndCalldata = abi.encodeCall(
             ProxyAdmin.upgradeAndCall,
             (
                 ITransparentUpgradeableProxy(address(sPOLChildProxy)),
                 address(sPOLChildImpl),
-                abi.encodeCall(sPOLChild.initialize, (address(accessManagerL2), address(polBridger), childChainManager))
+                abi.encodeCall(sPOLChild.initialize, (address(accessManagerL2), childChainManager))
             )
         );
         accessManagerL2.execute(address(sPOLChildproxyAdmin), upgradeAndCalldata);
+
+        // Wire the PolBridger pointer via reinitialize. See L1 messenger for the rationale.
+        bytes memory reinitChildData = abi.encodeCall(
+            ProxyAdmin.upgradeAndCall,
+            (
+                ITransparentUpgradeableProxy(address(sPOLChildProxy)),
+                address(sPOLChildImpl),
+                abi.encodeCall(sPOLChild.reinitialize, (address(polBridgerProxy)))
+            )
+        );
+        accessManagerL2.execute(address(sPOLChildproxyAdmin), reinitChildData);
 
         if (_deployer != admin) {
             accessManagerL2.grantRole(accessManagerL2.ADMIN_ROLE(), admin, 0);
@@ -229,7 +275,9 @@ contract Deploy is Script, ConfigLoader {
             string.concat(json, '"sPOLControllerProxyAdmin": "', vm.toString(address(sPOLControllerproxyAdmin)), '",');
         json = string.concat(json, '"sPOLMessengerProxyAdmin": "', vm.toString(address(sPOLMessengerproxyAdmin)), '",');
         json = string.concat(json, '"accessManagerL1": "', vm.toString(address(accessManagerL1)), '",');
-        json = string.concat(json, '"polBridger": "', vm.toString(address(polBridger)), '"');
+        json = string.concat(json, '"polBridgerProxy": "', vm.toString(address(polBridgerProxy)), '",');
+        json = string.concat(json, '"polBridgerImpl": "', vm.toString(address(polBridgerImplL1)), '",');
+        json = string.concat(json, '"polBridgerProxyAdmin": "', vm.toString(address(polBridgerProxyAdmin)), '"');
         json = string.concat(json, "},");
 
         json = string.concat(json, '"sPOL_L2": {');
@@ -237,7 +285,9 @@ contract Deploy is Script, ConfigLoader {
         json = string.concat(json, '"sPOLChildImpl": "', vm.toString(address(sPOLChildImpl)), '",');
         json = string.concat(json, '"sPOLChildProxyAdmin": "', vm.toString(address(sPOLChildproxyAdmin)), '",');
         json = string.concat(json, '"accessManagerL2": "', vm.toString(address(accessManagerL2)), '",');
-        json = string.concat(json, '"polBridger": "', vm.toString(address(polBridger)), '"');
+        json = string.concat(json, '"polBridgerProxy": "', vm.toString(address(polBridgerProxy)), '",');
+        json = string.concat(json, '"polBridgerImpl": "', vm.toString(address(polBridgerImplL2)), '",');
+        json = string.concat(json, '"polBridgerProxyAdmin": "', vm.toString(address(polBridgerProxyAdmin)), '"');
         json = string.concat(json, "}");
 
         json = string.concat(json, "}");
@@ -248,6 +298,8 @@ contract Deploy is Script, ConfigLoader {
     function _verifyDeploymentL1() internal view {
         sPOL token = sPOL(address(sPOLProxy));
         sPOLController controller = sPOLController(address(sPOLControllerProxy));
+        sPOLMessenger messenger = sPOLMessenger(address(sPOLMessengerProxy));
+        PolBridger bridger = PolBridger(address(polBridgerProxy));
 
         // Verify sPOL
         require(keccak256(bytes(token.name())) == keccak256(bytes("Staked POL")), "sPOL name incorrect");
@@ -260,7 +312,7 @@ contract Deploy is Script, ConfigLoader {
         );
 
         // Verify sPOLController
-        require(controller.authority() == address(accessManagerL1), "Controller admin incorrect");
+        require(controller.authority() == address(accessManagerL1), "Controller authority incorrect");
         require(address(controller.polToken()) == polTokenL1, "Controller POL token incorrect");
         require(address(controller.sPOLToken()) == address(sPOLProxy), "Controller sPOL token incorrect");
         require(controller.rewardFee() == rewardFee, "Controller reward fee incorrect");
@@ -271,28 +323,81 @@ contract Deploy is Script, ConfigLoader {
                 == bytes32(uint256(uint160(address(sPOLControllerImpl)))),
             "sPOL implementation address incorrect"
         );
+
+        // Verify messenger
+        require(messenger.authority() == address(accessManagerL1), "Messenger authority incorrect");
+        require(address(messenger.polBridger()) == address(polBridgerProxy), "Messenger polBridger incorrect");
+
+        // Verify PolBridger (L1 side)
+        require(bridger.authority() == address(accessManagerL1), "PolBridger L1 authority incorrect");
+        require(bridger.sPOLMessengerL1() == address(sPOLMessengerProxy), "PolBridger sPOLMessengerL1 incorrect");
+        require(
+            bridger.sPOLMessengerL2() == precalcsPOLChildProxyAddress(),
+            "PolBridger sPOLMessengerL2 (child proxy) incorrect"
+        );
+
+        // Verify AccessManager is the admin of every L1 proxy.
+        require(sPOLproxyAdmin.owner() == address(accessManagerL1), "sPOL ProxyAdmin not owned by AccessManager");
+        require(
+            sPOLControllerproxyAdmin.owner() == address(accessManagerL1),
+            "sPOLController ProxyAdmin not owned by AccessManager"
+        );
+        require(
+            sPOLMessengerproxyAdmin.owner() == address(accessManagerL1),
+            "sPOLMessenger ProxyAdmin not owned by AccessManager"
+        );
+        require(
+            polBridgerProxyAdmin.owner() == address(accessManagerL1),
+            "PolBridger L1 ProxyAdmin not owned by AccessManager"
+        );
+
+        // Verify the final admin multisig has ADMIN_ROLE on the AccessManager.
+        (bool adminHasRoleL1,) = accessManagerL1.hasRole(accessManagerL1.ADMIN_ROLE(), admin);
+        require(adminHasRoleL1, "admin (multisig) not granted ADMIN_ROLE on AccessManager L1");
+
         console.log("All verifications passed!");
     }
 
     function _verifyDeploymentL2() internal view {
         sPOLChild child = sPOLChild(payable(sPOLChildProxy));
+        PolBridger bridger = PolBridger(address(polBridgerProxy));
 
         // Verify sPOLChild
         require(address(child) == precalcsPOLChildProxyAddress(), "sPOLChild proxy address incorrect");
         require(child.stateSyncer() == stateSyncerL2, "sPOLChild state syncer incorrect");
-        require(address(child.bridgeHelper()) == address(polBridger), "sPOLChild bridger incorrect");
-        require(child.authority() == address(accessManagerL2), "sPOLChild admin incorrect");
+        require(address(child.polBridger()) == address(polBridgerProxy), "sPOLChild polBridger incorrect");
+        require(child.authority() == address(accessManagerL2), "sPOLChild authority incorrect");
         require(child.childChainManager() == childChainManager, "sPOLChild child chain manager incorrect");
         require(
             vm.load(address(child), hex"360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc")
                 == bytes32(uint256(uint160(address(sPOLChildImpl)))),
             "sPOLChild implementation address incorrect"
         );
-        require(getProxyAdmin(sPOLChildProxy).owner() == address(accessManagerL2), "sPOLChild ProxyAdmin wrong owner");
-        // If L1 was deployed then addresses should match
+
+        // Verify PolBridger (L2 side)
+        require(bridger.authority() == address(accessManagerL2), "PolBridger L2 authority incorrect");
+        require(bridger.sPOLMessengerL1() == address(sPOLMessengerProxy), "PolBridger sPOLMessengerL1 incorrect");
+        require(bridger.sPOLMessengerL2() == address(sPOLChildProxy), "PolBridger sPOLMessengerL2 incorrect");
+
+        // Verify AccessManager is the admin of every L2 proxy. L2 only has two: sPOLChild
+        // and polBridger (the messenger/controller/sPOL live on L1). So four admin checks
+        // (authority + ProxyAdmin.owner, once per proxy) covers every L2 contract.
+        require(
+            sPOLChildproxyAdmin.owner() == address(accessManagerL2), "sPOLChild ProxyAdmin not owned by AccessManager"
+        );
+        require(
+            polBridgerProxyAdmin.owner() == address(accessManagerL2),
+            "PolBridger L2 ProxyAdmin not owned by AccessManager"
+        );
+
+        // Verify the final admin multisig has ADMIN_ROLE on the AccessManager.
+        (bool adminHasRoleL2,) = accessManagerL2.hasRole(accessManagerL2.ADMIN_ROLE(), admin);
+        require(adminHasRoleL2, "admin (multisig) not granted ADMIN_ROLE on AccessManager L2");
+
+        // If L1 was deployed then cross-chain invariants should hold.
         if (address(accessManagerL1) != address(0)) {
             require(address(accessManagerL1) == address(accessManagerL2), "Access managers should be same");
-            require(address(dummyImplL1) == address(dummyImplL2), "Access managers should be same");
+            require(address(dummyImplL1) == address(dummyImplL2), "Dummy impls should be same");
         }
         console.log("All verifications passed for L2!");
     }

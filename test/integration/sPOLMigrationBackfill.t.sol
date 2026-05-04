@@ -155,8 +155,7 @@ contract sPOLMigrationBackfillTest is Test, Deploy, CheckpointData {
             depositManager,
             stateSenderL1,
             checkpointManager,
-            precalcedsPOLChildProxyAddress,
-            address(polBridger)
+            precalcedsPOLChildProxyAddress
         );
 
         bytes memory upgradeAndCallData = abi.encodeCall(
@@ -266,7 +265,7 @@ contract sPOLMigrationBackfillTest is Test, Deploy, CheckpointData {
         MocksPOLMessenger mockMessenger = _deployMockMessenger();
 
         // Give polBridger the POL that would come from bridge exit
-        deal(polTokenL1, address(polBridger), largeAmount);
+        deal(polTokenL1, address(polBridgerProxy), largeAmount);
 
         // Process migration on L1
         vm.selectFork(networkL1);

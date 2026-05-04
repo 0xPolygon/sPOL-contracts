@@ -6,32 +6,36 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {MRC20 as IMRC20} from "./interfaces/IMRC20.sol";
 import {ERC20PredicateBurnOnly as IERC20PredicateBurnOnly} from "./interfaces/IERC20Predicate.sol";
 import {WithdrawManager as IWithdrawManager} from "./interfaces/IWithdrawManager.sol";
+import {Registry as IRegistry} from "./interfaces/IRegistry.sol";
 
-import {AccessManaged} from "@openzeppelin/contracts/access/manager/AccessManaged.sol";
-import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
+import {Initializable} from "@openzeppelin-contracts-upgradeable/proxy/utils/Initializable.sol";
+import {
+    AccessManagedUpgradeable
+} from "@openzeppelin-contracts-upgradeable/access/manager/AccessManagedUpgradeable.sol";
+import {PausableUpgradeable} from "@openzeppelin-contracts-upgradeable/utils/PausableUpgradeable.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 
 /// @title POL Bridger
 /// @notice Helper contract for bridging POL between L1 and L2 via Polygon PoS bridge
-/// @dev Deployed on both chains. On L2, initiates withdrawals via MRC20 burn. On L1, processes
-///      exits and transfers POL to the messenger for migration processing.
-contract PolBridger is AccessManaged, Pausable, ReentrancyGuardTransient {
+/// @dev Deployed on both chains behind a proxy. On L2, initiates withdrawals via MRC20 burn.
+///      On L1, processes exits and transfers POL to the messenger for migration processing.
+///      Predicate and withdraw manager addresses are resolved from the Plasma Registry on
+///      every call so protocol upgrades do not require redeploys.
+contract PolBridger is Initializable, AccessManagedUpgradeable, PausableUpgradeable, ReentrancyGuardTransient {
     address public immutable polTokenL1;
     address public immutable polTokenL2;
     address public immutable maticTokenL1;
     uint256 public immutable chainIDL1;
     uint256 public immutable chainIDL2;
-    address public immutable erc20predicate;
-    address public immutable withdrawManager;
+    address public immutable registry;
 
-    bool public initialized;
     address public sPOLMessengerL1;
     address public sPOLMessengerL2;
 
     error AddressUnauthorized(address caller);
-    error AlreadyInitialized();
     error InsufficientPOLSent(uint256 sent, uint256 required);
     error InvalidOriginChain(uint256 currentChain, uint256 expectedChain);
+    error RegistryReturnedZero();
     error ZeroAddress();
 
     constructor(
@@ -40,30 +44,32 @@ contract PolBridger is AccessManaged, Pausable, ReentrancyGuardTransient {
         address _maticTokenL1,
         uint256 _chainIDL1,
         uint256 _chainIDL2,
-        address _erc20predicate,
-        address _withdrawManager,
-        address _authority
-    ) AccessManaged(_authority) {
+        address _registry
+    ) {
         polTokenL1 = _polTokenL1;
         polTokenL2 = _polTokenL2;
         maticTokenL1 = _maticTokenL1;
         chainIDL1 = _chainIDL1;
         chainIDL2 = _chainIDL2;
-        erc20predicate = _erc20predicate;
-        withdrawManager = _withdrawManager;
+        registry = _registry;
+
+        _disableInitializers();
     }
 
-    /// @notice Sets the messenger addresses for both chains
-    /// @dev Can only be called once. Must be called before any bridge operations.
+    /// @notice Initializes the bridger with access control and messenger addresses
+    /// @param _authority AccessManager contract for restricted function access
     /// @param _sPOLMessengerL1 Address of sPOLMessenger on Ethereum mainnet
     /// @param _sPOLMessengerL2 Address of sPOLChild on Polygon
-    function initialize(address _sPOLMessengerL1, address _sPOLMessengerL2) external restricted {
-        require(!initialized, AlreadyInitialized());
+    function initialize(address _authority, address _sPOLMessengerL1, address _sPOLMessengerL2) external initializer {
+        require(_authority != address(0), ZeroAddress());
         require(_sPOLMessengerL1 != address(0), ZeroAddress());
         require(_sPOLMessengerL2 != address(0), ZeroAddress());
+
+        __AccessManaged_init(_authority);
+        __Pausable_init();
+
         sPOLMessengerL1 = _sPOLMessengerL1;
         sPOLMessengerL2 = _sPOLMessengerL2;
-        initialized = true;
     }
 
     /// @notice Initiates POL bridge withdrawal from L2 to L1
@@ -78,17 +84,19 @@ contract PolBridger is AccessManaged, Pausable, ReentrancyGuardTransient {
 
     /// @notice Submits burn proof to start POL exit on L1
     /// @dev Anyone can call with valid proof. Proof is generated from L2 burn transaction after checkpoint.
+    ///      Predicate address is resolved from the registry on every call.
     /// @param proof Merkle proof of the POL burn event on L2
     function exitPOL(bytes memory proof) external whenNotPaused nonReentrant {
         require(block.chainid == chainIDL1, InvalidOriginChain(block.chainid, chainIDL1));
-        IERC20PredicateBurnOnly(erc20predicate).startExitWithBurntTokens(proof);
+        IERC20PredicateBurnOnly(_erc20Predicate()).startExitWithBurntTokens(proof);
     }
 
     /// @notice Processes pending POL(matic) exits and releases tokens to this contract
     /// @dev Anyone can call. Processes all exits in queue for POL token. POL stays in bridger until taken.
+    ///      Withdraw manager address is resolved from the registry on every call.
     function finalizeExitPOL() external whenNotPaused nonReentrant {
         require(block.chainid == chainIDL1, InvalidOriginChain(block.chainid, chainIDL1));
-        IWithdrawManager(withdrawManager).processExits(maticTokenL1);
+        IWithdrawManager(_withdrawManager()).processExits(maticTokenL1);
     }
 
     /// @notice Transfers POL from bridger to messenger for migration processing
@@ -124,5 +132,17 @@ contract PolBridger is AccessManaged, Pausable, ReentrancyGuardTransient {
     /// @notice Resumes bridge operations after a pause
     function unpause() external restricted {
         _unpause();
+    }
+
+    function _erc20Predicate() internal view returns (address) {
+        address predicate = IRegistry(registry).erc20Predicate();
+        require(predicate != address(0), RegistryReturnedZero());
+        return predicate;
+    }
+
+    function _withdrawManager() internal view returns (address) {
+        address withdrawManager = IRegistry(registry).getWithdrawManagerAddress();
+        require(withdrawManager != address(0), RegistryReturnedZero());
+        return withdrawManager;
     }
 }
