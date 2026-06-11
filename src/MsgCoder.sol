@@ -42,44 +42,4 @@ abstract contract MsgCoder {
     {
         (_polAmount, _sPOLAmount) = abi.decode(_message, (uint256, uint256));
     }
-
-    function _encodeL1MigrationResponseMessage(uint256 _sPOLAmount) internal pure returns (bytes memory) {
-        return abi.encode(_sPOLAmount);
-    }
-
-    function _decodeL1MigrationResponseMessage(bytes memory _message) internal pure returns (uint256 _sPOLAmount) {
-        (_sPOLAmount) = abi.decode(_message, (uint256));
-    }
-
-    function _encodeL2BackfillRequestMessage(uint256 _polAmount, uint256 _sPOLAmount, uint256 _backFillCycle)
-        internal
-        pure
-        returns (bytes memory)
-    {
-        return abi.encode(_polAmount, _sPOLAmount, _backFillCycle);
-    }
-
-    function _decodeL2BackfillRequestMessage(bytes memory _message)
-        internal
-        pure
-        returns (uint256 _polAmount, uint256 _sPOLAmount, uint256 _backFillCycle)
-    {
-        (_polAmount, _sPOLAmount, _backFillCycle) = abi.decode(_message, (uint256, uint256, uint256));
-    }
-
-    function _encodeL1BackfillResponseMessage(uint256 _polAmount, uint256 _backFillCycle)
-        internal
-        pure
-        returns (bytes memory)
-    {
-        return abi.encode(_polAmount, _backFillCycle);
-    }
-
-    function _decodeL1BackfillResponseMessage(bytes memory _message)
-        internal
-        pure
-        returns (uint256 _polAmount, uint256 _backFillCycle)
-    {
-        (_polAmount, _backFillCycle) = abi.decode(_message, (uint256, uint256));
-    }
 }

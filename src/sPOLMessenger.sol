@@ -127,8 +127,6 @@ contract sPOLMessenger is Initializable, AccessManagedUpgradeable, ReentrancyGua
         );
 
         rootChainManager.depositFor(childTunnel, address(sPOLToken), abi.encode(_mintedSPOL));
-        // disabled for portal because of cyclical exit issue, should be activated for lxly
-        //_sendMessageToChild(abi.encode(MsgType.L1_MIGRATION_RESPONSE, encodeL1MigrationResponseMessage(_mintedSPOL)));
         emit MigrationProcessed(_polAmount, _mintedSPOL);
     }
 
