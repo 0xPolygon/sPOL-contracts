@@ -18,7 +18,7 @@ import {ERC1967Utils} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.s
 
 /// @title sPOL Messenger
 /// @notice L1 bridge coordinator for cross-chain sPOL operations
-/// @dev Processes L2 migration and backfill requests via Polygon's state sync. Handles POL/sPOL
+/// @dev Processes L2 migration requests via Polygon's state sync. Handles POL/sPOL
 ///      bridging between L1 and L2, and pushes exchange rate updates to L2.
 contract sPOLMessenger is Initializable, AccessManagedUpgradeable, ReentrancyGuardTransient, BaseRootTunnel, MsgCoder {
     IERC20 public immutable polToken;
@@ -28,21 +28,17 @@ contract sPOLMessenger is Initializable, AccessManagedUpgradeable, ReentrancyGua
     IDepositManager public immutable depositManager;
     IsPOLController public immutable sPOLController;
 
-    mapping(uint256 => bool) public completedBackfill;
-    mapping(uint256 => uint256) public backfillAmounts;
-    uint256 public currentActiveBackfillCycle;
+    // Deprecated backfill slots, retained to preserve storage layout (backfill flow removed)
+    mapping(uint256 => bool) deprecated_completedBackfill;
+    mapping(uint256 => uint256) deprecated_backfillAmounts;
+    uint256 deprecated_currentActiveBackfillCycle;
     PolBridger public polBridger;
 
-    event BackfillCompleted(uint256 indexed backfillCycle, uint256 totalWithdraw);
-    event BackfillStarted(uint256 indexed backfillCycle, uint256 polAmount, uint256 sPOLAmount);
     event ExchangeRateUpdateSent(uint256 totalsPOLBalance, uint256 totaldPOLBalance);
     event InvalidMessageType(uint8 msgType);
     event MigrationProcessed(uint256 polAmount, uint256 mintedSPOL);
     event PolBridgerUpdated(address indexed oldPolBridger, address indexed newPolBridger);
 
-    error BackfillAlreadyCompleted(uint256 backfillCycle);
-    error BackfillAlreadyOngoing(uint256 backfillCycle);
-    error BackfillNotActive(uint256 backfillCycle);
     error NotEnoughPOLInMessenger(uint256 required, uint256 available);
     error NotEnoughSPOLInMessenger(uint256 required, uint256 available);
     error OnlyProxyAdmin();
@@ -108,8 +104,6 @@ contract sPOLMessenger is Initializable, AccessManagedUpgradeable, ReentrancyGua
         (MsgType msgType, bytes memory actualMessage) = abi.decode(_message, (MsgType, bytes));
         if (msgType == MsgType.L2_MIGRATION_REQUEST) {
             _handleMigration(actualMessage);
-        } else if (msgType == MsgType.L2_BACKFILL_REQUEST) {
-            _handleBackfill(actualMessage);
         } else {
             emit InvalidMessageType(uint8(msgType));
             return;
@@ -136,49 +130,6 @@ contract sPOLMessenger is Initializable, AccessManagedUpgradeable, ReentrancyGua
         // disabled for portal because of cyclical exit issue, should be activated for lxly
         //_sendMessageToChild(abi.encode(MsgType.L1_MIGRATION_RESPONSE, encodeL1MigrationResponseMessage(_mintedSPOL)));
         emit MigrationProcessed(_polAmount, _mintedSPOL);
-    }
-
-    function _handleBackfill(bytes memory _msg) internal {
-        (uint256 _polAmount, uint256 _sPOLAmount, uint256 _backFillCycle) = _decodeL2BackfillRequestMessage(_msg);
-        uint256 sPOLBalance = sPOLToken.balanceOf(address(this));
-
-        require(currentActiveBackfillCycle == 0, BackfillAlreadyOngoing(currentActiveBackfillCycle));
-        require(!completedBackfill[_backFillCycle], BackfillAlreadyCompleted(_backFillCycle));
-        require(backfillAmounts[_backFillCycle] == 0, BackfillAlreadyOngoing(_backFillCycle));
-        require(sPOLBalance >= _sPOLAmount, NotEnoughSPOLInMessenger(_sPOLAmount, sPOLBalance));
-
-        sPOLController.sellSPOL(sPOLBalance);
-        backfillAmounts[_backFillCycle] = _polAmount;
-        currentActiveBackfillCycle = _backFillCycle;
-        emit BackfillStarted(_backFillCycle, _polAmount, _sPOLAmount);
-    }
-
-    /// @notice Completes an active backfill by withdrawing POL and bridging it to L2
-    /// @dev Must be called after StakeManager's unbonding period. Attempts to withdraw from sPOLController,
-    ///      then bridges the POL to L2 and notifies sPOLChild via state sync message.
-    function completeBackfill() external restricted nonReentrant {
-        uint256 processingBackfillCycle = currentActiveBackfillCycle;
-        uint256 totalRequested = backfillAmounts[processingBackfillCycle];
-
-        require(processingBackfillCycle != 0, BackfillNotActive(0));
-        require(!completedBackfill[processingBackfillCycle], BackfillAlreadyCompleted(processingBackfillCycle));
-        require(totalRequested > 0, BackfillNotActive(processingBackfillCycle));
-
-        try sPOLController.withdrawPOL() {} catch {}
-
-        uint256 polBalance = polToken.balanceOf(address(this));
-        require(polBalance >= totalRequested, NotEnoughPOLInMessenger(totalRequested, polBalance));
-        // send surplus POL to controller, to be cleaned up later
-        polToken.transfer(address(sPOLController), polBalance - totalRequested);
-        depositManager.depositERC20ForUser(address(polToken), childTunnel, totalRequested);
-        _sendMessageToChild(
-            abi.encode(
-                MsgType.L1_BACKFILL_RESPONSE, _encodeL1BackfillResponseMessage(totalRequested, processingBackfillCycle)
-            )
-        );
-        completedBackfill[processingBackfillCycle] = true;
-        emit BackfillCompleted(processingBackfillCycle, totalRequested);
-        currentActiveBackfillCycle = 0;
     }
 
     /// @notice Sends current L1 exchange rate to L2 via state sync
