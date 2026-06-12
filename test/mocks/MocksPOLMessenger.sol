@@ -14,13 +14,7 @@ contract MocksPOLMessenger is sPOLMessenger {
         address _childTunnel
     )
         sPOLMessenger(
-            _polToken,
-            _sPOLToken,
-            _sPOLController,
-            _rootChainManager,
-            _stateSender,
-            _checkpointManager,
-            _childTunnel
+            _polToken, _sPOLToken, _sPOLController, _rootChainManager, _stateSender, _checkpointManager, _childTunnel
         )
     {}
 
