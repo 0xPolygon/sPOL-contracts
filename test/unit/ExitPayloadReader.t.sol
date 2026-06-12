@@ -57,9 +57,15 @@ contract ExitPayloadReaderCopyTest is Test {
         bytes memory el6 = abi.encodePacked(uint8(0x80 + rawReceipt.length), rawReceipt);
 
         bytes memory inner = abi.encodePacked(
-            uint8(0x80), uint8(0x80), uint8(0x80), uint8(0x80), uint8(0x80), uint8(0x80), // items 0..5
+            uint8(0x80),
+            uint8(0x80),
+            uint8(0x80),
+            uint8(0x80),
+            uint8(0x80),
+            uint8(0x80), // items 0..5
             el6, //                                                                          item 6 (receipt)
-            uint8(0x80), uint8(0x80), //                                                     items 7..8
+            uint8(0x80),
+            uint8(0x80), //                                                     items 7..8
             uint8(0x80) //                                                                   item 9 (log index = 0)
         );
         require(inner.length < 56, "inner too long for short-list helper");
