@@ -21,7 +21,7 @@ import {MRC20 as IMRC20} from "../../src/interfaces/IMRC20.sol";
 import {BaseChildTunnel} from "../../src/msg/BaseChildTunnel.sol";
 import {MsgCoder} from "../../src/MsgCoder.sol";
 
-contract sPOLMigrationBackfillTest is Test, Deploy, CheckpointData {
+contract sPOLMigrationTest is Test, Deploy, CheckpointData {
     sPOL public sPOLToken;
     sPOLController public controller;
     sPOLMessenger public messenger;
@@ -152,7 +152,6 @@ contract sPOLMigrationBackfillTest is Test, Deploy, CheckpointData {
             address(sPOLProxy),
             address(sPOLControllerProxy),
             rootChainManager,
-            depositManager,
             stateSenderL1,
             checkpointManager,
             precalcedsPOLChildProxyAddress
