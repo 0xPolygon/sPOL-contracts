@@ -114,6 +114,39 @@ contract ReinitializeMessengerTest is Test {
             abi.encodeCall(sPOLMessenger.reinitialize, (address(0)))
         );
     }
+
+    function test_reinitializeV3_viaProxyAdmin_revokesApproval() public {
+        // Mirror mainnet ordering: reinitialize(2) (polBridger) then reinitializeV3(3) (revoke DepositManager approval).
+        vm.prank(admin);
+        proxyAdmin.upgradeAndCall(
+            ITransparentUpgradeableProxy(address(proxy)),
+            address(impl),
+            abi.encodeCall(sPOLMessenger.reinitialize, (polBridger))
+        );
+
+        vm.expectCall(polToken, abi.encodeWithSignature("approve(address,uint256)", depositManager, uint256(0)));
+        vm.prank(admin);
+        proxyAdmin.upgradeAndCall(
+            ITransparentUpgradeableProxy(address(proxy)),
+            address(impl),
+            abi.encodeCall(sPOLMessenger.reinitializeV3, (depositManager))
+        );
+    }
+
+    function test_reinitializeV3_directFromEOA_reverts() public {
+        vm.expectRevert(sPOLMessenger.OnlyProxyAdmin.selector);
+        sPOLMessenger(address(proxy)).reinitializeV3(depositManager);
+    }
+
+    function test_reinitializeV3_rejectsZero() public {
+        vm.prank(admin);
+        vm.expectRevert(sPOLMessenger.ZeroAddress.selector);
+        proxyAdmin.upgradeAndCall(
+            ITransparentUpgradeableProxy(address(proxy)),
+            address(impl),
+            abi.encodeCall(sPOLMessenger.reinitializeV3, (address(0)))
+        );
+    }
 }
 
 contract ReinitializeChildTest is Test {

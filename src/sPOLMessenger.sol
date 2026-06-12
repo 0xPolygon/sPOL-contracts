@@ -94,6 +94,18 @@ contract sPOLMessenger is Initializable, AccessManagedUpgradeable, ReentrancyGua
         emit PolBridgerUpdated(address(0), _polBridger);
     }
 
+    /// @notice One-time cleanup that revokes the legacy Plasma DepositManager POL approval.
+    /// @dev The DepositManager was only used by the removed backfill flow; the max approval set in
+    ///      the original `initialize` lingers on the deployed proxy. This revokes it as part of the
+    ///      cleanup upgrade. Callable once via
+    ///      `ProxyAdmin.upgradeAndCall(messengerProxy, newImpl, reinitializeV3(depositManager))`.
+    /// @param _legacyDepositManager The Plasma DepositManager the messenger had approved for POL.
+    function reinitializeV3(address _legacyDepositManager) external reinitializer(3) {
+        require(msg.sender == ERC1967Utils.getAdmin(), OnlyProxyAdmin());
+        require(_legacyDepositManager != address(0), ZeroAddress());
+        polToken.approve(_legacyDepositManager, 0);
+    }
+
     function _processMessageFromChild(bytes memory _message) internal override {
         (MsgType msgType, bytes memory actualMessage) = abi.decode(_message, (MsgType, bytes));
         if (msgType == MsgType.L2_MIGRATION_REQUEST) {
