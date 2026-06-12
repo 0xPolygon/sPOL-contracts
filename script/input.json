@@ -17,7 +17,6 @@
         "childChainManager": "0xb991E39a401136348Dee93C75143B159FabF483f",
         "rootChainManager": "0x34F5A25B627f50Bb3f5cAb72807c4D4F405a9232",
         "rcmERC20Predicate": "0x4258C75b752c812B7Fa586bdeb259f2d4bd17f4F",
-        "depositManager": "0x44Ad17990F9128C6d823Ee10dB7F0A5d40a731A4",
         "stateSenderL1": "0x49E307Fa5a58ff1834E0F8a60eB2a9609E6A5F50",
         "stateSyncerL2": "0x0000000000000000000000000000000000001001",
         "checkpointManager": "0xbd07D7E1E93c8d4b2a261327F3C28a8EA7167209"
@@ -40,7 +39,6 @@
         "childChainManager": "0xA6FA4fB5f76172d178d61B04b0ecd319C5d1C0aa",
         "rootChainManager": "0xA0c68C638235ee32657e8f720a23ceC1bFc77C77",
         "rcmERC20Predicate": "0x40ec5B33f54e0E8A33A975908C5BA1c14e5BbbDf",
-        "depositManager": "0x401F6c983eA34274ec46f84D70b31C151321188b",
         "stateSenderL1": "0x28e4F3a7f651294B9564800b2D01f35189A5bFbE",
         "stateSyncerL2": "0x0000000000000000000000000000000000001001",
         "checkpointManager": "0x86E4Dc95c7FBdBf52e33D563BbDB00823894C287"

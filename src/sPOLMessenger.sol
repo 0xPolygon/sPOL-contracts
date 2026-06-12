@@ -3,7 +3,6 @@ pragma solidity 0.8.30;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IRootChainManager} from "./msg/interfaces/IRootChainManager.sol";
-import {DepositManager as IDepositManager} from "./interfaces/IDepositManager.sol";
 import {PolBridger} from "./polBridger.sol";
 import {sPOLController as IsPOLController} from "./sPOLController.sol";
 
@@ -25,7 +24,6 @@ contract sPOLMessenger is Initializable, AccessManagedUpgradeable, ReentrancyGua
     IERC20 public immutable sPOLToken;
 
     IRootChainManager public immutable rootChainManager;
-    IDepositManager public immutable depositManager;
     IsPOLController public immutable sPOLController;
 
     // Deprecated backfill slots, retained to preserve storage layout (backfill flow removed)
@@ -49,7 +47,6 @@ contract sPOLMessenger is Initializable, AccessManagedUpgradeable, ReentrancyGua
         address _sPOLToken,
         address _sPOLController,
         address _rootChainManager,
-        address _depositManager,
         address _stateSender,
         address _checkpointManager,
         address _childTunnel
@@ -58,7 +55,6 @@ contract sPOLMessenger is Initializable, AccessManagedUpgradeable, ReentrancyGua
         require(_sPOLToken != address(0), ZeroAddress());
         require(_sPOLController != address(0), ZeroAddress());
         require(_rootChainManager != address(0), ZeroAddress());
-        require(_depositManager != address(0), ZeroAddress());
         require(_stateSender != address(0), ZeroAddress());
         require(_checkpointManager != address(0), ZeroAddress());
         require(_childTunnel != address(0), ZeroAddress());
@@ -67,7 +63,6 @@ contract sPOLMessenger is Initializable, AccessManagedUpgradeable, ReentrancyGua
         sPOLToken = IERC20(_sPOLToken);
         sPOLController = IsPOLController(_sPOLController);
         rootChainManager = IRootChainManager(_rootChainManager);
-        depositManager = IDepositManager(_depositManager);
 
         _disableInitializers();
     }
@@ -85,7 +80,6 @@ contract sPOLMessenger is Initializable, AccessManagedUpgradeable, ReentrancyGua
         __AccessManaged_init(_authority);
 
         polToken.approve(address(sPOLController), type(uint256).max);
-        polToken.approve(address(depositManager), type(uint256).max);
         sPOLToken.approve(_rcmERC20Predicate, type(uint256).max);
     }
 

@@ -55,7 +55,6 @@ contract UpgradePolBridgerToProxy is Script {
         address sPOLChildProxy;
         address sPOLChildProxyAdmin;
         address rootChainManager;
-        address depositManager;
         address stateSenderL1;
         address checkpointManager;
     }
@@ -270,7 +269,6 @@ contract UpgradePolBridgerToProxy is Script {
                 cfg.sPOLProxy,
                 cfg.sPOLControllerProxy,
                 cfg.rootChainManager,
-                cfg.depositManager,
                 cfg.stateSenderL1,
                 cfg.checkpointManager,
                 cfg.sPOLChildProxy
@@ -313,7 +311,6 @@ contract UpgradePolBridgerToProxy is Script {
                 cfg.sPOLProxy,
                 cfg.sPOLControllerProxy,
                 cfg.rootChainManager,
-                cfg.depositManager,
                 cfg.stateSenderL1,
                 cfg.checkpointManager,
                 cfg.sPOLChildProxy
@@ -330,7 +327,6 @@ contract UpgradePolBridgerToProxy is Script {
                 cfg.sPOLProxy,
                 cfg.sPOLControllerProxy,
                 cfg.rootChainManager,
-                cfg.depositManager,
                 cfg.stateSenderL1,
                 cfg.checkpointManager,
                 cfg.sPOLChildProxy
@@ -630,7 +626,6 @@ contract UpgradePolBridgerToProxy is Script {
         cfg.registry = vm.parseJsonAddress(inputJson, string.concat(".", scenario, ".registry"));
         cfg.stateSyncerL2 = vm.parseJsonAddress(inputJson, string.concat(".", scenario, ".stateSyncerL2"));
         cfg.rootChainManager = vm.parseJsonAddress(inputJson, string.concat(".", scenario, ".rootChainManager"));
-        cfg.depositManager = vm.parseJsonAddress(inputJson, string.concat(".", scenario, ".depositManager"));
         cfg.stateSenderL1 = vm.parseJsonAddress(inputJson, string.concat(".", scenario, ".stateSenderL1"));
         cfg.checkpointManager = vm.parseJsonAddress(inputJson, string.concat(".", scenario, ".checkpointManager"));
     }

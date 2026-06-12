@@ -50,7 +50,6 @@ contract ReinitializeMessengerTest is Test {
             sPOLToken,
             sPOLController,
             makeAddr("rootChainManager"),
-            depositManager,
             makeAddr("stateSender"),
             makeAddr("checkpointManager"),
             makeAddr("childTunnel")

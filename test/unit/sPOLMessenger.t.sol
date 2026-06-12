@@ -15,7 +15,6 @@ contract sPOLMessengerTest is Test {
             makeAddr("sPOLToken"),
             makeAddr("sPOLController"),
             makeAddr("rootChainManager"),
-            makeAddr("depositManager"),
             makeAddr("stateSender"),
             makeAddr("checkpointManager"),
             makeAddr("childTunnel")

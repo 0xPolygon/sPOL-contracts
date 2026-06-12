@@ -123,7 +123,6 @@ contract Deploy is Script, ConfigLoader {
             address(sPOLProxy),
             address(sPOLControllerProxy),
             rootChainManager,
-            depositManager,
             stateSenderL1,
             checkpointManager,
             precalcedsPOLChildProxyAddress
