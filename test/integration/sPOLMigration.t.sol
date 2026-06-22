@@ -152,6 +152,7 @@ contract sPOLMigrationTest is Test, Deploy, CheckpointData {
             address(sPOLProxy),
             address(sPOLControllerProxy),
             rootChainManager,
+            depositManager,
             stateSenderL1,
             checkpointManager,
             precalcedsPOLChildProxyAddress

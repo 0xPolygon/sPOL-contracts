@@ -24,6 +24,7 @@ contract sPOLMessenger is Initializable, AccessManagedUpgradeable, ReentrancyGua
     IERC20 public immutable sPOLToken;
 
     IRootChainManager public immutable rootChainManager;
+    address public immutable depositManager;
     IsPOLController public immutable sPOLController;
 
     // Deprecated backfill slots, retained to preserve storage layout (backfill flow removed)
@@ -47,6 +48,7 @@ contract sPOLMessenger is Initializable, AccessManagedUpgradeable, ReentrancyGua
         address _sPOLToken,
         address _sPOLController,
         address _rootChainManager,
+        address _depositManager,
         address _stateSender,
         address _checkpointManager,
         address _childTunnel
@@ -55,6 +57,7 @@ contract sPOLMessenger is Initializable, AccessManagedUpgradeable, ReentrancyGua
         require(_sPOLToken != address(0), ZeroAddress());
         require(_sPOLController != address(0), ZeroAddress());
         require(_rootChainManager != address(0), ZeroAddress());
+        require(_depositManager != address(0), ZeroAddress());
         require(_stateSender != address(0), ZeroAddress());
         require(_checkpointManager != address(0), ZeroAddress());
         require(_childTunnel != address(0), ZeroAddress());
@@ -63,6 +66,7 @@ contract sPOLMessenger is Initializable, AccessManagedUpgradeable, ReentrancyGua
         sPOLToken = IERC20(_sPOLToken);
         sPOLController = IsPOLController(_sPOLController);
         rootChainManager = IRootChainManager(_rootChainManager);
+        depositManager = _depositManager;
 
         _disableInitializers();
     }
@@ -98,12 +102,10 @@ contract sPOLMessenger is Initializable, AccessManagedUpgradeable, ReentrancyGua
     /// @dev The DepositManager was only used by the removed backfill flow; the max approval set in
     ///      the original `initialize` lingers on the deployed proxy. This revokes it as part of the
     ///      cleanup upgrade. Callable once via
-    ///      `ProxyAdmin.upgradeAndCall(messengerProxy, newImpl, reinitializeV3(depositManager))`.
-    /// @param _legacyDepositManager The Plasma DepositManager the messenger had approved for POL.
-    function reinitializeV3(address _legacyDepositManager) external reinitializer(3) {
+    ///      `ProxyAdmin.upgradeAndCall(messengerProxy, newImpl, reinitializeV3())`.
+    function reinitializeV3() external reinitializer(3) {
         require(msg.sender == ERC1967Utils.getAdmin(), OnlyProxyAdmin());
-        require(_legacyDepositManager != address(0), ZeroAddress());
-        polToken.approve(_legacyDepositManager, 0);
+        polToken.approve(depositManager, 0);
     }
 
     function _processMessageFromChild(bytes memory _message) internal override {

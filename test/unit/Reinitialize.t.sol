@@ -50,6 +50,7 @@ contract ReinitializeMessengerTest is Test {
             sPOLToken,
             sPOLController,
             makeAddr("rootChainManager"),
+            depositManager,
             makeAddr("stateSender"),
             makeAddr("checkpointManager"),
             makeAddr("childTunnel")
@@ -129,23 +130,13 @@ contract ReinitializeMessengerTest is Test {
         proxyAdmin.upgradeAndCall(
             ITransparentUpgradeableProxy(address(proxy)),
             address(impl),
-            abi.encodeCall(sPOLMessenger.reinitializeV3, (depositManager))
+            abi.encodeCall(sPOLMessenger.reinitializeV3, ())
         );
     }
 
     function test_reinitializeV3_directFromEOA_reverts() public {
         vm.expectRevert(sPOLMessenger.OnlyProxyAdmin.selector);
-        sPOLMessenger(address(proxy)).reinitializeV3(depositManager);
-    }
-
-    function test_reinitializeV3_rejectsZero() public {
-        vm.prank(admin);
-        vm.expectRevert(sPOLMessenger.ZeroAddress.selector);
-        proxyAdmin.upgradeAndCall(
-            ITransparentUpgradeableProxy(address(proxy)),
-            address(impl),
-            abi.encodeCall(sPOLMessenger.reinitializeV3, (address(0)))
-        );
+        sPOLMessenger(address(proxy)).reinitializeV3();
     }
 }
 

@@ -16,6 +16,7 @@ contract ConfigLoader is Script {
     address public childChainManager;
     address public rootChainManager;
     address public rcmERC20Predicate;
+    address public depositManager;
     address public stateSenderL1;
     address public maticTokenL1;
     address public polygonMigration;
@@ -48,6 +49,7 @@ contract ConfigLoader is Script {
         childChainManager = makeAddr("childChainManager");
         rootChainManager = makeAddr("rootChainManager");
         rcmERC20Predicate = makeAddr("rcmERC20Predicate");
+        depositManager = makeAddr("depositManager");
         stateSenderL1 = makeAddr("stateSender");
         checkpointManager = makeAddr("checkpointManager");
         stateSyncerL2 = makeAddr("stateSyncerL2");
@@ -86,6 +88,7 @@ contract ConfigLoader is Script {
         childChainManager = vm.parseJsonAddress(json, string.concat(scenarioName, ".childChainManager"));
         rootChainManager = vm.parseJsonAddress(json, string.concat(scenarioName, ".rootChainManager"));
         rcmERC20Predicate = vm.parseJsonAddress(json, string.concat(scenarioName, ".rcmERC20Predicate"));
+        depositManager = vm.parseJsonAddress(json, string.concat(scenarioName, ".depositManager"));
         stateSenderL1 = vm.parseJsonAddress(json, string.concat(scenarioName, ".stateSenderL1"));
         checkpointManager = vm.parseJsonAddress(json, string.concat(scenarioName, ".checkpointManager"));
         stateSyncerL2 = vm.parseJsonAddress(json, string.concat(scenarioName, ".stateSyncerL2"));
@@ -110,6 +113,7 @@ contract ConfigLoader is Script {
         require(childChainManager != address(0), "Child Chain Manager address is zero");
         require(rootChainManager != address(0), "Root Chain Manager address is zero");
         require(rcmERC20Predicate != address(0), "RCM ERC20 Predicate address is zero");
+        require(depositManager != address(0), "Deposit Manager address is zero");
         require(stateSenderL1 != address(0), "State Syncer address is zero");
         require(checkpointManager != address(0), "Checkpoint Manager address is zero");
         require(stateSyncerL2 != address(0), "State Syncer L2 address is zero");
