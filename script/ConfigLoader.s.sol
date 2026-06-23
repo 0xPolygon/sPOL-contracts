@@ -119,4 +119,10 @@ contract ConfigLoader is Script {
         require(stateSyncerL2 != address(0), "State Syncer L2 address is zero");
         require(admin != address(0), "Admin address is zero");
     }
+
+    /// @notice Deterministic CREATE2 salt: the scenario salt prefix concatenated with `_name`.
+    /// @dev Keep `saltPrefix + _name` <= 32 bytes; the bytes32 cast silently truncates beyond that.
+    function getSalt(string memory _name) public view returns (bytes32) {
+        return bytes32(bytes(string.concat(string(saltPrefix), _name)));
+    }
 }
