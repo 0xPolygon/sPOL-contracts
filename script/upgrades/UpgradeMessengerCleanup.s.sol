@@ -124,22 +124,52 @@ contract UpgradeMessengerCleanup is ConfigLoader {
         // otherwise the new impl would ship with wrong immutables (e.g. a stale childTunnel).
         _assertLiveMatchesConfig(cfg);
 
+        // Deploy the new impl exactly as runL1 will, then print the Safe calldata, apply, and verify.
+        address newImpl = _deployL1(cfg);
+        _dryRunApplyAndVerify(cfg, newImpl);
+    }
+
+    /// @notice Like dryRunL1 but for an ALREADY-DEPLOYED impl: validates the provided impl was built
+    ///         from the expected config, prints the Safe calldata for it, then forks/applies/verifies.
+    ///         Use after the impl has been broadcast (e.g. by runL1) to produce the Safe tx and
+    ///         rehearse it without redeploying.
+    /// @dev    forge script script/upgrades/UpgradeMessengerCleanup.s.sol \
+    ///           --sig "dryRunWithImplL1(string,address)" "mainnet" <newImpl>
+    function dryRunWithImplL1(string calldata network, address newImpl) external {
+        Config memory cfg = _loadConfig(network);
+
+        vm.createSelectFork(vm.envString("L1_RPC_URL"));
+        require(block.chainid == cfg.chainIdL1, "UpgradeMessengerCleanup: dry run on wrong chain");
+
+        // The provided impl must exist on this chain and be a messenger built from the same config
+        // (catches a wrong/foreign address before it's ever wired into the proxy).
+        require(newImpl.code.length > 0, "dryRunWithImplL1: newImpl has no code on this chain");
+        _assertImmutablesMatchConfig(newImpl, cfg);
+
+        // Pre-flight: the live (old) impl + wiring must match config too.
+        _assertLiveMatchesConfig(cfg);
+
+        _dryRunApplyAndVerify(cfg, newImpl);
+    }
+
+    /// @notice Shared by dryRunL1 / dryRunWithImplL1: prints the Safe calldata for `newImpl`, applies
+    ///         it on the current fork, and asserts the DepositManager approval is revoked while the
+    ///         rest of the wiring is preserved.
+    function _dryRunApplyAndVerify(Config memory cfg, address newImpl) internal {
         uint256 allowanceBefore = IERC20(cfg.polTokenL1).allowance(cfg.sPOLMessengerProxy, cfg.depositManager);
         console.log("DepositManager allowance before:", allowanceBefore);
-        require(allowanceBefore > 0, "dryRunL1: expected non-zero legacy DepositManager approval pre-upgrade");
+        require(allowanceBefore > 0, "dry run: expected non-zero legacy DepositManager approval pre-upgrade");
 
-        // 1. Deploy the new impl exactly as runL1 will.
-        address newImpl = _deployL1(cfg);
         _printSafeCalldata(cfg, newImpl);
 
-        // 2. Apply the verbatim Safe tx: admin multisig -> AccessManager.execute(...). Prank only the
-        //    initial caller (the Safe); the AccessManager -> ProxyAdmin -> proxy -> reinitializeV3
-        //    call chain unfolds on its own.
+        // Apply the verbatim Safe tx: admin multisig -> AccessManager.execute(...). Prank only the
+        // initial caller (the Safe); the AccessManager -> ProxyAdmin -> proxy -> reinitializeV3 chain
+        // unfolds on its own.
         vm.prank(cfg.admin);
         (bool ok,) = cfg.accessManagerL1.call(_safeCalldata(cfg, newImpl));
-        require(ok, "dryRunL1: Safe upgrade calldata reverted on fork");
+        require(ok, "dry run: Safe upgrade calldata reverted on fork");
 
-        // 3. Verify the upgrade landed and the approval is revoked.
+        // Verify the upgrade landed and the approval is revoked.
         _verifyL1(cfg, newImpl);
 
         // The new impl must still match config — immutables preserved, polBridger/authority/admin intact.
@@ -148,9 +178,9 @@ contract UpgradeMessengerCleanup is ConfigLoader {
         // The sPOLController approval must be untouched by this upgrade.
         require(
             IERC20(cfg.polTokenL1).allowance(cfg.sPOLMessengerProxy, cfg.sPOLControllerProxy) == type(uint256).max,
-            "dryRunL1: sPOLController approval changed unexpectedly"
+            "dry run: sPOLController approval changed unexpectedly"
         );
-        console.log("dryRunL1 OK: upgrade applied on fork, DepositManager approval revoked.");
+        console.log("dry run OK: upgrade applied on fork, DepositManager approval revoked.");
     }
 
     /// @notice Post-broadcast sanity gate: proxy points at newImpl, the immutable is wired, and the
@@ -215,24 +245,34 @@ contract UpgradeMessengerCleanup is ConfigLoader {
         cfg.sPOLChildProxy = vm.parseJsonAddress(dep, ".sPOL_L2.sPOLChildProxy");
     }
 
+    /// @notice Asserts the 8 sPOLMessenger constructor immutables read off `messenger` (a proxy or a
+    ///         raw impl address) match the loaded config. On a raw impl this proves it was built from
+    ///         the expected constructor args.
+    function _assertImmutablesMatchConfig(address messenger, Config memory cfg) internal view {
+        sPOLMessenger m = sPOLMessenger(messenger);
+
+        // sPOLMessenger constructor immutables
+        require(address(m.polToken()) == cfg.polTokenL1, "immutable mismatch: polToken");
+        require(address(m.sPOLToken()) == cfg.sPOLProxy, "immutable mismatch: sPOLToken");
+        require(address(m.sPOLController()) == cfg.sPOLControllerProxy, "immutable mismatch: sPOLController");
+        require(address(m.rootChainManager()) == cfg.rootChainManager, "immutable mismatch: rootChainManager");
+        require(m.depositManager() == cfg.depositManager, "immutable mismatch: depositManager");
+
+        // BaseRootTunnel immutables
+        require(address(m.stateSender()) == cfg.stateSenderL1, "immutable mismatch: stateSender");
+        require(address(m.checkpointManager()) == cfg.checkpointManager, "immutable mismatch: checkpointManager");
+        require(m.childTunnel() == cfg.sPOLChildProxy, "immutable mismatch: childTunnel");
+    }
+
     /// @notice Cross-checks every immutable and wired pointer the live messenger proxy exposes
     ///         against the loaded config. Run pre-upgrade it proves input.json / deployment-*.json
     ///         still match what's on chain (so the new impl, built from the same config, carries
     ///         identical immutables); run post-upgrade it confirms nothing shifted.
     function _assertLiveMatchesConfig(Config memory cfg) internal view {
+        // Immutables baked into whatever impl the proxy currently delegates to.
+        _assertImmutablesMatchConfig(cfg.sPOLMessengerProxy, cfg);
+
         sPOLMessenger m = sPOLMessenger(cfg.sPOLMessengerProxy);
-
-        // sPOLMessenger constructor immutables
-        require(address(m.polToken()) == cfg.polTokenL1, "live: polToken != input polTokenL1");
-        require(address(m.sPOLToken()) == cfg.sPOLProxy, "live: sPOLToken != sPOLProxy");
-        require(address(m.sPOLController()) == cfg.sPOLControllerProxy, "live: sPOLController != sPOLControllerProxy");
-        require(address(m.rootChainManager()) == cfg.rootChainManager, "live: rootChainManager != input");
-        require(m.depositManager() == cfg.depositManager, "live: depositManager != input depositManager");
-
-        // BaseRootTunnel immutables
-        require(address(m.stateSender()) == cfg.stateSenderL1, "live: stateSender != input stateSenderL1");
-        require(address(m.checkpointManager()) == cfg.checkpointManager, "live: checkpointManager != input");
-        require(m.childTunnel() == cfg.sPOLChildProxy, "live: childTunnel != sPOLChildProxy");
 
         // Wired pointers / access control (storage). polBridger != 0 also proves the v2 reinitialize
         // already ran, which reinitializer(3) (reinitializeV3) silently depends on.
