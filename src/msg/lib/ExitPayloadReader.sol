@@ -42,6 +42,7 @@ library ExitPayloadReader {
             dest += WORD_SIZE;
         }
 
+        // if len is 0 after the word loop, 256 ** (32 - 0) - 1 overflows uint256.
         if (len > 0) {
             // left over bytes. Mask is used to remove unwanted bytes from the word
             uint256 mask = 256 ** (WORD_SIZE - len) - 1;

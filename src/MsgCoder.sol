@@ -7,8 +7,8 @@ abstract contract MsgCoder {
         EXCHANGE_UPDATE,
         L2_MIGRATION_REQUEST,
         L1_MIGRATION_RESPONSE,
-        L2_BACKFILL_REQUEST,
-        L1_BACKFILL_RESPONSE
+        _DEPRECATED_L2_BACKFILL_REQUEST,
+        _DEPRECATED_L1_BACKFILL_RESPONSE
     }
 
     function _decodeExchangeUpdateMessage(bytes memory _message)

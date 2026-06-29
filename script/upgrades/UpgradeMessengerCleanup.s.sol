@@ -29,6 +29,9 @@ contract UpgradeMessengerCleanup is ConfigLoader {
     bytes32 internal constant ERC1967_IMPL_SLOT = hex"360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc";
     bytes32 internal constant ERC1967_ADMIN_SLOT =
         hex"b53127684a568b3173ae13b9f8a6016e243e63b6e8ee1178d6a717850b5d6103";
+    bytes32 internal constant DEPRECATED_COMPLETED_BACKFILL_SLOT = bytes32(uint256(1));
+    bytes32 internal constant DEPRECATED_BACKFILL_AMOUNTS_SLOT = bytes32(uint256(2));
+    bytes32 internal constant DEPRECATED_CURRENT_ACTIVE_BACKFILL_CYCLE_SLOT = bytes32(uint256(3));
 
     struct Config {
         uint256 chainIdL1;
@@ -53,6 +56,7 @@ contract UpgradeMessengerCleanup is ConfigLoader {
     /// @notice Deploy the new impl and print the Safe calldata. Broadcasts the deploy only.
     function runL1(string calldata network) external {
         Config memory cfg = _loadConfig(network);
+        _assertDeprecatedBackfillSlotsZero(cfg, "runL1 pre-upgrade");
 
         uint256 pk = vm.envUint("DEPLOYER_PRIVATE_KEY");
         vm.startBroadcast(pk);
@@ -159,6 +163,7 @@ contract UpgradeMessengerCleanup is ConfigLoader {
         uint256 allowanceBefore = IERC20(cfg.polTokenL1).allowance(cfg.sPOLMessengerProxy, cfg.depositManager);
         console.log("DepositManager allowance before:", allowanceBefore);
         require(allowanceBefore > 0, "dry run: expected non-zero legacy DepositManager approval pre-upgrade");
+        _assertDeprecatedBackfillSlotsZero(cfg, "dry run pre-upgrade");
 
         _printSafeCalldata(cfg, newImpl);
 
@@ -180,6 +185,7 @@ contract UpgradeMessengerCleanup is ConfigLoader {
             IERC20(cfg.polTokenL1).allowance(cfg.sPOLMessengerProxy, cfg.sPOLControllerProxy) == type(uint256).max,
             "dry run: sPOLController approval changed unexpectedly"
         );
+        _assertDepositManagerApprovalRevoked(cfg, "dry run");
         console.log("dry run OK: upgrade applied on fork, DepositManager approval revoked.");
     }
 
@@ -189,6 +195,7 @@ contract UpgradeMessengerCleanup is ConfigLoader {
         Config memory cfg = _loadConfig(network);
         require(block.chainid == cfg.chainIdL1, "UpgradeMessengerCleanup: wrong chain for verify");
         _assertLiveMatchesConfig(cfg);
+        _assertDeprecatedBackfillSlotsZero(cfg, "verify");
         _verifyL1(cfg, newImpl);
     }
 
@@ -200,12 +207,31 @@ contract UpgradeMessengerCleanup is ConfigLoader {
             sPOLMessenger(newImpl).depositManager() == cfg.depositManager, "verify: depositManager immutable mismatch"
         );
 
-        require(
-            IERC20(cfg.polTokenL1).allowance(cfg.sPOLMessengerProxy, cfg.depositManager) == 0,
-            "verify: DepositManager approval not revoked"
-        );
+        _assertDepositManagerApprovalRevoked(cfg, "verify");
 
         console.log("verify OK: impl upgraded and DepositManager approval == 0");
+    }
+
+    function _assertDepositManagerApprovalRevoked(Config memory cfg, string memory context) internal view {
+        require(
+            IERC20(cfg.polTokenL1).allowance(cfg.sPOLMessengerProxy, cfg.depositManager) == 0,
+            string.concat(context, ": DepositManager approval not revoked")
+        );
+    }
+
+    function _assertDeprecatedBackfillSlotsZero(Config memory cfg, string memory context) internal view {
+        require(
+            vm.load(cfg.sPOLMessengerProxy, DEPRECATED_COMPLETED_BACKFILL_SLOT) == bytes32(0),
+            string.concat(context, ": deprecated_completedBackfill slot not zero")
+        );
+        require(
+            vm.load(cfg.sPOLMessengerProxy, DEPRECATED_BACKFILL_AMOUNTS_SLOT) == bytes32(0),
+            string.concat(context, ": deprecated_backfillAmounts slot not zero")
+        );
+        require(
+            vm.load(cfg.sPOLMessengerProxy, DEPRECATED_CURRENT_ACTIVE_BACKFILL_CYCLE_SLOT) == bytes32(0),
+            string.concat(context, ": deprecated_currentActiveBackfillCycle slot not zero")
+        );
     }
 
     /// @notice Input.json values come from the project `ConfigLoader`; deployed proxy addresses
