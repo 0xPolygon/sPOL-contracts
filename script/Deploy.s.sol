@@ -437,8 +437,4 @@ contract Deploy is Script, ConfigLoader {
             )
         );
     }
-
-    function getSalt(string memory _name) public view returns (bytes32) {
-        return bytes32(bytes(string.concat(string(saltPrefix), _name)));
-    }
 }
